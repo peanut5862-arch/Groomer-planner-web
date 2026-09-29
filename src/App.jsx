@@ -671,6 +671,7 @@ function clientDueInfo(rows) {
 function Clients({ dogs, loading, error, onOpen, revision }) {
   const [query, setQuery] = useState('')
   const [clientFilter, setClientFilter] = useState('all')
+  const [areaFilter, setAreaFilter] = useState('all')
   const [selectedClient, setSelectedClient] = useState(null)
   const [history, setHistory] = useState([])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -830,17 +831,29 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
     }, {})
   ).sort((a, b) => a.owner.localeCompare(b.owner))
 
-  const filtered = grouped
-    .map(client => {
-      const baseDue = clientDueInfo(client.rows)
-      const scheduleInfo = scheduleForClient(client)
-      return {...client, scheduleInfo, dueInfo:scheduledDueInfo(baseDue,scheduleInfo)}
-    })
+  const preparedClients = grouped.map(client => {
+    const baseDue = clientDueInfo(client.rows)
+    const scheduleInfo = scheduleForClient(client)
+    return {...client, scheduleInfo, dueInfo:scheduledDueInfo(baseDue,scheduleInfo)}
+  })
+
+  const needsSchedulingClients = preparedClients.filter(client =>
+    !client.dueInfo.scheduled && ['Overdue','Due today','Due this week','Due soon'].includes(client.dueInfo.status)
+  )
+
+  const areaOptions = [...new Set(
+    needsSchedulingClients
+      .map(client => String(client.area || '').trim())
+      .filter(Boolean)
+  )].sort((a,b) => a.localeCompare(b))
+
+  const filtered = preparedClients
     .filter(client => {
       const haystack = `${client.owner} ${client.dogs.join(' ')} ${client.area} ${client.groomer}`.toLowerCase()
       const matchesSearch = haystack.includes(query.trim().toLowerCase())
       const needsScheduling = !client.dueInfo.scheduled && ['Overdue','Due today','Due this week','Due soon'].includes(client.dueInfo.status)
-      return matchesSearch && (clientFilter === 'all' || needsScheduling)
+      const matchesArea = areaFilter === 'all' || normalizedKey(client.area) === normalizedKey(areaFilter)
+      return matchesSearch && (clientFilter === 'all' || (needsScheduling && matchesArea))
     })
     .sort((a,b) => a.dueInfo.rank - b.dueInfo.rank ||
       (a.dueInfo.dueDate || '9999-99-99').localeCompare(b.dueInfo.dueDate || '9999-99-99') ||
@@ -993,7 +1006,10 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
         <button
           type="button"
           className={clientFilter === 'all' ? 'primary-mini' : 'secondary-btn'}
-          onClick={() => setClientFilter('all')}
+          onClick={() => {
+            setClientFilter('all')
+            setAreaFilter('all')
+          }}
           style={{flex:1,justifyContent:'center'}}
         >
           All Clients
@@ -1004,9 +1020,36 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
           onClick={() => setClientFilter('needs')}
           style={{flex:1,justifyContent:'center'}}
         >
-          Needs Scheduling
+          Needs Scheduling{needsSchedulingClients.length ? ` (${needsSchedulingClients.length})` : ''}
         </button>
       </div>
+
+      {clientFilter === 'needs' && (
+        <div style={{marginTop:10}}>
+          <label style={{display:'block',fontSize:13,fontWeight:700,color:'#737b89',marginBottom:6}}>
+            Area
+          </label>
+          <select
+            value={areaFilter}
+            onChange={event => setAreaFilter(event.target.value)}
+            style={{
+              width:'100%',
+              padding:'13px 14px',
+              border:'1px solid #deddd8',
+              borderRadius:14,
+              background:'#fff',
+              color:'#172038',
+              fontSize:16,
+              fontWeight:600
+            }}
+          >
+            <option value="all">All areas</option>
+            {areaOptions.map(area => (
+              <option key={area} value={area}>{area}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="prototype-note" style={{marginTop:10}}>
         {clientFilter === 'needs'
@@ -1017,7 +1060,7 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
       {loading && <div className="prototype-note">Loading your clients…</div>}
       {error && <div className="login-message">{error}</div>}
       {!loading && !error && filtered.length === 0 && (
-        <div className="prototype-note">No matching clients found.</div>
+        <div className="prototype-note">{clientFilter === 'needs' && areaFilter !== 'all' ? `No clients need scheduling in ${areaFilter}.` : 'No matching clients found.'}</div>
       )}
 
       <div className="client-list">
