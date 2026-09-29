@@ -1987,7 +1987,7 @@ export default function App() {
     const row = appt.sourceRow || {}
     const today = businessDateKey()
     const blocked = completionBlockReason(row,today)
-    if (blocked) { setSaveMessage(blocked); return }
+    if (blocked) { setSaveMessage(blocked); window.alert(blocked); return }
     const scheduledDate = String(row.Date || '').slice(0,10)
     if (/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate) && scheduledDate > today) {
       const label = textDate(scheduledDate)
@@ -2013,7 +2013,7 @@ export default function App() {
         : `${appt.owner} was already completed.`)
       setScheduleRevision(value=>value+1)
     } catch (err) {
-      setSaveMessage(err.message || 'Could not confirm completion. Refresh before trying again.')
+      setSaveMessage(err.message || 'Could not confirm completion. Refresh before trying again.'); window.alert(err.message || 'Could not confirm completion. Refresh before trying again.')
     } finally {
       setCompletingId('')
     }
