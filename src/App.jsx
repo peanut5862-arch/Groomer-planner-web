@@ -611,6 +611,9 @@ function Month({onOpen,revision}) {
 function Clients({ dogs, loading, error }) {
   const [query, setQuery] = useState('')
   const [selectedClient, setSelectedClient] = useState(null)
+  const [history, setHistory] = useState([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState('')
 
   const valueOf = (row, ...keys) => {
     for (const key of keys) {
@@ -619,6 +622,15 @@ function Clients({ dogs, loading, error }) {
       }
     }
     return ''
+  }
+
+  const textDate = value => {
+    if (!value) return ''
+    const key = String(value).slice(0,10)
+    const match = key.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (!match) return String(value)
+    const date = new Date(`${key}T12:00:00Z`)
+    return date.toLocaleDateString('en-US',{timeZone:'UTC',month:'short',day:'numeric',year:'numeric'})
   }
 
   const grouped = Object.values(
@@ -630,6 +642,7 @@ function Clients({ dogs, loading, error }) {
 
       if (!acc[key]) {
         acc[key] = {
+          household,
           owner,
           dogs: [],
           area: valueOf(row, 'area', 'Area'),
@@ -657,6 +670,113 @@ function Clients({ dogs, loading, error }) {
     const haystack = `${client.owner} ${client.dogs.join(' ')} ${client.area} ${client.groomer}`.toLowerCase()
     return haystack.includes(query.trim().toLowerCase())
   })
+
+  useEffect(() => {
+    if (!selectedClient || !supabase) {
+      setHistory([])
+      setHistoryError('')
+      return
+    }
+
+    let cancelled = false
+
+    const loadHistory = async () => {
+      setHistoryLoading(true)
+      setHistoryError('')
+
+      try {
+        const {data,error:historyLoadError} = await supabase
+          .from('weekly_drafts')
+          .select('week_start,plan_json,status')
+          .order('week_start',{ascending:false})
+          .limit(104)
+
+        if (historyLoadError) throw historyLoadError
+        if (cancelled) return
+
+        const targetHousehold = String(selectedClient.household || '').trim().toLowerCase()
+        const targetOwner = String(selectedClient.owner || '').trim().toLowerCase()
+        const today = businessDateKey()
+
+        const rows = (data || []).flatMap(week =>
+          (Array.isArray(week.plan_json) ? week.plan_json : []).map((row,index) => ({
+            row,
+            weekStart:String(week.week_start || '').slice(0,10),
+            weekStatus:week.status,
+            index
+          }))
+        )
+
+        const matches = rows
+          .filter(item => {
+            const rowHousehold = String(item.row?.['Household ID'] || '').trim().toLowerCase()
+            const rowOwner = String(item.row?.Owner || '').trim().toLowerCase()
+            return (targetHousehold && rowHousehold && rowHousehold === targetHousehold) ||
+              (!rowHousehold && rowOwner === targetOwner) ||
+              (!targetHousehold && rowOwner === targetOwner)
+          })
+          .map(item => {
+            const row = item.row || {}
+            const completion = String(row['Completion Status'] || '').trim().toLowerCase()
+            const appointmentStatus = String(row['Appointment Status'] || '').trim().toLowerCase()
+            const date = String(row.Date || '').slice(0,10)
+            const completedDate = String(row['Completed Date'] || '').slice(0,10)
+            const rescheduledTo = String(row['Rescheduled To'] || '').slice(0,10)
+            const cancelledDate = String(row['Cancelled Date'] || '').slice(0,10)
+
+            let status = 'Scheduled'
+            let statusClass = 'confirmed'
+            if (completion === 'completed') {
+              status = 'Completed'
+              statusClass = 'confirmed'
+            } else if (['cancelled','canceled'].includes(appointmentStatus)) {
+              status = 'Cancelled'
+              statusClass = 'pending'
+            } else if (appointmentStatus === 'moved to another week') {
+              status = 'Rescheduled'
+              statusClass = 'pending'
+            } else if (date && date < today) {
+              status = 'Past appointment'
+              statusClass = 'locked'
+            }
+
+            const priceText = String(row.Price ?? '').replace(/[$,]/g,'').trim()
+            const price = priceText === '' ? NaN : Number(priceText)
+            const sortDate = completedDate || cancelledDate || rescheduledTo || date || item.weekStart
+
+            return {
+              id:`${item.weekStart}-${row['Household ID'] || row.Owner}-${item.index}`,
+              date,
+              sortDate,
+              completedDate,
+              cancelledDate,
+              rescheduledTo,
+              status,
+              statusClass,
+              groomer:String(row.Groomer || '').trim(),
+              dogs:String(row.Dogs || '').trim(),
+              time:String(row['Start Time'] || row['Locked Time'] || '').trim(),
+              price,
+              note:String(row['Status Note'] || row.Status || '').trim()
+            }
+          })
+          .filter(item => item.status !== 'Scheduled')
+          .sort((a,b) => String(b.sortDate).localeCompare(String(a.sortDate)))
+
+        setHistory(matches)
+      } catch (err) {
+        if (!cancelled) {
+          setHistory([])
+          setHistoryError(err.message || 'Could not load appointment history.')
+        }
+      } finally {
+        if (!cancelled) setHistoryLoading(false)
+      }
+    }
+
+    loadHistory()
+    return () => { cancelled = true }
+  }, [selectedClient])
 
   return (
     <section>
@@ -705,7 +825,7 @@ function Clients({ dogs, loading, error }) {
 
       {selectedClient && (
         <div className="sheet-backdrop" onMouseDown={() => setSelectedClient(null)}>
-          <div className="sheet" onMouseDown={event => event.stopPropagation()}>
+          <div className="sheet" onMouseDown={event => event.stopPropagation()} style={{maxHeight:'88dvh',overflowY:'auto'}}>
             <div className="sheet-handle" />
 
             <div className="sheet-title">
@@ -758,15 +878,17 @@ function Clients({ dogs, loading, error }) {
             </div>
 
             <div style={{marginTop:18}}>
-              <div className="eyebrow" style={{marginBottom:8}}>Dogs & service details</div>
+              <div className="eyebrow" style={{marginBottom:8}}>Dogs & service history</div>
               <div className="client-list">
                 {selectedClient.rows.map((row, index) => {
                   const dog = valueOf(row, 'dog', 'Dog') || 'Unnamed dog'
                   const servicePattern = valueOf(row, 'service_pattern', 'Service Pattern')
-                  const nextService = valueOf(row, 'next_service', 'Next Service')
+                  const nextService = valueOf(row, 'next_service', 'Next Service', 'next_service_date', 'Next Service Date')
                   const price = valueOf(row, 'price', 'Price')
                   const minutes = valueOf(row, 'minutes', 'Minutes')
                   const frequency = valueOf(row, 'frequency_weeks', 'Frequency Weeks')
+                  const lastGroom = valueOf(row, 'last_groom', 'Last Groom', 'last_groom_date', 'Last Groom Date')
+                  const lastBath = valueOf(row, 'last_bath', 'Last Bath', 'last_bath_date', 'Last Bath Date')
 
                   return (
                     <div
@@ -779,21 +901,66 @@ function Clients({ dogs, loading, error }) {
                         marginBottom:8
                       }}
                     >
-                      <strong style={{display:'block',marginBottom:4}}>{dog}</strong>
-                      <div style={{fontSize:12,color:'#7b828e',lineHeight:1.5}}>
-                        {[servicePattern, nextService && `Next: ${nextService}`].filter(Boolean).join(' · ') || 'Service details not set'}
+                      <strong style={{display:'block',marginBottom:6}}>{dog}</strong>
+                      <div style={{fontSize:12,color:'#59616e',lineHeight:1.65}}>
+                        <div><strong>Last groom:</strong> {lastGroom ? textDate(lastGroom) : '—'}</div>
+                        <div><strong>Last bath:</strong> {lastBath ? textDate(lastBath) : '—'}</div>
+                        <div><strong>Next service:</strong> {nextService ? textDate(nextService) : '—'}</div>
                       </div>
-                      <div style={{fontSize:12,color:'#7b828e',marginTop:3}}>
-                        {[
+                      <div style={{fontSize:12,color:'#7b828e',marginTop:6,lineHeight:1.5}}>
+                        {[servicePattern,
                           price !== '' ? `$${price}` : '',
                           minutes !== '' ? `${minutes} min` : '',
                           frequency !== '' ? `Every ${frequency} wks` : ''
-                        ].filter(Boolean).join(' · ')}
+                        ].filter(Boolean).join(' · ') || 'Service details not set'}
                       </div>
                     </div>
                   )
                 })}
               </div>
+            </div>
+
+            <div style={{marginTop:18}}>
+              <div className="eyebrow" style={{marginBottom:8}}>Appointment history</div>
+              {historyLoading && <div className="prototype-note">Loading appointment history…</div>}
+              {historyError && <div className="login-message">{historyError}</div>}
+              {!historyLoading && !historyError && history.length === 0 && (
+                <div className="prototype-note">No completed, cancelled, rescheduled, or past appointments found yet.</div>
+              )}
+              {!historyLoading && !historyError && history.length > 0 && (
+                <div className="appt-list">
+                  {history.slice(0,20).map(item => (
+                    <div className="appt-card" key={item.id}>
+                      <div className="time-pill">{item.date ? textDate(item.date).replace(/, \d{4}$/,'') : '—'}</div>
+                      <div className="appt-main">
+                        <div className="appt-topline">
+                          <strong>{item.status}</strong>
+                          <span className={`status-dot ${item.statusClass}`} />
+                        </div>
+                        <div className="dogs">{item.dogs || selectedClient.dogs.join(' + ')}</div>
+                        <div className="meta">
+                          {item.groomer && <span><Users size={14}/>{item.groomer}</span>}
+                          {item.time && <span><Clock3 size={14}/>{item.time}</span>}
+                          {Number.isFinite(item.price) && <span><WalletCards size={14}/>${Math.round(item.price)}</span>}
+                        </div>
+                        {item.status === 'Completed' && item.completedDate && (
+                          <div style={{fontSize:11,color:'#7b828e',marginTop:5}}>Completed {textDate(item.completedDate)}</div>
+                        )}
+                        {item.status === 'Cancelled' && item.cancelledDate && (
+                          <div style={{fontSize:11,color:'#7b828e',marginTop:5}}>Cancelled {textDate(item.cancelledDate)}</div>
+                        )}
+                        {item.status === 'Rescheduled' && item.rescheduledTo && (
+                          <div style={{fontSize:11,color:'#7b828e',marginTop:5}}>Moved to {textDate(item.rescheduledTo)}</div>
+                        )}
+                        {item.note && <div style={{fontSize:11,color:'#7b828e',marginTop:5}}>{item.note}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {history.length > 20 && (
+                <div className="prototype-note">Showing the 20 most recent history entries.</div>
+              )}
             </div>
 
             {selectedClient.notes && (
