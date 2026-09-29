@@ -1000,7 +1000,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
     household_id:client?.household || '', owner:client?.owner || '', original_dog:'', dog:'',
     phone:client?.phone || '', groomer:client?.groomer || '', area:client?.area || '',
     address:client?.address || '', city:client?.city || '', state:client?.state || 'TX', zip:client?.zip || '',
-    service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'', minutes:'', frequency_weeks:'', last_groom:'', last_bath:''
+    service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'', groom_minutes:'', bath_minutes:'', partial_groom_minutes:'', frequency_weeks:'', last_groom:'', last_bath:''
   })
 
   const editDog = row => {
@@ -1014,7 +1014,10 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
     service:canonicalServiceLabel(valueOf(row,'service_pattern','Service Pattern')) || 'Groom',
     groom_price:valueOf(row,'groom_price','Groom Price') || (['Groom','Service Varies'].includes(canonicalServiceLabel(valueOf(row,'service_pattern','Service Pattern'))) ? valueOf(row,'price','Price') : ''),
     bath_price:valueOf(row,'bath_price','Bath Price') || (['Bath','Bath Only'].includes(canonicalServiceLabel(valueOf(row,'service_pattern','Service Pattern'))) ? valueOf(row,'price','Price') : ''),
-    partial_groom_price:valueOf(row,'partial_groom_price','Partial Groom Price') || (canonicalServiceLabel(valueOf(row,'service_pattern','Service Pattern'))==='Partial Groom' ? valueOf(row,'price','Price') : ''), minutes:valueOf(row,'minutes','Minutes'),
+    partial_groom_price:valueOf(row,'partial_groom_price','Partial Groom Price') || (canonicalServiceLabel(valueOf(row,'service_pattern','Service Pattern'))==='Partial Groom' ? valueOf(row,'price','Price') : ''),
+    groom_minutes:valueOf(row,'groom_minutes','Groom Minutes') || (['Groom','Service Varies'].includes(canonicalServiceLabel(valueOf(row,'service_pattern','Service Pattern'))) ? valueOf(row,'minutes','Minutes') : ''),
+    bath_minutes:valueOf(row,'bath_minutes','Bath Minutes') || (['Bath','Bath Only'].includes(canonicalServiceLabel(valueOf(row,'service_pattern','Service Pattern'))) ? valueOf(row,'minutes','Minutes') : ''),
+    partial_groom_minutes:valueOf(row,'partial_groom_minutes','Partial Groom Minutes') || (canonicalServiceLabel(valueOf(row,'service_pattern','Service Pattern'))==='Partial Groom' ? valueOf(row,'minutes','Minutes') : ''),
     frequency_weeks:valueOf(row,'frequency_weeks','Frequency Weeks'),
     last_groom:String(valueOf(row,'last_groom','Last Groom','last_groom_date','Last Groom Date') || '').slice(0,10),
     last_bath:String(valueOf(row,'last_bath','Last Bath','last_bath_date','Last Bath Date') || '').slice(0,10)
@@ -1036,7 +1039,9 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
         p_address:String(form.address||'').trim() || null, p_city:String(form.city||'').trim() || null,
         p_state:String(form.state||'').trim() || null, p_zip:String(form.zip||'').trim() || null,
         p_service:form.service || 'Groom', p_price:num(form.groom_price || form.bath_price || form.partial_groom_price),
-        p_groom_price:num(form.groom_price), p_bath_price:num(form.bath_price), p_partial_groom_price:num(form.partial_groom_price), p_minutes:num(form.minutes),
+        p_groom_price:num(form.groom_price), p_bath_price:num(form.bath_price), p_partial_groom_price:num(form.partial_groom_price),
+        p_groom_minutes:num(form.groom_minutes), p_bath_minutes:num(form.bath_minutes), p_partial_groom_minutes:num(form.partial_groom_minutes),
+        p_minutes:num(form.groom_minutes || form.bath_minutes || form.partial_groom_minutes),
         p_frequency_weeks:num(form.frequency_weeks), p_last_groom:form.last_groom || null, p_last_bath:form.last_bath || null
       })
       if (saveError) throw saveError
@@ -1297,12 +1302,14 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
               <label>Groom price<input type="number" inputMode="decimal" value={dogEditor.groom_price} onChange={e=>setDogEditor({...dogEditor,groom_price:e.target.value})}/></label>
               <label>Bath price<input type="number" inputMode="decimal" value={dogEditor.bath_price} onChange={e=>setDogEditor({...dogEditor,bath_price:e.target.value})}/></label>
               <label>Partial Groom price<input type="number" inputMode="decimal" value={dogEditor.partial_groom_price} onChange={e=>setDogEditor({...dogEditor,partial_groom_price:e.target.value})}/></label>
-              <label>Minutes<input type="number" inputMode="numeric" value={dogEditor.minutes} onChange={e=>setDogEditor({...dogEditor,minutes:e.target.value})}/></label>
+              <label>Groom time (min)<input type="number" inputMode="numeric" value={dogEditor.groom_minutes} onChange={e=>setDogEditor({...dogEditor,groom_minutes:e.target.value})}/></label>
+              <label>Bath time (min)<input type="number" inputMode="numeric" value={dogEditor.bath_minutes} onChange={e=>setDogEditor({...dogEditor,bath_minutes:e.target.value})}/></label>
+              <label>Partial Groom time (min)<input type="number" inputMode="numeric" value={dogEditor.partial_groom_minutes} onChange={e=>setDogEditor({...dogEditor,partial_groom_minutes:e.target.value})}/></label>
               <label>Frequency (weeks)<input type="number" inputMode="numeric" value={dogEditor.frequency_weeks} onChange={e=>setDogEditor({...dogEditor,frequency_weeks:e.target.value})}/></label>
               <label>Last groom<input type="date" value={dogEditor.last_groom} onChange={e=>setDogEditor({...dogEditor,last_groom:e.target.value})}/></label>
               <label>Last bath<input type="date" value={dogEditor.last_bath} onChange={e=>setDogEditor({...dogEditor,last_bath:e.target.value})}/></label>
             </div>
-            <div className="prototype-note" style={{marginTop:12}}>Usual service: Groom, Bath Only, Bath, Partial Groom, or Service Varies. Choose Service Varies when the dog comes on a regular schedule but the owner decides that week's service later. Last groom and last bath stay separate.</div>
+            <div className="prototype-note" style={{marginTop:12}}>Usual service: Groom, Bath Only, Bath, Partial Groom, or Service Varies. Each service can have its own price and time. Bath Only uses the Bath price and Bath time. Choose Service Varies when the dog comes on a regular schedule but the owner decides that week's service later. Last groom and last bath stay separate.</div>
             {dogMessage && <div className="login-message" style={{marginTop:10}}>{dogMessage}</div>}
             <div className="sheet-actions"><button className="ghost" onClick={()=>{setDogEditor(null);setNewClientOpen(false)}}>Cancel</button><button className="save" disabled={dogSaving} onClick={()=>saveDogForm(dogEditor,newClientOpen)}>{dogSaving?'Saving…':'Save'}</button></div>
           </div>
@@ -1627,8 +1634,16 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
     const raw = service==='Partial Groom' ? (dog.partial_groom_price ?? dog['Partial Groom Price']) : (service==='Bath' || service==='Bath Only') ? (dog.bath_price ?? dog['Bath Price']) : (dog.groom_price ?? dog['Groom Price'] ?? dog.price ?? dog.Price)
     const n=Number(String(raw ?? '').replace(/[$,]/g,'')); return Number.isFinite(n)?n:null
   }
+  const serviceMinutesFor = (name,service) => {
+    const dog = householdDogs.find(item=>String(item.dog || item.Dog || '').trim().toLowerCase()===String(name || '').trim().toLowerCase())
+    if (!dog) return null
+    const raw = service==='Partial Groom' ? (dog.partial_groom_minutes ?? dog['Partial Groom Minutes']) : (service==='Bath' || service==='Bath Only') ? (dog.bath_minutes ?? dog['Bath Minutes']) : (dog.groom_minutes ?? dog['Groom Minutes'] ?? dog.minutes ?? dog.Minutes)
+    const n=Number(String(raw ?? '').replace(/[^0-9.]/g,'')); return Number.isFinite(n)?n:null
+  }
   const serviceTotal = serviceRows.reduce((sum,item)=>{ const n=servicePriceFor(item.name,item.service); return sum+(Number.isFinite(n)?n:0) },0)
+  const serviceMinutesTotal = serviceRows.reduce((sum,item)=>{ const n=serviceMinutesFor(item.name,item.service); return sum+(Number.isFinite(n)?n:0) },0)
   const missingServicePrice = serviceRows.some(item=>!Number.isFinite(servicePriceFor(item.name,item.service)))
+  const missingServiceMinutes = serviceRows.some(item=>!Number.isFinite(serviceMinutesFor(item.name,item.service)))
   const restrictions = householdDogs.map(dog=>String(dog.groomer || dog.Groomer || '').trim()).filter(name=>['Jen','Haley'].includes(name))
   const groomers = ['Jen','Haley'].filter(name=>restrictions.every(assigned=>assigned===name))
   const close = () => { if (!savingRef.current) onClose() }
@@ -1665,6 +1680,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
       setError('Choose a service for every dog in this appointment.');return
     }
     if (mode==='services' && missingServicePrice) { setError('Add a price for each selected service on the dog profile first.'); return }
+    if (mode==='services' && missingServiceMinutes) { setError('Add a time for each selected service on the dog profile first.'); return }
     savingRef.current=true;setSaving(true);setError('')
     try {
       if (!supabase) throw new Error('Your schedule connection is not configured.')
@@ -1674,7 +1690,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
         : mode==='missed'
           ? await supabase.rpc('mark_grooming_no_show',{...params,p_missed_date:originalDate})
           : mode==='services'
-            ? await supabase.rpc('update_grooming_appointment_services',{...params,p_dogs:formatAppointmentDogServices(serviceRows),p_price:missingServicePrice?null:serviceTotal})
+            ? await supabase.rpc('update_grooming_appointment_services',{...params,p_dogs:formatAppointmentDogServices(serviceRows),p_price:missingServicePrice?null:serviceTotal,p_minutes:missingServiceMinutes?null:serviceMinutesTotal})
             : await supabase.rpc('change_grooming_appointment',{...params,p_action:mode,
               p_target_date:mode==='reschedule'?targetDate:null,
               p_target_time:mode==='reschedule'?targetTime:null,
@@ -1728,7 +1744,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
                 </select>
               </label>)}
             </div>
-            <div className="prototype-note" style={{textAlign:'left',marginTop:12}}>{missingServicePrice ? 'Add the missing service price on the dog profile before saving so the appointment total can update.' : `Appointment total: $${serviceTotal.toFixed(2)}`}</div>
+            <div className="prototype-note" style={{textAlign:'left',marginTop:12}}>{missingServicePrice ? 'Add the missing service price on the dog profile before saving so the appointment total can update.' : missingServiceMinutes ? 'Add the missing service time on the dog profile before saving so the appointment duration can update.' : `Appointment total: $${serviceTotal.toFixed(2)} · ${serviceMinutesTotal} min`}</div>
           </>}
           {mode==='complete' && <>
             <div className="form-grid"><label style={{gridColumn:'1 / -1'}}>Date services were completed
