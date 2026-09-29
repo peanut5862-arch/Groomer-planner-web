@@ -52,7 +52,7 @@ function ApptCard({appt,onOpen,onComplete,onUndo,completing}) {
   return (
     <div className="appt-card" style={{cursor:onOpen?'pointer':'default'}} onClick={onOpen} role={onOpen?'button':undefined} tabIndex={onOpen?0:undefined}
       onKeyDown={onOpen ? event=>{ if(event.key==='Enter' || event.key===' '){event.preventDefault();onOpen()} } : undefined}>
-      <div className="time-pill">{appt.time || '—'}</div>
+      <div className="time-pill">{displayClockTime(appt.time)}</div>
       <div className="appt-main">
         <div className="appt-topline">
           <strong>{appt.owner}</strong>
@@ -296,6 +296,18 @@ function clockMinutesForDisplay(value) {
   }
 
   return hours * 60 + minutes + seconds / 60
+}
+
+function displayClockTime(value) {
+  const raw = String(value || '').trim()
+  const minutes = clockMinutesForDisplay(raw)
+  if (!Number.isFinite(minutes)) return raw || '—'
+  const wholeMinutes = Math.floor(minutes)
+  const hours24 = Math.floor(wholeMinutes / 60) % 24
+  const mins = wholeMinutes % 60
+  const period = hours24 >= 12 ? 'PM' : 'AM'
+  const hours12 = hours24 % 12 || 12
+  return `${hours12}:${String(mins).padStart(2,'0')} ${period}`
 }
 
 function compareAppointmentTimes(a, b) {
@@ -651,6 +663,11 @@ function AddAppointmentSheet({open,dateKey,dogs,onClose,onSaved}) {
     if (!chosen.length) { setMessage('Choose at least one dog.'); return }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { setMessage('Choose an appointment date.'); return }
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) { setMessage('Choose a valid appointment time.'); return }
+    const weekday = new Date(`${date}T12:00:00Z`).getUTCDay()
+    if (![1,2,3,4,5].includes(weekday)) { setMessage('Choose Monday through Friday.'); return }
+    if (groomer === 'Jen' && ![2,3,4].includes(weekday)) { setMessage('Jen works Tuesday through Thursday.'); return }
+    const assigned = [...new Set(chosen.map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))]
+    if (assigned.length === 1 && groomer !== assigned[0]) { setMessage(`This client is assigned to ${assigned[0]}.`); return }
     setSaving(true)
     setMessage('')
     try {
@@ -677,7 +694,7 @@ function AddAppointmentSheet({open,dateKey,dogs,onClose,onSaved}) {
         throw error
       }
       if (data?.status !== 'added') throw new Error('The appointment could not be confirmed.')
-      onSaved?.(`${client.owner} added to ${date} at ${time}.`)
+      onSaved?.(`${client.owner} added to ${date} at ${displayClockTime(time)}.`)
     } catch(err) {
       setMessage(err?.message || 'Could not add appointment.')
     } finally {
@@ -2000,7 +2017,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
       else if(data.status==='services_updated') onSaved(`${appt.owner}'s services were updated for this appointment.`)
       else if(data.status==='appointment_updated') onSaved(`${appt.owner}'s appointment details were updated.`)
       else if(data.status==='already_completed') onSaved(`${appt.owner} was already completed.`)
-      else if(data.status==='rescheduled') onSaved(`${appt.owner} moved to ${targetDate} at ${targetTime} with ${targetGroomer}. Review the affected draft routes in your existing planner.`)
+      else if(data.status==='rescheduled') onSaved(`${appt.owner} moved to ${targetDate} at ${displayClockTime(targetTime)} with ${targetGroomer}. Review the affected draft routes in your existing planner.`)
       else if(data.status==='missed') onSaved(`${appt.owner} marked as a no-show. The service history was not advanced.`)
       else if(data.status==='already_missed') onSaved(`${appt.owner} was already marked as a no-show.`)
       else onSaved(`${appt.owner} cancelled. Review the affected draft route in your existing planner.`)
@@ -2020,7 +2037,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
         <button ref={closeRef} className="icon-btn" aria-label="Close appointment" disabled={saving} onClick={close}><X size={18}/></button>
       </div>
       <div className="prototype-note" style={{textAlign:'left',marginBottom:16}}>
-        {originalDate} · {appt.time || 'Time not set'} · {row.Groomer || 'Groomer not set'}
+        {originalDate} · {displayClockTime(appt.time) || 'Time not set'} · {row.Groomer || 'Groomer not set'}
         {row['Completed Date'] && <div>Completed: {String(row['Completed Date']).slice(0,10)}</div>}
         {row['Rescheduled To'] && <div>Moved to: {String(row['Rescheduled To']).slice(0,10)}</div>}
         {row['Status Note'] && <div>{row['Status Note']}</div>}
