@@ -155,20 +155,37 @@ function Month() {
 
 function Clients({ dogs, loading, error }) {
   const [query, setQuery] = useState('')
+  const [selectedClient, setSelectedClient] = useState(null)
+
+  const valueOf = (row, ...keys) => {
+    for (const key of keys) {
+      if (row?.[key] !== undefined && row?.[key] !== null && row?.[key] !== '') {
+        return row[key]
+      }
+    }
+    return ''
+  }
 
   const grouped = Object.values(
     (dogs || []).reduce((acc, row) => {
-      const owner = row.owner ?? row.Owner ?? 'Unknown owner'
-      const dog = row.dog ?? row.Dog ?? 'Unnamed dog'
-      const household = row.household_id ?? row['Household ID'] ?? owner
+      const owner = valueOf(row, 'owner', 'Owner') || 'Unknown owner'
+      const dog = valueOf(row, 'dog', 'Dog') || 'Unnamed dog'
+      const household = valueOf(row, 'household_id', 'Household ID') || owner
       const key = String(household || owner)
 
       if (!acc[key]) {
         acc[key] = {
           owner,
           dogs: [],
-          area: row.area ?? row.Area ?? '',
-          groomer: row.groomer ?? row.Groomer ?? ''
+          area: valueOf(row, 'area', 'Area'),
+          groomer: valueOf(row, 'groomer', 'Groomer'),
+          phone: valueOf(row, 'phone', 'Phone'),
+          address: valueOf(row, 'address', 'Address'),
+          city: valueOf(row, 'city', 'City'),
+          state: valueOf(row, 'state', 'State'),
+          zip: valueOf(row, 'zip', 'ZIP'),
+          notes: valueOf(row, 'notes', 'Notes'),
+          rows: []
         }
       }
 
@@ -176,6 +193,7 @@ function Clients({ dogs, loading, error }) {
         acc[key].dogs.push(dog)
       }
 
+      acc[key].rows.push(row)
       return acc
     }, {})
   ).sort((a, b) => a.owner.localeCompare(b.owner))
@@ -212,7 +230,10 @@ function Clients({ dogs, loading, error }) {
 
       <div className="client-list">
         {filtered.map((client, index) => (
-          <button key={`${client.owner}-${index}`}>
+          <button
+            key={`${client.owner}-${index}`}
+            onClick={() => setSelectedClient(client)}
+          >
             <div className="avatar"><Dog size={18}/></div>
             <span>
               {client.owner} — {client.dogs.join(' + ')}
@@ -226,6 +247,113 @@ function Clients({ dogs, loading, error }) {
           </button>
         ))}
       </div>
+
+      {selectedClient && (
+        <div className="sheet-backdrop" onMouseDown={() => setSelectedClient(null)}>
+          <div className="sheet" onMouseDown={event => event.stopPropagation()}>
+            <div className="sheet-handle" />
+
+            <div className="sheet-title">
+              <div>
+                <span>Client profile</span>
+                <h2>{selectedClient.owner}</h2>
+                <p>{selectedClient.dogs.join(' + ')}</p>
+              </div>
+
+              <button className="icon-btn" onClick={() => setSelectedClient(null)}>
+                <X size={18}/>
+              </button>
+            </div>
+
+            <div className="form-grid">
+              <label>
+                Phone
+                <input readOnly value={selectedClient.phone || '—'} />
+              </label>
+
+              <label>
+                Groomer
+                <input readOnly value={selectedClient.groomer || '—'} />
+              </label>
+
+              <label style={{gridColumn:'1 / -1'}}>
+                Address
+                <input
+                  readOnly
+                  value={
+                    [
+                      selectedClient.address,
+                      selectedClient.city,
+                      selectedClient.state,
+                      selectedClient.zip
+                    ].filter(Boolean).join(', ') || '—'
+                  }
+                />
+              </label>
+
+              <label>
+                Area
+                <input readOnly value={selectedClient.area || '—'} />
+              </label>
+
+              <label>
+                Dogs
+                <input readOnly value={selectedClient.dogs.join(', ') || '—'} />
+              </label>
+            </div>
+
+            <div style={{marginTop:18}}>
+              <div className="eyebrow" style={{marginBottom:8}}>Dogs & service details</div>
+              <div className="client-list">
+                {selectedClient.rows.map((row, index) => {
+                  const dog = valueOf(row, 'dog', 'Dog') || 'Unnamed dog'
+                  const servicePattern = valueOf(row, 'service_pattern', 'Service Pattern')
+                  const nextService = valueOf(row, 'next_service', 'Next Service')
+                  const price = valueOf(row, 'price', 'Price')
+                  const minutes = valueOf(row, 'minutes', 'Minutes')
+                  const frequency = valueOf(row, 'frequency_weeks', 'Frequency Weeks')
+
+                  return (
+                    <div
+                      key={`${dog}-${index}`}
+                      style={{
+                        background:'#fff',
+                        border:'1px solid #ebe8e2',
+                        borderRadius:14,
+                        padding:'12px 14px',
+                        marginBottom:8
+                      }}
+                    >
+                      <strong style={{display:'block',marginBottom:4}}>{dog}</strong>
+                      <div style={{fontSize:12,color:'#7b828e',lineHeight:1.5}}>
+                        {[servicePattern, nextService && `Next: ${nextService}`].filter(Boolean).join(' · ') || 'Service details not set'}
+                      </div>
+                      <div style={{fontSize:12,color:'#7b828e',marginTop:3}}>
+                        {[
+                          price !== '' ? `$${price}` : '',
+                          minutes !== '' ? `${minutes} min` : '',
+                          frequency !== '' ? `Every ${frequency} wks` : ''
+                        ].filter(Boolean).join(' · ')}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            {selectedClient.notes && (
+              <div style={{marginTop:14}}>
+                <div className="eyebrow" style={{marginBottom:6}}>Notes</div>
+                <div className="prototype-note">{selectedClient.notes}</div>
+              </div>
+            )}
+
+            <div className="sheet-actions">
+              <button className="save" onClick={() => setSelectedClient(null)}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
