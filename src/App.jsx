@@ -110,6 +110,38 @@ function Today({openEditor,onAsk}) {
   )
 }
 
+// Display-only sorting: compare clock times, never change saved appointments.
+function clockMinutesForDisplay(value) {
+  if (typeof value !== 'string') return Number.POSITIVE_INFINITY
+
+  const text = value.trim().toUpperCase().replace(/\./g, '').replace(/\s+/g, ' ')
+  const match = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/)
+  if (!match) return Number.POSITIVE_INFINITY
+
+  let hours = Number(match[1])
+  const minutes = Number(match[2])
+  const seconds = Number(match[3] || 0)
+  const period = match[4]
+  if (minutes > 59 || seconds > 59) return Number.POSITIVE_INFINITY
+
+  if (period) {
+    if (hours < 1 || hours > 12) return Number.POSITIVE_INFINITY
+    hours = (hours % 12) + (period === 'PM' ? 12 : 0)
+  } else if (hours > 23) {
+    return Number.POSITIVE_INFINITY
+  }
+
+  return hours * 60 + minutes + seconds / 60
+}
+
+function compareAppointmentTimes(a, b) {
+  const first = clockMinutesForDisplay(a?.time)
+  const second = clockMinutesForDisplay(b?.time)
+  // Equal or missing times retain their saved order. Missing times go last.
+  if (first === second) return 0
+  return first < second ? -1 : 1
+}
+
 function Week({onAsk}) {
   const [groomer,setGroomer]=useState('All')
   const [weekStart,setWeekStart]=useState(() => {
@@ -314,7 +346,7 @@ function Week({onAsk}) {
                 <div className="appt-list">
                   {dayAppointments
                     .slice()
-                    .sort((a,b)=>String(a.time).localeCompare(String(b.time)))
+                    .sort(compareAppointmentTimes)
                     .map(appt=>(
                       <ApptCard key={appt.id} appt={appt}/>
                     ))}
