@@ -111,7 +111,7 @@ function todayAppointments(rows, dateKey, groomer) {
         statusClass:completed ? 'confirmed' : locked ? 'locked' : 'pending',
         note:[String(row.Groomer || '').trim(),
           completed ? 'Completed' : String(row.Status || '').trim(),
-          locked ? 'Fixed time' : ''].filter(Boolean).join(' · ')
+          locked ? 'Fixed time' : '',row['Route Review Needed'] ? 'Review route' : ''].filter(Boolean).join(' · ')
       }
     })
     .sort(compareAppointmentTimes)
@@ -349,6 +349,8 @@ function Week({onAsk,onOpen,revision}) {
         statusClass = 'pending'
       }
 
+      if (row['Route Review Needed']) note = [note,'Review route'].filter(Boolean).join(' · ')
+
       const driveRaw =
         row['Drive From Previous Min'] ??
         row['Drive Minutes'] ??
@@ -369,7 +371,8 @@ function Week({onAsk,onOpen,revision}) {
         price: Number(row.Price || 0),
         drive: Number(driveRaw),
         note,
-        statusClass
+        statusClass,
+        inactive:['cancelled','canceled','moved to another week'].includes(apptStatus.toLowerCase())
       }
     })
 
@@ -426,7 +429,8 @@ function Week({onAsk,onOpen,revision}) {
       {!loading && !error && weekRecord && days.map(dayDate => {
         const dateKey = ymd(dayDate)
         const dayAppointments = visibleAppointments.filter(a => a.date === dateKey)
-        const revenue = dayAppointments.reduce((sum,a)=>sum+(Number.isFinite(a.price)?a.price:0),0)
+        const activeAppointments = dayAppointments.filter(appt=>!appt.inactive)
+        const revenue = activeAppointments.reduce((sum,a)=>sum+(Number.isFinite(a.price)?a.price:0),0)
 
         return (
           <div className="day-block" key={dateKey}>
@@ -449,7 +453,7 @@ function Week({onAsk,onOpen,revision}) {
             {dayAppointments.length > 0 ? (
               <>
                 <div style={{fontSize:11,color:'#8a8f99',margin:'0 0 8px 2px'}}>
-                  {dayAppointments.length} stop{dayAppointments.length===1?'':'s'} · ${Math.round(revenue)}
+                  {activeAppointments.length} stop{activeAppointments.length===1?'':'s'} · ${Math.round(revenue)}
                 </div>
                 <div className="appt-list">
                   {dayAppointments
@@ -471,7 +475,7 @@ function Week({onAsk,onOpen,revision}) {
 
       {weekRecord && (
         <div className="prototype-note">
-          Tap an appointment to view its details or mark its services completed.
+          Tap an appointment to complete, cancel, or reschedule. Changed routes need review in your existing planner.
         </div>
       )}
     </section>
@@ -827,63 +831,107 @@ function completionBlockReason(row,today) {
   if (['cancelled','canceled','moved to another week'].includes(String(row?.['Appointment Status'] || '').trim().toLowerCase())) return 'Cancelled or moved appointments cannot be completed.'
   const date = String(row?.Date || '').slice(0,10)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 'This appointment needs a valid scheduled date.'
-  if (date>today) return 'This appointment is in the future. Reschedule it in the existing planner if the service happened early.'
+  if (date>today) return 'This appointment is in the future. Use Reschedule if the service happened early.'
   if (!String(row?.['Household ID'] || '').trim() || !String(row?.Dogs || '').trim()) return 'Household or service details are missing. Update this appointment in the existing planner first.'
   return ''
 }
 
-function CompletionSheet({appt,onClose,onSaved}) {
+function appointmentTimeInput(value) {
+  const minutes = clockMinutesForDisplay(String(value || ''))
+  return Number.isFinite(minutes)
+    ? `${String(Math.floor(minutes/60)).padStart(2,'0')}:${String(Math.floor(minutes%60)).padStart(2,'0')}` : ''
+}
+
+function rescheduleValidation(date,time,groomer,today) {
+  if (!date || date<today) return 'Choose today or a future date.'
+  const day = new Date(`${date}T12:00:00Z`).getUTCDay()
+  if (![1,2,3,4,5].includes(day)) return 'Choose Monday through Friday.'
+  if (groomer==='Jen' && ![2,3,4].includes(day)) return 'Jen works Tuesday through Thursday.'
+  if (!['Jen','Haley'].includes(groomer)) return 'Choose a groomer.'
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return 'Choose a valid arrival time.'
+  return ''
+}
+
+function CompletionSheet({appt,dogs,onClose,onSaved}) {
   const row = appt.sourceRow
   const today = businessDateKey()
-  const [completedDate,setCompletedDate] = useState(()=>String(row.Date || today).slice(0,10))
+  const originalDate = String(row.Date || today).slice(0,10)
+  const [mode,setMode] = useState('complete')
+  const [completedDate,setCompletedDate] = useState(originalDate)
+  const [targetDate,setTargetDate] = useState(originalDate<today?today:originalDate)
+  const [targetTime,setTargetTime] = useState(()=>appointmentTimeInput(row['Start Time'] || row['Locked Time'] || row['Original Start Time']))
+  const [targetGroomer,setTargetGroomer] = useState(String(row.Groomer || '').trim())
+  const [note,setNote] = useState('')
   const [saving,setSaving] = useState(false)
   const [error,setError] = useState('')
   const savingRef = React.useRef(false)
   const closeRef = React.useRef(null)
+  const dialogRef = React.useRef(null)
   const blocked = completionBlockReason(row,today)
+  const completed = String(row['Completion Status'] || '').trim().toLowerCase()==='completed'
+  const moved = String(row['Appointment Status'] || '').trim().toLowerCase()==='moved to another week'
+  const cancelled = ['cancelled','canceled'].includes(String(row['Appointment Status'] || '').trim().toLowerCase())
+  const householdDogs = (dogs || []).filter(dog=>String(dog.household_id || dog['Household ID'] || '').trim()===String(row['Household ID'] || '').trim())
+  const restrictions = householdDogs.map(dog=>String(dog.groomer || dog.Groomer || '').trim()).filter(name=>['Jen','Haley'].includes(name))
+  const groomers = ['Jen','Haley'].filter(name=>restrictions.every(assigned=>assigned===name))
   const close = () => { if (!savingRef.current) onClose() }
 
   useEffect(()=>{
     const previous = document.activeElement
     closeRef.current?.focus()
-    const escape = event => {if(event.key==='Escape' && !savingRef.current) onClose()}
-    document.addEventListener('keydown',escape)
-    return ()=>{document.removeEventListener('keydown',escape);previous?.focus?.()}
+    const keydown = event => {
+      if(event.key==='Escape' && !savingRef.current) onClose()
+      if(event.key==='Tab') {
+        const focusable = Array.from(dialogRef.current?.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled)') || [])
+        const first=focusable[0], last=focusable[focusable.length-1]
+        if(event.shiftKey && document.activeElement===first){event.preventDefault();last?.focus()}
+        else if(!event.shiftKey && document.activeElement===last){event.preventDefault();first?.focus()}
+      }
+    }
+    document.addEventListener('keydown',keydown)
+    return ()=>{document.removeEventListener('keydown',keydown);previous?.focus?.()}
   },[])
 
-  const complete = async event => {
+  const submit = async event => {
     event.preventDefault()
-    if (savingRef.current || blocked) return
-    if (!completedDate || completedDate>businessDateKey()) {
-      setError('Choose a completion date that is today or earlier.')
-      return
+    if (savingRef.current || completed || moved) return
+    if (mode==='complete' && blocked) return
+    if (mode==='complete' && (!completedDate || completedDate>businessDateKey())) {
+      setError('Choose a completion date that is today or earlier.');return
     }
-    savingRef.current=true
-    setSaving(true)
-    setError('')
+    if (mode==='reschedule') {
+      const message=rescheduleValidation(targetDate,targetTime,targetGroomer,businessDateKey())
+      if(message){setError(message);return}
+      if(!groomers.includes(targetGroomer)){setError('Choose the household’s assigned groomer.');return}
+    }
+    savingRef.current=true;setSaving(true);setError('')
     try {
       if (!supabase) throw new Error('Your schedule connection is not configured.')
-      const {data,error:saveError} = await supabase.rpc('complete_grooming_appointment',{
-        p_week_start:appt.weekStart,
-        p_expected_row:row,
-        p_completed_date:completedDate
-      })
+      const params = {p_week_start:appt.weekStart,p_expected_row:row}
+      const {data,error:saveError} = mode==='complete'
+        ? await supabase.rpc('complete_grooming_appointment',{...params,p_completed_date:completedDate})
+        : await supabase.rpc('change_grooming_appointment',{...params,p_action:mode,
+          p_target_date:mode==='reschedule'?targetDate:null,
+          p_target_time:mode==='reschedule'?targetTime:null,
+          p_target_groomer:mode==='reschedule'?targetGroomer:null,p_note:note.trim()})
       if (saveError) {
-        if (saveError.code==='PGRST202' || saveError.code==='42883') throw new Error('Appointment completion has not been enabled yet. Please finish the one-time setup first.')
+        if (saveError.code==='PGRST202' || saveError.code==='42883') throw new Error('This action has not been enabled yet. Please finish its one-time setup first.')
         throw saveError
       }
-      if (!['completed','already_completed'].includes(data?.status)) throw new Error('The save result could not be confirmed. Close this appointment and refresh before trying again.')
-      onSaved(data.status==='already_completed' ? `${appt.owner} was already completed.` : `${appt.owner} marked completed. Service history updated for ${data.dogs_updated} dog${data.dogs_updated===1?'':'s'}.`)
+      if (!['completed','already_completed','cancelled','already_cancelled','rescheduled'].includes(data?.status)) throw new Error('The save result could not be confirmed. Close and refresh before trying again.')
+      if(data.status==='completed') onSaved(`${appt.owner} marked completed. Service history updated for ${data.dogs_updated} dog${data.dogs_updated===1?'':'s'}.`)
+      else if(data.status==='already_completed') onSaved(`${appt.owner} was already completed.`)
+      else if(data.status==='rescheduled') onSaved(`${appt.owner} moved to ${targetDate} at ${targetTime} with ${targetGroomer}. Review the affected draft routes in your existing planner.`)
+      else onSaved(`${appt.owner} cancelled. Review the affected draft route in your existing planner.`)
     } catch (err) {
       setError(err.message || 'Could not confirm the save. Close and refresh before trying again.')
     } finally {
-      savingRef.current=false
-      setSaving(false)
+      savingRef.current=false;setSaving(false)
     }
   }
 
   return <div className="sheet-backdrop" onMouseDown={close}>
-    <div className="sheet" role="dialog" aria-modal="true" aria-labelledby="completion-title"
+    <div ref={dialogRef} className="sheet" role="dialog" aria-modal="true" aria-labelledby="completion-title"
       onMouseDown={event=>event.stopPropagation()} style={{maxHeight:'85dvh',overflowY:'auto'}}>
       <div className="sheet-handle"/>
       <div className="sheet-title">
@@ -891,23 +939,47 @@ function CompletionSheet({appt,onClose,onSaved}) {
         <button ref={closeRef} className="icon-btn" aria-label="Close appointment" disabled={saving} onClick={close}><X size={18}/></button>
       </div>
       <div className="prototype-note" style={{textAlign:'left',marginBottom:16}}>
-        {String(row.Date || '').slice(0,10)} · {appt.time || 'Time not set'} · {row.Groomer || 'Groomer not set'}
+        {originalDate} · {appt.time || 'Time not set'} · {row.Groomer || 'Groomer not set'}
         {row['Completed Date'] && <div>Completed: {String(row['Completed Date']).slice(0,10)}</div>}
+        {row['Rescheduled To'] && <div>Moved to: {String(row['Rescheduled To']).slice(0,10)}</div>}
+        {row['Status Note'] && <div>{row['Status Note']}</div>}
       </div>
-      {blocked ? <div className="prototype-note">{blocked}</div> : <form onSubmit={complete}>
-        <div className="form-grid">
-          <label style={{gridColumn:'1 / -1'}}>Date services were completed
-            <input type="date" value={completedDate} max={today} required disabled={saving}
-              onChange={event=>setCompletedDate(event.target.value)}/>
-          </label>
+      {completed || moved ? <div className="prototype-note">{completed?'This appointment is already completed.':'Open the appointment in its new week to change it.'}</div> : <>
+        <div className="segmented" aria-label="Appointment action" style={{marginBottom:16}}>
+          {[['complete','Complete'],['reschedule','Reschedule'],['cancel','Cancel']].map(([value,label])=><button
+            type="button" key={value} disabled={saving || (cancelled && value==='cancel')} aria-pressed={mode===value}
+            className={mode===value?'active':''} onClick={()=>{setMode(value);setError('')}}>{label}</button>)}
         </div>
-        <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>Marks every listed service completed. Baths update bath history; full grooms update both bath and groom history.</p>
-        {error && <div className="login-message" role="alert">{error}</div>}
-        <div className="sheet-actions">
-          <button type="button" className="ghost" disabled={saving} onClick={close}>Close</button>
-          <button type="submit" className="save" disabled={saving}>{saving?'Saving…':'Mark completed'}</button>
-        </div>
-      </form>}
+        {mode==='complete' && blocked ? <div className="prototype-note">{blocked}{cancelled && ' Use Reschedule to book it again.'}</div> : <form onSubmit={submit}>
+          {mode==='complete' && <>
+            <div className="form-grid"><label style={{gridColumn:'1 / -1'}}>Date services were completed
+              <input type="date" value={completedDate} max={today} required disabled={saving} onChange={event=>setCompletedDate(event.target.value)}/>
+            </label></div>
+            <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>Marks every listed service completed. Baths update bath history; full grooms update both bath and groom history.</p>
+          </>}
+          {mode==='reschedule' && <>
+            <div className="form-grid">
+              <label>New date<input type="date" min={today} value={targetDate} required disabled={saving} onChange={event=>setTargetDate(event.target.value)}/></label>
+              <label>Arrival time<input type="time" value={targetTime} required disabled={saving} onChange={event=>setTargetTime(event.target.value)}/></label>
+              <label style={{gridColumn:'1 / -1'}}>Groomer<select value={targetGroomer} disabled={saving} onChange={event=>setTargetGroomer(event.target.value)}>
+                <option value="">Choose groomer</option>{groomers.map(name=><option key={name}>{name}</option>)}
+              </select></label>
+            </div>
+            <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>The selected arrival time becomes fixed. Saved service lengths and travel buffers are checked for conflicts. Review the affected draft routes in your existing planner after saving.</p>
+          </>}
+          {mode==='cancel' && <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>Cancel this appointment for {appt.owner}? It stays in Week history, and the affected route becomes a draft for review.</p>}
+          {mode!=='complete' && <div className="form-grid"><label style={{gridColumn:'1 / -1'}}>Note (optional)
+            <input value={note} maxLength={1000} disabled={saving} onChange={event=>setNote(event.target.value)} placeholder="Reason or client request"/>
+          </label></div>}
+          {error && <div className="login-message" role="alert">{error}</div>}
+          <div className="sheet-actions">
+            <button type="button" className="ghost" disabled={saving} onClick={close}>Close</button>
+            <button type="submit" className={mode==='cancel'?'danger':'save'} disabled={saving}>
+              {saving?'Saving…':mode==='complete'?'Mark completed':mode==='reschedule'?'Save reschedule':'Confirm cancellation'}
+            </button>
+          </div>
+        </form>}
+      </>}
     </div>
   </div>
 }
@@ -1157,7 +1229,7 @@ export default function App() {
         ))}
       </nav>
 
-      {editing && <CompletionSheet appt={editing} onClose={()=>setEditing(null)} onSaved={message=>{
+      {editing && <CompletionSheet appt={editing} dogs={dogs} onClose={()=>setEditing(null)} onSaved={message=>{
         setEditing(null)
         setSaveMessage(message)
         setScheduleRevision(value=>value+1)
