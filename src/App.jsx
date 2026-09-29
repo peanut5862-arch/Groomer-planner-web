@@ -1631,7 +1631,7 @@ function completionBlockReason(row,today) {
   if (['cancelled','canceled','moved to another week'].includes(String(row?.['Appointment Status'] || '').trim().toLowerCase())) return 'Cancelled or moved appointments cannot be completed.'
   const date = String(row?.Date || '').slice(0,10)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 'This appointment needs a valid scheduled date.'
-  if (!String(row?.['Household ID'] || '').trim() || !String(row?.Dogs || '').trim()) return 'Household or service details are missing. Update this appointment in the existing planner first.'
+  if (!String(row?.Dogs || '').trim()) return 'Service details are missing. Update this appointment in the existing planner first.'
   return ''
 }
 
@@ -2180,5 +2180,3 @@ export default function App() {
     </div>
   )
 }
-
-trigger deploy
