@@ -608,7 +608,7 @@ function Month({onOpen,revision}) {
   )
 }
 
-function Clients({ dogs, loading, error }) {
+function Clients({ dogs, loading, error, onOpen, revision }) {
   const [query, setQuery] = useState('')
   const [selectedClient, setSelectedClient] = useState(null)
   const [history, setHistory] = useState([])
@@ -753,13 +753,16 @@ function Clients({ dogs, loading, error }) {
             const priceText = String(row.Price ?? '').replace(/[$,]/g,'').trim()
             const price = priceText === '' ? NaN : Number(priceText)
             const sortDate = completedDate || cancelledDate || rescheduledTo || date || item.weekStart
-            const suppressOperationalStatus = ['overdue','due','due soon'].some(value =>
-              rawStatusLower === value || rawStatusLower.startsWith(`${value} `)
+            const operationalStatusText = `${rawStatusLower} ${statusNote.toLowerCase()}`
+            const suppressOperationalStatus = ['overdue','due soon','due'].some(value =>
+              operationalStatusText.includes(value)
             )
-            const note = statusNote || (suppressOperationalStatus ? '' : rawStatus)
+            const note = suppressOperationalStatus ? '' : (statusNote || rawStatus)
 
             return {
               id:`${item.weekStart}-${row['Household ID'] || row.Owner}-${item.index}`,
+              weekStart:item.weekStart,
+              sourceRow:row,
               date,
               sortDate,
               completedDate,
@@ -790,7 +793,7 @@ function Clients({ dogs, loading, error }) {
 
     loadHistory()
     return () => { cancelled = true }
-  }, [selectedClient])
+  }, [selectedClient, revision])
 
   return (
     <section>
@@ -943,8 +946,23 @@ function Clients({ dogs, loading, error }) {
               )}
               {!historyLoading && !historyError && history.length > 0 && (
                 <div className="appt-list">
-                  {history.slice(0,20).map(item => (
-                    <div className="appt-card" key={item.id}>
+                  {history.slice(0,20).map(item => {
+                    const needsReview = item.status === 'Needs review'
+                    const CardTag = needsReview ? 'button' : 'div'
+                    return (
+                    <CardTag
+                      className="appt-card"
+                      key={item.id}
+                      type={needsReview ? 'button' : undefined}
+                      onClick={needsReview ? () => onOpen?.({
+                        id:item.id,
+                        owner:selectedClient.owner,
+                        dogs:item.dogs || selectedClient.dogs.join(' + '),
+                        weekStart:item.weekStart,
+                        sourceRow:item.sourceRow
+                      }) : undefined}
+                      style={needsReview ? {width:'100%',textAlign:'left',cursor:'pointer',font:'inherit',color:'inherit'} : undefined}
+                    >
                       <div className="time-pill">{item.date ? textDate(item.date).replace(/, \d{4}$/,'') : '—'}</div>
                       <div className="appt-main">
                         <div className="appt-topline">
@@ -967,9 +985,10 @@ function Clients({ dogs, loading, error }) {
                           <div style={{fontSize:11,color:'#7b828e',marginTop:5}}>Moved to {textDate(item.rescheduledTo)}</div>
                         )}
                         {item.note && <div style={{fontSize:11,color:'#7b828e',marginTop:5}}>{item.note}</div>}
+                        {needsReview && <div style={{fontSize:11,color:'#53617a',marginTop:6,fontWeight:700}}>Tap to review →</div>}
                       </div>
-                    </div>
-                  ))}
+                    </CardTag>
+                  )})}
                 </div>
               )}
               {history.length > 20 && (
@@ -1052,6 +1071,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
   const completed = String(row['Completion Status'] || '').trim().toLowerCase()==='completed'
   const moved = String(row['Appointment Status'] || '').trim().toLowerCase()==='moved to another week'
   const cancelled = ['cancelled','canceled'].includes(String(row['Appointment Status'] || '').trim().toLowerCase())
+  const missed = ['missed','no show','no-show','noshow'].some(value => String(row['Appointment Status'] || row.Status || '').trim().toLowerCase().includes(value))
   const householdDogs = (dogs || []).filter(dog=>String(dog.household_id || dog['Household ID'] || '').trim()===String(row['Household ID'] || '').trim())
   const restrictions = householdDogs.map(dog=>String(dog.groomer || dog.Groomer || '').trim()).filter(name=>['Jen','Haley'].includes(name))
   const groomers = ['Jen','Haley'].filter(name=>restrictions.every(assigned=>assigned===name))
@@ -1075,7 +1095,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
 
   const submit = async event => {
     event.preventDefault()
-    if (savingRef.current || completed || moved) return
+    if (savingRef.current || completed || moved || missed) return
     if (mode==='complete' && blocked) return
     if (mode==='complete' && (!completedDate || completedDate>businessDateKey())) {
       setError('Choose a completion date that is today or earlier.');return
@@ -1091,18 +1111,22 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
       const params = {p_week_start:appt.weekStart,p_expected_row:row}
       const {data,error:saveError} = mode==='complete'
         ? await supabase.rpc('complete_grooming_appointment',{...params,p_completed_date:completedDate})
-        : await supabase.rpc('change_grooming_appointment',{...params,p_action:mode,
-          p_target_date:mode==='reschedule'?targetDate:null,
-          p_target_time:mode==='reschedule'?targetTime:null,
-          p_target_groomer:mode==='reschedule'?targetGroomer:null,p_note:note.trim()})
+        : mode==='missed'
+          ? await supabase.rpc('mark_grooming_no_show',{...params,p_missed_date:originalDate})
+          : await supabase.rpc('change_grooming_appointment',{...params,p_action:mode,
+            p_target_date:mode==='reschedule'?targetDate:null,
+            p_target_time:mode==='reschedule'?targetTime:null,
+            p_target_groomer:mode==='reschedule'?targetGroomer:null,p_note:note.trim()})
       if (saveError) {
         if (saveError.code==='PGRST202' || saveError.code==='42883') throw new Error('This action has not been enabled yet. Please finish its one-time setup first.')
         throw saveError
       }
-      if (!['completed','already_completed','cancelled','already_cancelled','rescheduled'].includes(data?.status)) throw new Error('The save result could not be confirmed. Close and refresh before trying again.')
+      if (!['completed','already_completed','cancelled','already_cancelled','rescheduled','missed','already_missed'].includes(data?.status)) throw new Error('The save result could not be confirmed. Close and refresh before trying again.')
       if(data.status==='completed') onSaved(`${appt.owner} marked completed. Service history updated for ${data.dogs_updated} dog${data.dogs_updated===1?'':'s'}.`)
       else if(data.status==='already_completed') onSaved(`${appt.owner} was already completed.`)
       else if(data.status==='rescheduled') onSaved(`${appt.owner} moved to ${targetDate} at ${targetTime} with ${targetGroomer}. Review the affected draft routes in your existing planner.`)
+      else if(data.status==='missed') onSaved(`${appt.owner} marked as a no-show. The service history was not advanced.`)
+      else if(data.status==='already_missed') onSaved(`${appt.owner} was already marked as a no-show.`)
       else onSaved(`${appt.owner} cancelled. Review the affected draft route in your existing planner.`)
     } catch (err) {
       setError(err.message || 'Could not confirm the save. Close and refresh before trying again.')
@@ -1125,9 +1149,9 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
         {row['Rescheduled To'] && <div>Moved to: {String(row['Rescheduled To']).slice(0,10)}</div>}
         {row['Status Note'] && <div>{row['Status Note']}</div>}
       </div>
-      {completed || moved ? <div className="prototype-note">{completed?'This appointment is already completed.':'Open the appointment in its new week to change it.'}</div> : <>
+      {completed || moved || missed ? <div className="prototype-note">{completed?'This appointment is already completed.':moved?'Open the appointment in its new week to change it.':'This appointment is already marked as a no-show.'}</div> : <>
         <div className="segmented" aria-label="Appointment action" style={{marginBottom:16}}>
-          {[['complete','Complete'],['reschedule','Reschedule'],['cancel','Cancel']].map(([value,label])=><button
+          {[['complete','Complete'],['reschedule','Reschedule'],['cancel','Cancel'],['missed','No-show']].map(([value,label])=><button
             type="button" key={value} disabled={saving || (cancelled && value==='cancel')} aria-pressed={mode===value}
             className={mode===value?'active':''} onClick={()=>{setMode(value);setError('')}}>{label}</button>)}
         </div>
@@ -1149,6 +1173,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
             <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>The selected arrival time becomes fixed. Saved service lengths and travel buffers are checked for conflicts. Review the affected draft routes in your existing planner after saving.</p>
           </>}
           {mode==='cancel' && <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>Cancel this appointment for {appt.owner}? It stays in Week history, and the affected route becomes a draft for review.</p>}
+          {mode==='missed' && <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>Mark this past appointment as a no-show? It stays in history and does not advance the dog’s last-service date.</p>}
           {mode!=='complete' && <div className="form-grid"><label style={{gridColumn:'1 / -1'}}>Note (optional)
             <input value={note} maxLength={1000} disabled={saving} onChange={event=>setNote(event.target.value)} placeholder="Reason or client request"/>
           </label></div>}
@@ -1156,7 +1181,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
           <div className="sheet-actions">
             <button type="button" className="ghost" disabled={saving} onClick={close}>Close</button>
             <button type="submit" className={mode==='cancel'?'danger':'save'} disabled={saving}>
-              {saving?'Saving…':mode==='complete'?'Mark completed':mode==='reschedule'?'Save reschedule':'Confirm cancellation'}
+              {saving?'Saving…':mode==='complete'?'Mark completed':mode==='reschedule'?'Save reschedule':mode==='missed'?'Mark no-show':'Confirm cancellation'}
             </button>
           </div>
         </form>}
@@ -1377,7 +1402,7 @@ export default function App() {
   } else if (tab === 'Month') {
     body = <Month onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Clients') {
-    body = <Clients dogs={dogs} loading={dataLoading} error={dataError}/>
+    body = <Clients dogs={dogs} loading={dataLoading} error={dataError} onOpen={setEditing} revision={scheduleRevision}/>
   } else {
     body = <More/>
   }
