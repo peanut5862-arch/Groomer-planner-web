@@ -1,4 +1,3 @@
-// redeploy trigger
 import React, { useEffect, useState } from 'react'
 import { supabase } from './supabase.js'
 import {
@@ -78,14 +77,16 @@ function ApptCard({appt,onOpen,onComplete,onUndo,completing}) {
           <button
             type="button"
             disabled={completing}
+            onPointerDown={event=>event.stopPropagation()}
+            onTouchStart={event=>event.stopPropagation()}
             onClick={event=>{
+              event.preventDefault()
               event.stopPropagation()
               onComplete(appt)
             }}
             style={{
-              marginTop:9, padding:0, border:0, background:'transparent', cursor:completing?'default':'pointer',
-              fontSize:12, fontWeight:800, color:'#17223f', textDecoration:'underline',
-              textUnderlineOffset:3
+              marginTop:9, padding:'7px 12px', border:'1px solid #17223f', borderRadius:10, background:'#fff', cursor:completing?'default':'pointer',
+              fontSize:12, fontWeight:800, color:'#17223f', position:'relative', zIndex:5, WebkitTapHighlightColor:'transparent'
             }}
           >
             {completing ? 'Saving...' : 'Complete'}
@@ -95,14 +96,16 @@ function ApptCard({appt,onOpen,onComplete,onUndo,completing}) {
           <button
             type="button"
             disabled={completing}
+            onPointerDown={event=>event.stopPropagation()}
+            onTouchStart={event=>event.stopPropagation()}
             onClick={event=>{
+              event.preventDefault()
               event.stopPropagation()
               onUndo(appt)
             }}
             style={{
-              marginTop:9, padding:0, border:0, background:'transparent', cursor:completing?'default':'pointer',
-              fontSize:12, fontWeight:800, color:'#267447', textDecoration:'underline',
-              textUnderlineOffset:3
+              marginTop:9, padding:'7px 12px', border:'1px solid #267447', borderRadius:10, background:'#fff', cursor:completing?'default':'pointer',
+              fontSize:12, fontWeight:800, color:'#267447', position:'relative', zIndex:5, WebkitTapHighlightColor:'transparent'
             }}
           >
             {completing ? 'Saving...' : '✓ Completed'}
@@ -2004,11 +2007,6 @@ export default function App() {
     const today = businessDateKey()
     const blocked = completionBlockReason(row,today)
     if (blocked) { setSaveMessage(blocked); window.alert(blocked); return }
-    const scheduledDate = String(row.Date || '').slice(0,10)
-    if (/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate) && scheduledDate > today) {
-      const label = textDate(scheduledDate)
-      if (!window.confirm(`This appointment is scheduled for ${label}. Mark it complete early?`)) return
-    }
     setCompletingId(appt.id)
     setSaveMessage('')
     try {
