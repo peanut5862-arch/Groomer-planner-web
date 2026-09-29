@@ -615,6 +615,7 @@ function canonicalServiceLabel(value) {
   if (key === 'bath only') return 'Bath Only'
   if (key === 'bath') return 'Bath'
   if (key === 'partial groom') return 'Partial Groom'
+  if (key === 'service varies' || key === 'varies') return 'Service Varies'
   return String(value || '').trim()
 }
 
@@ -649,6 +650,7 @@ function dogDueInfo(row, todayKey = businessDateKey()) {
   let baseDate = ''
   if (servicePattern === 'bath only' || servicePattern === 'bath') baseDate = lastBath
   else if (servicePattern === 'groom' || servicePattern === 'groom only' || servicePattern === 'partial groom') baseDate = lastGroom
+  else if (servicePattern === 'service varies' || servicePattern === 'varies') baseDate = [lastGroom,lastBath].filter(Boolean).sort().at(-1) || ''
   else if (nextLabel.toLowerCase().includes('groom')) baseDate = lastGroom
   else if (nextLabel.toLowerCase().includes('bath')) baseDate = lastBath
   else baseDate = [lastGroom,lastBath].filter(Boolean).sort().at(-1) || ''
@@ -1267,14 +1269,14 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
               <label style={{gridColumn:'1 / -1'}}>Address<input value={dogEditor.address} onChange={e=>setDogEditor({...dogEditor,address:e.target.value})}/></label>
               <label>City<input value={dogEditor.city} onChange={e=>setDogEditor({...dogEditor,city:e.target.value})}/></label>
               <label>ZIP<input value={dogEditor.zip} onChange={e=>setDogEditor({...dogEditor,zip:e.target.value})}/></label>
-              <label style={{gridColumn:'1 / -1'}}>Service<select value={dogEditor.service} onChange={e=>setDogEditor({...dogEditor,service:e.target.value})}><option>Groom</option><option>Bath Only</option><option>Bath</option><option>Partial Groom</option></select></label>
+              <label style={{gridColumn:'1 / -1'}}>Service<select value={dogEditor.service} onChange={e=>setDogEditor({...dogEditor,service:e.target.value})}><option>Groom</option><option>Bath Only</option><option>Bath</option><option>Partial Groom</option><option>Service Varies</option></select></label>
               <label>Price<input type="number" inputMode="decimal" value={dogEditor.price} onChange={e=>setDogEditor({...dogEditor,price:e.target.value})}/></label>
               <label>Minutes<input type="number" inputMode="numeric" value={dogEditor.minutes} onChange={e=>setDogEditor({...dogEditor,minutes:e.target.value})}/></label>
               <label>Frequency (weeks)<input type="number" inputMode="numeric" value={dogEditor.frequency_weeks} onChange={e=>setDogEditor({...dogEditor,frequency_weeks:e.target.value})}/></label>
               <label>Last groom<input type="date" value={dogEditor.last_groom} onChange={e=>setDogEditor({...dogEditor,last_groom:e.target.value})}/></label>
               <label>Last bath<input type="date" value={dogEditor.last_bath} onChange={e=>setDogEditor({...dogEditor,last_bath:e.target.value})}/></label>
             </div>
-            <div className="prototype-note" style={{marginTop:12}}>Service options: Groom, Bath Only, Bath, or Partial Groom. Last groom and last bath stay separate, so you only enter the date that actually happened.</div>
+            <div className="prototype-note" style={{marginTop:12}}>Usual service: Groom, Bath Only, Bath, Partial Groom, or Service Varies. Choose Service Varies when the dog comes on a regular schedule but the owner decides that week's service later. Last groom and last bath stay separate.</div>
             {dogMessage && <div className="login-message" style={{marginTop:10}}>{dogMessage}</div>}
             <div className="sheet-actions"><button className="ghost" onClick={()=>{setDogEditor(null);setNewClientOpen(false)}}>Cancel</button><button className="save" disabled={dogSaving} onClick={()=>saveDogForm(dogEditor,newClientOpen)}>{dogSaving?'Saving…':'Save'}</button></div>
           </div>
@@ -1430,7 +1432,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
                       <div style={{fontSize:12,color:'#59616e',lineHeight:1.65}}>
                         <div><strong>Last groom:</strong> {lastGroom ? textDate(lastGroom) : '—'}</div>
                         <div><strong>Last bath:</strong> {lastBath ? textDate(lastBath) : '—'}</div>
-                        <div><strong>Next service:</strong> {nextService || '—'}</div>
+                        <div><strong>{nextService === 'Service Varies' ? 'Usual service:' : 'Next service:'}</strong> {nextService || '—'}</div>
                         <div><strong>Next due:</strong> {due.dueDate ? textDate(due.dueDate) : '—'}</div>
                         <div style={{fontWeight:700,color:
                           due.status === 'Overdue' ? '#b63b36' :
