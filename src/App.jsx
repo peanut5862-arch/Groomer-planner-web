@@ -724,6 +724,13 @@ function Clients({ dogs, loading, error }) {
             const rescheduledTo = String(row['Rescheduled To'] || '').slice(0,10)
             const cancelledDate = String(row['Cancelled Date'] || '').slice(0,10)
 
+            const rawStatus = String(row.Status || '').trim()
+            const rawStatusLower = rawStatus.toLowerCase()
+            const statusNote = String(row['Status Note'] || '').trim()
+            const explicitlyMissed = ['missed','no show','no-show','noshow'].some(value =>
+              rawStatusLower === value || rawStatusLower.includes(value)
+            )
+
             let status = 'Scheduled'
             let statusClass = 'confirmed'
             if (completion === 'completed') {
@@ -735,14 +742,21 @@ function Clients({ dogs, loading, error }) {
             } else if (appointmentStatus === 'moved to another week') {
               status = 'Rescheduled'
               statusClass = 'pending'
+            } else if (date && date < today && explicitlyMissed) {
+              status = 'Missed'
+              statusClass = 'pending'
             } else if (date && date < today) {
-              status = 'Past appointment'
+              status = 'Needs review'
               statusClass = 'locked'
             }
 
             const priceText = String(row.Price ?? '').replace(/[$,]/g,'').trim()
             const price = priceText === '' ? NaN : Number(priceText)
             const sortDate = completedDate || cancelledDate || rescheduledTo || date || item.weekStart
+            const suppressOperationalStatus = ['overdue','due','due soon'].some(value =>
+              rawStatusLower === value || rawStatusLower.startsWith(`${value} `)
+            )
+            const note = statusNote || (suppressOperationalStatus ? '' : rawStatus)
 
             return {
               id:`${item.weekStart}-${row['Household ID'] || row.Owner}-${item.index}`,
@@ -757,7 +771,7 @@ function Clients({ dogs, loading, error }) {
               dogs:String(row.Dogs || '').trim(),
               time:String(row['Start Time'] || row['Locked Time'] || '').trim(),
               price,
-              note:String(row['Status Note'] || row.Status || '').trim()
+              note
             }
           })
           .filter(item => item.status !== 'Scheduled')
