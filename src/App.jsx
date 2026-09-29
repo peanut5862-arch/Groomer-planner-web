@@ -73,13 +73,30 @@ function ApptCard({appt,onOpen,onComplete,onUndo,completing}) {
             {appt.note}
           </div>
         )}
-        {completed && <div style={{marginTop:9,fontSize:12,fontWeight:800,color:'#267447'}}>Completed</div>}
+        {!inactive && (completed || canComplete) && (
+          <button
+            type="button"
+            disabled={completing}
+            onClick={event=>{
+              event.stopPropagation()
+              if (completed) {
+                if (canUndo) onUndo(appt)
+                else window.alert('This appointment was completed before Undo Complete was enabled. New completions can be tapped again to undo.')
+              } else {
+                onComplete(appt)
+              }
+            }}
+            style={{
+              marginTop:9, padding:0, border:0, background:'transparent', cursor:completing?'default':'pointer',
+              fontSize:12, fontWeight:800, color:completed?'#267447':'#17223f', textDecoration:'underline',
+              textUnderlineOffset:3
+            }}
+          >
+            {completing ? 'Saving...' : completed ? '✓ Completed' : 'Complete'}
+          </button>
+        )}
       </div>
       <div style={{display:'flex',alignItems:'center',gap:8,marginLeft:'auto'}}>
-        {canComplete && <button type="button" className="save" disabled={completing} onClick={event=>{event.stopPropagation();onComplete(appt)}}
-          style={{padding:'8px 11px',fontSize:12,whiteSpace:'nowrap'}}>{completing?'Saving...':'Complete'}</button>}
-        {canUndo && <button type="button" className="secondary" disabled={completing} onClick={event=>{event.stopPropagation();onUndo(appt)}}
-          style={{padding:'8px 11px',fontSize:12,whiteSpace:'nowrap'}}>{completing?'Saving...':'Undo Complete'}</button>}
         {onOpen && <ChevronRight size={18} className="chev"/>}
       </div>
     </div>
