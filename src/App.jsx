@@ -1134,8 +1134,6 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
                         <div><strong>Last bath:</strong> {lastBath ? textDate(lastBath) : '—'}</div>
                         <div><strong>Next service:</strong> {nextService ? textDate(nextService) : '—'}</div>
                         <div><strong>Next due:</strong> {due.dueDate ? textDate(due.dueDate) : '—'}</div>
-                        {due.scheduled && (
-                        )}
                         <div style={{fontWeight:700,color:
                           due.status === 'Overdue' ? '#b63b36' :
                           ['Due today','Due this week'].includes(due.status) ? '#9a6b18' :
