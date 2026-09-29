@@ -608,6 +608,66 @@ function Month({onOpen,revision}) {
   )
 }
 
+
+function dogDueInfo(row, todayKey = businessDateKey()) {
+  const pick = (...keys) => {
+    for (const key of keys) {
+      const value = row?.[key]
+      if (value !== undefined && value !== null && String(value).trim() !== '') return value
+    }
+    return ''
+  }
+  const dateKey = value => {
+    const text = String(value || '').trim().slice(0,10)
+    return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : ''
+  }
+  const addWeeks = (key, weeks) => {
+    if (!key || !Number.isFinite(weeks)) return ''
+    const date = new Date(`${key}T12:00:00Z`)
+    date.setUTCDate(date.getUTCDate() + Math.round(weeks * 7))
+    return date.toISOString().slice(0,10)
+  }
+
+  const frequencyRaw = pick('frequency_weeks', 'Frequency Weeks')
+  const frequency = Number(String(frequencyRaw).replace(/[^0-9.]/g,''))
+  const lastGroom = dateKey(pick('last_groom', 'Last Groom', 'last_groom_date', 'Last Groom Date'))
+  const lastBath = dateKey(pick('last_bath', 'Last Bath', 'last_bath_date', 'Last Bath Date'))
+  const nextRaw = pick('next_service', 'Next Service')
+  const explicitDue = dateKey(pick('next_service_date', 'Next Service Date')) || dateKey(nextRaw)
+  const nextLabel = explicitDue ? '' : String(nextRaw || '').trim()
+
+  let baseDate = ''
+  if (nextLabel.toLowerCase().includes('groom')) baseDate = lastGroom
+  else if (nextLabel.toLowerCase().includes('bath')) baseDate = lastBath
+  else baseDate = [lastGroom,lastBath].filter(Boolean).sort().at(-1) || ''
+
+  const dueDate = explicitDue || (Number.isFinite(frequency) && frequency > 0 ? addWeeks(baseDate,frequency) : '')
+  if (!dueDate) {
+    return { dueDate:'', status:'Not enough data', detail:'Add a last service date and frequency', rank:5, days:null, nextLabel }
+  }
+
+  const today = new Date(`${todayKey}T12:00:00Z`)
+  const due = new Date(`${dueDate}T12:00:00Z`)
+  const days = Math.round((due - today) / 86400000)
+
+  if (days < 0) return {dueDate,status:'Overdue',detail:`${Math.abs(days)} day${Math.abs(days)===1?'':'s'} overdue`,rank:0,days,nextLabel}
+  if (days === 0) return {dueDate,status:'Due today',detail:'Due today',rank:1,days,nextLabel}
+  if (days <= 7) return {dueDate,status:'Due this week',detail:`Due in ${days} day${days===1?'':'s'}`,rank:1,days,nextLabel}
+  if (days <= 14) return {dueDate,status:'Due soon',detail:`Due in ${days} days`,rank:2,days,nextLabel}
+  return {dueDate,status:'Upcoming',detail:`Due in ${days} days`,rank:3,days,nextLabel}
+}
+
+function clientDueInfo(rows) {
+  const infos = (rows || []).map(row => ({row, ...dogDueInfo(row)}))
+  const known = infos.filter(info => info.dueDate)
+  if (!known.length) return {status:'Not enough data',detail:'No due date yet',dueDate:'',rank:5,infos}
+  known.sort((a,b) => a.rank - b.rank || a.dueDate.localeCompare(b.dueDate))
+  const mostUrgent = known[0]
+  const overdueCount = known.filter(info => info.status === 'Overdue').length
+  const detail = overdueCount > 1 ? `${overdueCount} dogs overdue` : mostUrgent.detail
+  return {...mostUrgent,detail,infos}
+}
+
 function Clients({ dogs, loading, error, onOpen, revision }) {
   const [query, setQuery] = useState('')
   const [selectedClient, setSelectedClient] = useState(null)
@@ -666,10 +726,15 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
     }, {})
   ).sort((a, b) => a.owner.localeCompare(b.owner))
 
-  const filtered = grouped.filter(client => {
-    const haystack = `${client.owner} ${client.dogs.join(' ')} ${client.area} ${client.groomer}`.toLowerCase()
-    return haystack.includes(query.trim().toLowerCase())
-  })
+  const filtered = grouped
+    .map(client => ({...client, dueInfo:clientDueInfo(client.rows)}))
+    .filter(client => {
+      const haystack = `${client.owner} ${client.dogs.join(' ')} ${client.area} ${client.groomer}`.toLowerCase()
+      return haystack.includes(query.trim().toLowerCase())
+    })
+    .sort((a,b) => a.dueInfo.rank - b.dueInfo.rank ||
+      (a.dueInfo.dueDate || '9999-99-99').localeCompare(b.dueInfo.dueDate || '9999-99-99') ||
+      a.owner.localeCompare(b.owner))
 
   useEffect(() => {
     if (!selectedClient || !supabase) {
@@ -814,6 +879,10 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
         />
       </div>
 
+      <div className="prototype-note" style={{marginTop:10}}>
+        Clients are sorted by next service due date: overdue first, then due this week, due soon, and upcoming.
+      </div>
+
       {loading && <div className="prototype-note">Loading your clients…</div>}
       {error && <div className="login-message">{error}</div>}
       {!loading && !error && filtered.length === 0 && (
@@ -834,6 +903,12 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
                   {[client.area, client.groomer].filter(Boolean).join(' · ')}
                 </small>
               )}
+              <small style={{display:'block',fontWeight:700,marginTop:4,color:
+                client.dueInfo.status === 'Overdue' ? '#b63b36' :
+                ['Due today','Due this week'].includes(client.dueInfo.status) ? '#9a6b18' :
+                client.dueInfo.status === 'Due soon' ? '#53617a' : '#7b828e'}}>
+                {client.dueInfo.status}{client.dueInfo.dueDate ? ` · ${textDate(client.dueInfo.dueDate)}` : ''}
+              </small>
             </span>
             <ChevronRight size={17}/>
           </button>
@@ -906,6 +981,7 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
                   const frequency = valueOf(row, 'frequency_weeks', 'Frequency Weeks')
                   const lastGroom = valueOf(row, 'last_groom', 'Last Groom', 'last_groom_date', 'Last Groom Date')
                   const lastBath = valueOf(row, 'last_bath', 'Last Bath', 'last_bath_date', 'Last Bath Date')
+                  const due = dogDueInfo(row)
 
                   return (
                     <div
@@ -923,6 +999,13 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
                         <div><strong>Last groom:</strong> {lastGroom ? textDate(lastGroom) : '—'}</div>
                         <div><strong>Last bath:</strong> {lastBath ? textDate(lastBath) : '—'}</div>
                         <div><strong>Next service:</strong> {nextService ? textDate(nextService) : '—'}</div>
+                        <div><strong>Next due:</strong> {due.dueDate ? textDate(due.dueDate) : '—'}</div>
+                        <div style={{fontWeight:700,color:
+                          due.status === 'Overdue' ? '#b63b36' :
+                          ['Due today','Due this week'].includes(due.status) ? '#9a6b18' :
+                          due.status === 'Due soon' ? '#53617a' : '#7b828e'}}>
+                          {due.status}{due.detail && due.status !== due.detail ? ` · ${due.detail}` : ''}
+                        </div>
                       </div>
                       <div style={{fontSize:12,color:'#7b828e',marginTop:6,lineHeight:1.5}}>
                         {[servicePattern,
