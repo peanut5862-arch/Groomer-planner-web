@@ -99,7 +99,7 @@ function todayAppointments(rows, dateKey, groomer) {
       const priceText = String(row.Price ?? '').replace(/[$,]/g,'').trim()
       const price = priceText === '' ? NaN : Number(priceText)
       const rawStatus = String(row.Status || '').trim()
-      const scheduleStatus = completed ? 'Completed' : /overdue/i.test(rawStatus) ? 'Scheduled' : rawStatus
+      const scheduleStatus = completed ? 'Completed' : 'Scheduled'
       return {
         id:`${row['Household ID'] || row.Owner}-${index}`,
         sourceRow:row,
@@ -345,12 +345,10 @@ function Week({onAsk,onOpen,revision}) {
           : 'Moved to another week'
         statusClass = 'pending'
       } else {
-        if (/overdue/i.test(rawStatus)) {
-          note = 'Scheduled'
-          statusClass = 'confirmed'
-        }
+        note = 'Scheduled'
+        statusClass = 'confirmed'
         if (locked) {
-          note = note ? `${note} · Fixed time` : 'Scheduled · Fixed time'
+          note = 'Scheduled · Fixed time'
           statusClass = 'locked'
         }
       }
