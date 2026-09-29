@@ -71,41 +71,145 @@ function ApptCard({appt,onOpen}) {
   )
 }
 
-function Today({openEditor,onAsk}) {
-  const appointments = demoDays[1].appointments
-  const revenue = appointments.reduce((s,a)=>s+a.price,0)
+// Use the business date even when the phone is traveling in another time zone.
+function businessDateKey(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone:'America/Chicago', year:'numeric', month:'2-digit', day:'2-digit'
+  }).formatToParts(now)
+  const part = type => parts.find(value => value.type === type).value
+  return `${part('year')}-${part('month')}-${part('day')}`
+}
+
+function mondayForDate(dateKey) {
+  const date = new Date(`${dateKey}T12:00:00Z`)
+  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7))
+  return date.toISOString().slice(0,10)
+}
+
+function todayAppointments(rows, dateKey, groomer) {
+  return (Array.isArray(rows) ? rows : [])
+    .filter(row => row && String(row.Owner || '').trim()
+      && String(row.Date || '').slice(0,10) === dateKey
+      && !['cancelled','canceled','moved to another week'].includes(
+        String(row['Appointment Status'] || '').trim().toLowerCase())
+      && (groomer === 'All' || String(row.Groomer || '').trim() === groomer))
+    .map((row,index) => {
+      const completed = String(row['Completion Status'] || '').trim() === 'Completed'
+      const locked = String(row['Locked Time'] || '').trim()
+      const priceText = String(row.Price ?? '').replace(/[$,]/g,'').trim()
+      const price = priceText === '' ? NaN : Number(priceText)
+      return {
+        id:`${row['Household ID'] || row.Owner}-${index}`,
+        owner:String(row.Owner).trim(),
+        dogs:String(row.Dogs || '').trim(),
+        area:String(row['Area Cluster'] || row.Area || '').trim(),
+        time:String(row['Start Time'] || locked || '').trim(),
+        price,
+        completed,
+        statusClass:completed ? 'confirmed' : locked ? 'locked' : 'pending',
+        note:[String(row.Groomer || '').trim(),
+          completed ? 'Completed' : String(row.Status || '').trim(),
+          locked ? 'Fixed time' : ''].filter(Boolean).join(' · ')
+      }
+    })
+    .sort(compareAppointmentTimes)
+}
+
+function Today() {
+  const [groomer,setGroomer] = useState('All')
+  const [dateKey,setDateKey] = useState(() => businessDateKey())
+  const [result,setResult] = useState(null)
+  const [loading,setLoading] = useState(true)
+  const [error,setError] = useState('')
+  const [refresh,setRefresh] = useState(0)
+
+  useEffect(() => {
+    const updateDate = () => setDateKey(businessDateKey())
+    const timer = window.setInterval(updateDate,30000)
+    window.addEventListener('focus',updateDate)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus',updateDate)
+    }
+  },[])
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError('')
+    setResult(null)
+    const load = async () => {
+      try {
+        if (!supabase) throw new Error('Your schedule connection is not configured.')
+        const {data,error:loadError} = await supabase
+          .from('weekly_drafts')
+          .select('week_start,plan_json,status,confirmed_at')
+          .eq('week_start',mondayForDate(dateKey))
+          .limit(1)
+        if (loadError) throw loadError
+        if (!cancelled) setResult({dateKey,record:data?.[0] || null})
+      } catch (err) {
+        if (!cancelled) setError(err.message || 'Could not load today’s schedule. Please try again.')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  },[dateKey,refresh])
+
+  const current = result?.dateKey === dateKey
+  const ready = !loading && !error && current
+  const record = current ? result.record : null
+  const appointments = todayAppointments(record?.plan_json,dateKey,groomer)
+  const total = appointments.reduce((sum,appt) => sum + (Number.isFinite(appt.price) ? appt.price : 0),0)
+  const missingPrices = appointments.some(appt => !Number.isFinite(appt.price))
+  const completed = appointments.filter(appt => appt.completed).length
+  const dateLabel = new Date(`${dateKey}T12:00:00Z`).toLocaleDateString('en-US', {
+    timeZone:'America/Chicago',weekday:'long',month:'short',day:'numeric',year:'numeric'
+  })
+
   return (
     <section>
       <div className="page-head">
-        <div><div className="eyebrow">Tuesday · Sep 30</div><h1>Today</h1></div>
-        <button className="icon-btn"><Ellipsis size={20}/></button>
+        <div><div className="eyebrow">{dateLabel}</div><h1>Today</h1></div>
+        <button className="text-btn" disabled={loading} onClick={()=>setRefresh(value=>value+1)}>
+          {loading ? 'Loading…' : 'Refresh'}
+        </button>
       </div>
 
-      <div className="hero-card">
-        <div>
-          <span className="hero-label">Jen’s route</span>
-          <h2>The Woodlands → Conroe</h2>
-          <p>Leave home 7:58 AM · Back around 3:05 PM</p>
-        </div>
-        <button className="route-btn"><Route size={17}/>Open route</button>
+      <div className="segmented" aria-label="Filter by groomer">
+        {['All','Jen','Haley'].map(name=>(
+          <button key={name} className={groomer===name?'active':''}
+            aria-pressed={groomer===name} onClick={()=>setGroomer(name)}>{name}</button>
+        ))}
       </div>
 
-      <div className="stats-row">
-        <Stat label="Stops" value={appointments.length}/>
-        <Stat label="Revenue" value={`$${revenue}`}/>
-        <Stat label="Drive" value="52 min"/>
-      </div>
-
-      <div className="smart-callout">
-        <div className="smart-icon"><Sparkles size={18}/></div>
-        <div><strong>Had a cancellation?</strong><span>Ask Planner can find the best fill based on due date, area and drive time.</span></div>
-        <button onClick={()=>onAsk("Fill a canceled appointment today in The Woodlands")}>Find fill</button>
-      </div>
-
-      <div className="section-title"><h3>Appointments</h3><button className="text-btn"><Plus size={16}/>Add</button></div>
-      <div className="appt-list">
-        {appointments.map((a,i)=><ApptCard key={i} appt={a} onOpen={()=>openEditor(a)}/>)}
-      </div>
+      {(loading || (!current && !error)) && <div className="prototype-note" role="status">Loading today’s appointments…</div>}
+      {error && <div className="login-message" role="alert">{error}</div>}
+      {ready && !record && (
+        <div className="prototype-note">No saved schedule for this week yet. Today will appear here once the week is saved in your planner.</div>
+      )}
+      {ready && record && (
+        <>
+          <div className="eyebrow" style={{margin:'16px 0 12px'}}>
+            {record.status === 'confirmed' ? 'Confirmed week' : 'Draft week'} · {groomer === 'All' ? 'Both groomers' : groomer}
+          </div>
+          <div className="stats-row">
+            <Stat label="Stops" value={appointments.length}/>
+            <Stat label="Scheduled total" value={new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(total)}/>
+            <Stat label="Completed" value={`${completed}/${appointments.length}`}/>
+          </div>
+          {missingPrices && <div className="prototype-note">Some appointments have no price saved; the total includes known prices only.</div>}
+          <div className="section-title"><h3>Appointments</h3></div>
+          {appointments.length ? (
+            <div className="appt-list">{appointments.map(appt=><ApptCard key={appt.id} appt={appt}/>)}</div>
+          ) : (
+            <div className="prototype-note">No appointments scheduled today{groomer === 'All' ? '' : ` for ${groomer}`}.</div>
+          )}
+          <div className="prototype-note">Cancelled appointments and appointments moved to another week are excluded.</div>
+        </>
+      )}
     </section>
   )
 }
@@ -842,7 +946,7 @@ export default function App() {
 
   let body
   if (tab === 'Today') {
-    body = <Today openEditor={setEditing} onAsk={ask}/>
+    body = <Today/>
   } else if (tab === 'Week') {
     body = <Week onAsk={ask}/>
   } else if (tab === 'Month') {
