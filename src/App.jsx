@@ -609,6 +609,15 @@ function Month({onOpen,revision}) {
 }
 
 
+function canonicalServiceLabel(value) {
+  const key = String(value || '').trim().toLowerCase()
+  if (key === 'groom' || key === 'groom only') return 'Groom'
+  if (key === 'bath only') return 'Bath Only'
+  if (key === 'bath') return 'Bath'
+  if (key === 'partial groom') return 'Partial Groom'
+  return String(value || '').trim()
+}
+
 function dogDueInfo(row, todayKey = businessDateKey()) {
   const pick = (...keys) => {
     for (const key of keys) {
@@ -639,7 +648,7 @@ function dogDueInfo(row, todayKey = businessDateKey()) {
   const servicePattern = String(pick('service_pattern', 'Service Pattern') || '').trim().toLowerCase()
   let baseDate = ''
   if (servicePattern === 'bath only' || servicePattern === 'bath') baseDate = lastBath
-  else if (servicePattern === 'groom' || servicePattern === 'partial groom') baseDate = lastGroom
+  else if (servicePattern === 'groom' || servicePattern === 'groom only' || servicePattern === 'partial groom') baseDate = lastGroom
   else if (nextLabel.toLowerCase().includes('groom')) baseDate = lastGroom
   else if (nextLabel.toLowerCase().includes('bath')) baseDate = lastBath
   else baseDate = [lastGroom,lastBath].filter(Boolean).sort().at(-1) || ''
@@ -979,7 +988,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
     phone:selectedClient.phone || '', groomer:valueOf(row,'groomer','Groomer') || selectedClient.groomer || '',
     area:selectedClient.area || '', address:selectedClient.address || '', city:selectedClient.city || '',
     state:selectedClient.state || 'TX', zip:selectedClient.zip || '',
-    service:valueOf(row,'service_pattern','Service Pattern') || 'Groom',
+    service:canonicalServiceLabel(valueOf(row,'service_pattern','Service Pattern')) || 'Groom',
     price:valueOf(row,'price','Price'), minutes:valueOf(row,'minutes','Minutes'),
     frequency_weeks:valueOf(row,'frequency_weeks','Frequency Weeks'),
     last_groom:String(valueOf(row,'last_groom','Last Groom','last_groom_date','Last Groom Date') || '').slice(0,10),
@@ -1394,7 +1403,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
                 {selectedClient.rows.map((row, index) => {
                   const dog = valueOf(row, 'dog', 'Dog') || 'Unnamed dog'
                   const servicePattern = valueOf(row, 'service_pattern', 'Service Pattern')
-                  const nextService = servicePattern || valueOf(row, 'next_service', 'Next Service')
+                  const nextService = canonicalServiceLabel(servicePattern) || canonicalServiceLabel(valueOf(row, 'next_service', 'Next Service'))
                   const price = valueOf(row, 'price', 'Price')
                   const minutes = valueOf(row, 'minutes', 'Minutes')
                   const frequency = valueOf(row, 'frequency_weeks', 'Frequency Weeks')
