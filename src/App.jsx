@@ -842,7 +842,7 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
   )
 
   const areaOptions = [...new Set(
-    needsSchedulingClients
+    preparedClients
       .map(client => String(client.area || '').trim())
       .filter(Boolean)
   )].sort((a,b) => a.localeCompare(b))
@@ -1060,7 +1060,7 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
       {loading && <div className="prototype-note">Loading your clients…</div>}
       {error && <div className="login-message">{error}</div>}
       {!loading && !error && filtered.length === 0 && (
-        <div className="prototype-note">{clientFilter === 'needs' && areaFilter !== 'all' ? `No clients need scheduling in ${areaFilter}.` : 'No matching clients found.'}</div>
+        <div className="prototype-note">{clientFilter === 'needs' ? (areaFilter !== 'all' ? `No clients in ${areaFilter} currently need scheduling.` : 'No clients currently need scheduling.') : 'No matching clients found.'}</div>
       )}
 
       <div className="client-list">
