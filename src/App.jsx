@@ -1613,7 +1613,10 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
   const [targetDate,setTargetDate] = useState(originalDate<today?today:originalDate)
   const [targetTime,setTargetTime] = useState(()=>appointmentTimeInput(row['Start Time'] || row['Locked Time'] || row['Original Start Time']))
   const [targetGroomer,setTargetGroomer] = useState(String(row.Groomer || '').trim())
-  const [note,setNote] = useState('')
+  const [note,setNote] = useState(String(row['Status Note'] || ''))
+  const [editTime,setEditTime] = useState(()=>appointmentTimeInput(row['Start Time'] || row['Locked Time'] || row['Original Start Time']))
+  const [editGroomer,setEditGroomer] = useState(String(row.Groomer || '').trim())
+  const [editFixed,setEditFixed] = useState(Boolean(String(row['Locked Time'] || '').trim()))
   const [serviceRows,setServiceRows] = useState(()=>parseAppointmentDogServices(row.Dogs))
   const [saving,setSaving] = useState(false)
   const [error,setError] = useState('')
@@ -1669,6 +1672,10 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
     if (mode==='complete' && (!completedDate || completedDate>businessDateKey())) {
       setError('Choose a completion date that is today or earlier.');return
     }
+    if (mode==='edit') {
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(editTime)) { setError('Choose a valid arrival time.'); return }
+      if (!groomers.includes(editGroomer)) { setError('Choose the household’s assigned groomer.'); return }
+    }
     if (mode==='reschedule') {
       const message=rescheduleValidation(targetDate,targetTime,targetGroomer,businessDateKey())
       if(message){setError(message);return}
@@ -1689,6 +1696,8 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
           ? await supabase.rpc('mark_grooming_no_show',{...params,p_missed_date:originalDate})
           : mode==='services'
             ? await supabase.rpc('update_grooming_appointment_services',{...params,p_dogs:formatAppointmentDogServices(serviceRows),p_price:missingServicePrice?null:serviceTotal,p_minutes:missingServiceMinutes?null:serviceMinutesTotal})
+          : mode==='edit'
+            ? await supabase.rpc('update_grooming_appointment_details',{...params,p_time:editTime,p_groomer:editGroomer,p_fixed:editFixed,p_note:note.trim() || null})
             : await supabase.rpc('change_grooming_appointment',{...params,p_action:mode,
               p_target_date:mode==='reschedule'?targetDate:null,
               p_target_time:mode==='reschedule'?targetTime:null,
@@ -1697,9 +1706,10 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
         if (saveError.code==='PGRST202' || saveError.code==='42883') throw new Error('This action has not been enabled yet. Please finish its one-time setup first.')
         throw saveError
       }
-      if (!['completed','already_completed','cancelled','already_cancelled','rescheduled','missed','already_missed','services_updated'].includes(data?.status)) throw new Error('The save result could not be confirmed. Close and refresh before trying again.')
+      if (!['completed','already_completed','cancelled','already_cancelled','rescheduled','missed','already_missed','services_updated','appointment_updated'].includes(data?.status)) throw new Error('The save result could not be confirmed. Close and refresh before trying again.')
       if(data.status==='completed') onSaved(`${appt.owner} marked completed. Service history updated for ${data.dogs_updated} dog${data.dogs_updated===1?'':'s'}.`)
       else if(data.status==='services_updated') onSaved(`${appt.owner}'s services were updated for this appointment.`)
+      else if(data.status==='appointment_updated') onSaved(`${appt.owner}'s appointment details were updated.`)
       else if(data.status==='already_completed') onSaved(`${appt.owner} was already completed.`)
       else if(data.status==='rescheduled') onSaved(`${appt.owner} moved to ${targetDate} at ${targetTime} with ${targetGroomer}. Review the affected draft routes in your existing planner.`)
       else if(data.status==='missed') onSaved(`${appt.owner} marked as a no-show. The service history was not advanced.`)
@@ -1728,11 +1738,26 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
       </div>
       {completed || moved || missed ? <div className="prototype-note">{completed?'This appointment is already completed.':moved?'Open the appointment in its new week to change it.':'This appointment is already marked as a no-show.'}</div> : <>
         <div className="segmented" aria-label="Appointment action" style={{marginBottom:16}}>
-          {[['services','Services'],['complete','Complete'],['reschedule','Reschedule'],['cancel','Cancel'],['missed','No-show']].map(([value,label])=><button
+          {[['edit','Edit'],['services','Services'],['complete','Complete'],['reschedule','Reschedule'],['cancel','Cancel'],['missed','No-show']].map(([value,label])=><button
             type="button" key={value} disabled={saving || (cancelled && value==='cancel')} aria-pressed={mode===value}
             className={mode===value?'active':''} onClick={()=>{setMode(value);setError('')}}>{label}</button>)}
         </div>
         {mode==='complete' && blocked ? <div className="prototype-note">{blocked}{cancelled && ' Use Reschedule to book it again.'}</div> : <form onSubmit={submit}>
+          {mode==='edit' && <>
+            <div className="prototype-note" style={{textAlign:'left',marginBottom:12}}>Change this appointment only. Client and dog profile defaults stay the same.</div>
+            <div className="form-grid">
+              <label>Arrival time<input type="time" value={editTime} required disabled={saving} onChange={event=>setEditTime(event.target.value)}/></label>
+              <label>Groomer<select value={editGroomer} disabled={saving} onChange={event=>setEditGroomer(event.target.value)}>
+                <option value="">Choose groomer</option>{groomers.map(name=><option key={name}>{name}</option>)}
+              </select></label>
+              <label style={{gridColumn:'1 / -1',display:'flex',alignItems:'center',gap:10}}>
+                <input type="checkbox" checked={editFixed} disabled={saving} onChange={event=>setEditFixed(event.target.checked)} style={{width:20,height:20}}/> Fixed arrival time
+              </label>
+              <label style={{gridColumn:'1 / -1'}}>Appointment note
+                <input value={note} maxLength={1000} disabled={saving} onChange={event=>setNote(event.target.value)} placeholder="Client request, access note, timing note…"/>
+              </label>
+            </div>
+          </>}
           {mode==='services' && <>
             <div className="prototype-note" style={{textAlign:'left',marginBottom:12}}>Set what each dog is getting for this appointment only. This does not change the dog’s usual service on the client profile.</div>
             <div className="form-grid">
@@ -1762,14 +1787,14 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
           </>}
           {mode==='cancel' && <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>Cancel this appointment for {appt.owner}? It stays in Week history, and the affected route becomes a draft for review.</p>}
           {mode==='missed' && <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>Mark this past appointment as a no-show? It stays in history and does not advance the dog’s last-service date.</p>}
-          {!['complete','services'].includes(mode) && <div className="form-grid"><label style={{gridColumn:'1 / -1'}}>Note (optional)
+          {!['complete','services','edit'].includes(mode) && <div className="form-grid"><label style={{gridColumn:'1 / -1'}}>Note (optional)
             <input value={note} maxLength={1000} disabled={saving} onChange={event=>setNote(event.target.value)} placeholder="Reason or client request"/>
           </label></div>}
           {error && <div className="login-message" role="alert">{error}</div>}
           <div className="sheet-actions">
             <button type="button" className="ghost" disabled={saving} onClick={close}>Close</button>
             <button type="submit" className={mode==='cancel'?'danger':'save'} disabled={saving}>
-              {saving?'Saving…':mode==='services'?'Save services':mode==='complete'?'Mark completed':mode==='reschedule'?'Save reschedule':mode==='missed'?'Mark no-show':'Confirm cancellation'}
+              {saving?'Saving…':mode==='edit'?'Save changes':mode==='services'?'Save services':mode==='complete'?'Mark completed':mode==='reschedule'?'Save reschedule':mode==='missed'?'Mark no-show':'Confirm cancellation'}
             </button>
           </div>
         </form>}
