@@ -1394,7 +1394,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
                 {selectedClient.rows.map((row, index) => {
                   const dog = valueOf(row, 'dog', 'Dog') || 'Unnamed dog'
                   const servicePattern = valueOf(row, 'service_pattern', 'Service Pattern')
-                  const nextService = valueOf(row, 'next_service', 'Next Service', 'next_service_date', 'Next Service Date')
+                  const nextService = servicePattern || valueOf(row, 'next_service', 'Next Service')
                   const price = valueOf(row, 'price', 'Price')
                   const minutes = valueOf(row, 'minutes', 'Minutes')
                   const frequency = valueOf(row, 'frequency_weeks', 'Frequency Weeks')
@@ -1421,7 +1421,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
                       <div style={{fontSize:12,color:'#59616e',lineHeight:1.65}}>
                         <div><strong>Last groom:</strong> {lastGroom ? textDate(lastGroom) : '—'}</div>
                         <div><strong>Last bath:</strong> {lastBath ? textDate(lastBath) : '—'}</div>
-                        <div><strong>Next service:</strong> {nextService ? textDate(nextService) : '—'}</div>
+                        <div><strong>Next service:</strong> {nextService || '—'}</div>
                         <div><strong>Next due:</strong> {due.dueDate ? textDate(due.dueDate) : '—'}</div>
                         <div style={{fontWeight:700,color:
                           due.status === 'Overdue' ? '#b63b36' :
