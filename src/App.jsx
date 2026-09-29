@@ -98,6 +98,8 @@ function todayAppointments(rows, dateKey, groomer) {
       const locked = String(row['Locked Time'] || '').trim()
       const priceText = String(row.Price ?? '').replace(/[$,]/g,'').trim()
       const price = priceText === '' ? NaN : Number(priceText)
+      const rawStatus = String(row.Status || '').trim()
+      const scheduleStatus = completed ? 'Completed' : /overdue/i.test(rawStatus) ? 'Scheduled' : rawStatus
       return {
         id:`${row['Household ID'] || row.Owner}-${index}`,
         sourceRow:row,
@@ -108,9 +110,9 @@ function todayAppointments(rows, dateKey, groomer) {
         time:String(row['Start Time'] || locked || '').trim(),
         price,
         completed,
-        statusClass:completed ? 'confirmed' : locked ? 'locked' : 'pending',
+        statusClass:completed ? 'confirmed' : locked ? 'locked' : 'confirmed',
         note:[String(row.Groomer || '').trim(),
-          completed ? 'Completed' : String(row.Status || '').trim(),
+          scheduleStatus,
           locked ? 'Fixed time' : '',row['Route Review Needed'] ? 'Review route' : ''].filter(Boolean).join(' · ')
       }
     })
@@ -342,11 +344,15 @@ function Week({onAsk,onOpen,revision}) {
           ? `Moved to ${row['Rescheduled To']}`
           : 'Moved to another week'
         statusClass = 'pending'
-      } else if (locked) {
-        note = note ? `${note} · Fixed time` : 'Fixed time'
-        statusClass = 'locked'
-      } else if (/overdue/i.test(rawStatus)) {
-        statusClass = 'pending'
+      } else {
+        if (/overdue/i.test(rawStatus)) {
+          note = 'Scheduled'
+          statusClass = 'confirmed'
+        }
+        if (locked) {
+          note = note ? `${note} · Fixed time` : 'Scheduled · Fixed time'
+          statusClass = 'locked'
+        }
       }
 
       if (row['Route Review Needed']) note = [note,'Review route'].filter(Boolean).join(' · ')
@@ -617,6 +623,21 @@ function canonicalServiceLabel(value) {
   if (key === 'partial groom') return 'Partial Groom'
   if (key === 'service varies' || key === 'varies') return 'Service Varies'
   return String(value || '').trim()
+}
+
+const appointmentServiceOptions = ['Groom','Bath Only','Bath','Partial Groom']
+
+function parseAppointmentDogServices(value) {
+  return String(value || '').split(',').map(part=>part.trim()).filter(Boolean).map(part=>{
+    const match = part.match(/^(.*?)\s*\(([^()]*)\)\s*$/)
+    const name = (match?.[1] || part).trim()
+    const service = canonicalServiceLabel(match?.[2] || '')
+    return {name,service:appointmentServiceOptions.includes(service)?service:'Groom'}
+  })
+}
+
+function formatAppointmentDogServices(items) {
+  return items.map(item=>`${String(item.name || '').trim()} (${item.service})`).join(', ')
 }
 
 function dogDueInfo(row, todayKey = businessDateKey()) {
@@ -1583,6 +1604,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
   const [targetTime,setTargetTime] = useState(()=>appointmentTimeInput(row['Start Time'] || row['Locked Time'] || row['Original Start Time']))
   const [targetGroomer,setTargetGroomer] = useState(String(row.Groomer || '').trim())
   const [note,setNote] = useState('')
+  const [serviceRows,setServiceRows] = useState(()=>parseAppointmentDogServices(row.Dogs))
   const [saving,setSaving] = useState(false)
   const [error,setError] = useState('')
   const savingRef = React.useRef(false)
@@ -1626,6 +1648,9 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
       if(message){setError(message);return}
       if(!groomers.includes(targetGroomer)){setError('Choose the household’s assigned groomer.');return}
     }
+    if (mode==='services' && (!serviceRows.length || serviceRows.some(item=>!item.name || !appointmentServiceOptions.includes(item.service)))) {
+      setError('Choose a service for every dog in this appointment.');return
+    }
     savingRef.current=true;setSaving(true);setError('')
     try {
       if (!supabase) throw new Error('Your schedule connection is not configured.')
@@ -1634,16 +1659,19 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
         ? await supabase.rpc('complete_grooming_appointment',{...params,p_completed_date:completedDate})
         : mode==='missed'
           ? await supabase.rpc('mark_grooming_no_show',{...params,p_missed_date:originalDate})
-          : await supabase.rpc('change_grooming_appointment',{...params,p_action:mode,
-            p_target_date:mode==='reschedule'?targetDate:null,
-            p_target_time:mode==='reschedule'?targetTime:null,
-            p_target_groomer:mode==='reschedule'?targetGroomer:null,p_note:note.trim()})
+          : mode==='services'
+            ? await supabase.rpc('update_grooming_appointment_services',{...params,p_dogs:formatAppointmentDogServices(serviceRows)})
+            : await supabase.rpc('change_grooming_appointment',{...params,p_action:mode,
+              p_target_date:mode==='reschedule'?targetDate:null,
+              p_target_time:mode==='reschedule'?targetTime:null,
+              p_target_groomer:mode==='reschedule'?targetGroomer:null,p_note:note.trim()})
       if (saveError) {
         if (saveError.code==='PGRST202' || saveError.code==='42883') throw new Error('This action has not been enabled yet. Please finish its one-time setup first.')
         throw saveError
       }
-      if (!['completed','already_completed','cancelled','already_cancelled','rescheduled','missed','already_missed'].includes(data?.status)) throw new Error('The save result could not be confirmed. Close and refresh before trying again.')
+      if (!['completed','already_completed','cancelled','already_cancelled','rescheduled','missed','already_missed','services_updated'].includes(data?.status)) throw new Error('The save result could not be confirmed. Close and refresh before trying again.')
       if(data.status==='completed') onSaved(`${appt.owner} marked completed. Service history updated for ${data.dogs_updated} dog${data.dogs_updated===1?'':'s'}.`)
+      else if(data.status==='services_updated') onSaved(`${appt.owner}'s services were updated for this appointment.`)
       else if(data.status==='already_completed') onSaved(`${appt.owner} was already completed.`)
       else if(data.status==='rescheduled') onSaved(`${appt.owner} moved to ${targetDate} at ${targetTime} with ${targetGroomer}. Review the affected draft routes in your existing planner.`)
       else if(data.status==='missed') onSaved(`${appt.owner} marked as a no-show. The service history was not advanced.`)
@@ -1672,11 +1700,21 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
       </div>
       {completed || moved || missed ? <div className="prototype-note">{completed?'This appointment is already completed.':moved?'Open the appointment in its new week to change it.':'This appointment is already marked as a no-show.'}</div> : <>
         <div className="segmented" aria-label="Appointment action" style={{marginBottom:16}}>
-          {[['complete','Complete'],['reschedule','Reschedule'],['cancel','Cancel'],['missed','No-show']].map(([value,label])=><button
+          {[['services','Services'],['complete','Complete'],['reschedule','Reschedule'],['cancel','Cancel'],['missed','No-show']].map(([value,label])=><button
             type="button" key={value} disabled={saving || (cancelled && value==='cancel')} aria-pressed={mode===value}
             className={mode===value?'active':''} onClick={()=>{setMode(value);setError('')}}>{label}</button>)}
         </div>
         {mode==='complete' && blocked ? <div className="prototype-note">{blocked}{cancelled && ' Use Reschedule to book it again.'}</div> : <form onSubmit={submit}>
+          {mode==='services' && <>
+            <div className="prototype-note" style={{textAlign:'left',marginBottom:12}}>Set what each dog is getting for this appointment only. This does not change the dog’s usual service on the client profile.</div>
+            <div className="form-grid">
+              {serviceRows.map((item,index)=><label key={`${item.name}-${index}`} style={{gridColumn:'1 / -1'}}>{item.name}
+                <select value={item.service} disabled={saving} onChange={event=>setServiceRows(rows=>rows.map((row,i)=>i===index?{...row,service:event.target.value}:row))}>
+                  {appointmentServiceOptions.map(service=><option key={service}>{service}</option>)}
+                </select>
+              </label>)}
+            </div>
+          </>}
           {mode==='complete' && <>
             <div className="form-grid"><label style={{gridColumn:'1 / -1'}}>Date services were completed
               <input type="date" value={completedDate} max={today} required disabled={saving} onChange={event=>setCompletedDate(event.target.value)}/>
@@ -1695,14 +1733,14 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
           </>}
           {mode==='cancel' && <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>Cancel this appointment for {appt.owner}? It stays in Week history, and the affected route becomes a draft for review.</p>}
           {mode==='missed' && <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>Mark this past appointment as a no-show? It stays in history and does not advance the dog’s last-service date.</p>}
-          {mode!=='complete' && <div className="form-grid"><label style={{gridColumn:'1 / -1'}}>Note (optional)
+          {!['complete','services'].includes(mode) && <div className="form-grid"><label style={{gridColumn:'1 / -1'}}>Note (optional)
             <input value={note} maxLength={1000} disabled={saving} onChange={event=>setNote(event.target.value)} placeholder="Reason or client request"/>
           </label></div>}
           {error && <div className="login-message" role="alert">{error}</div>}
           <div className="sheet-actions">
             <button type="button" className="ghost" disabled={saving} onClick={close}>Close</button>
             <button type="submit" className={mode==='cancel'?'danger':'save'} disabled={saving}>
-              {saving?'Saving…':mode==='complete'?'Mark completed':mode==='reschedule'?'Save reschedule':mode==='missed'?'Mark no-show':'Confirm cancellation'}
+              {saving?'Saving…':mode==='services'?'Save services':mode==='complete'?'Mark completed':mode==='reschedule'?'Save reschedule':mode==='missed'?'Mark no-show':'Confirm cancellation'}
             </button>
           </div>
         </form>}
