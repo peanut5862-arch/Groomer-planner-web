@@ -41,22 +41,33 @@ function Stat({label,value,subtle}) {
 }
 
 function ApptCard({appt,onOpen}) {
+  const Wrapper = onOpen ? 'button' : 'div'
   return (
-    <button className="appt-card" onClick={onOpen}>
-      <div className="time-pill">{appt.time}</div>
+    <Wrapper className="appt-card" {...(onOpen ? {onClick:onOpen} : {})}>
+      <div className="time-pill">{appt.time || '—'}</div>
       <div className="appt-main">
         <div className="appt-topline">
-          <strong>{appt.owner}</strong><span className={`status-dot ${appt.status}`} />
+          <strong>{appt.owner}</strong>
+          <span className={`status-dot ${appt.statusClass || appt.status || 'confirmed'}`} />
         </div>
         <div className="dogs">{appt.dogs}</div>
         <div className="meta">
-          <span><MapPin size={14}/>{appt.area}</span>
-          <span><Route size={14}/>{appt.drive} min</span>
-          <span><WalletCards size={14}/>${appt.price}</span>
+          {appt.area && <span><MapPin size={14}/>{appt.area}</span>}
+          {Number.isFinite(appt.drive) && appt.drive > 0 && (
+            <span><Route size={14}/>{Math.round(appt.drive)} min</span>
+          )}
+          {Number.isFinite(appt.price) && (
+            <span><WalletCards size={14}/>${Math.round(appt.price)}</span>
+          )}
         </div>
+        {appt.note && (
+          <div style={{fontSize:11,color:'#7b828e',marginTop:5}}>
+            {appt.note}
+          </div>
+        )}
       </div>
-      <ChevronRight size={18} className="chev"/>
-    </button>
+      {onOpen && <ChevronRight size={18} className="chev"/>}
+    </Wrapper>
   )
 }
 
@@ -99,28 +110,230 @@ function Today({openEditor,onAsk}) {
   )
 }
 
-function Week({openEditor,onAsk}) {
+function Week({onAsk}) {
   const [groomer,setGroomer]=useState('All')
-  const visible=groomer==='All'?demoDays:demoDays.filter(d=>d.groomer===groomer)
+  const [weekStart,setWeekStart]=useState(() => {
+    const now = new Date()
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const weekday = d.getDay()
+    const delta = weekday === 0 ? -6 : 1 - weekday
+    d.setDate(d.getDate() + delta)
+    return d
+  })
+  const [weekRecord,setWeekRecord]=useState(null)
+  const [loading,setLoading]=useState(true)
+  const [error,setError]=useState('')
+
+  const ymd = (date) => {
+    const y = date.getFullYear()
+    const m = String(date.getMonth()+1).padStart(2,'0')
+    const d = String(date.getDate()).padStart(2,'0')
+    return `${y}-${m}-${d}`
+  }
+
+  const parseLocalDate = (value) => {
+    if (!value) return null
+    const match = String(value).slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (!match) return null
+    return new Date(Number(match[1]), Number(match[2])-1, Number(match[3]))
+  }
+
+  const addDays = (date, amount) => {
+    const next = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+    next.setDate(next.getDate()+amount)
+    return next
+  }
+
+  const displayDate = (date) =>
+    date.toLocaleDateString(undefined,{month:'short',day:'numeric'})
+
+  const displayDay = (date) =>
+    date.toLocaleDateString(undefined,{weekday:'short'})
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadWeek = async () => {
+      if (!supabase) return
+      setLoading(true)
+      setError('')
+
+      const {data,error} = await supabase
+        .from('weekly_drafts')
+        .select('week_start,plan_json,status,confirmed_at')
+        .eq('week_start', ymd(weekStart))
+        .limit(1)
+
+      if (cancelled) return
+
+      if (error) {
+        setError(error.message)
+        setWeekRecord(null)
+      } else {
+        setWeekRecord(data?.[0] || null)
+      }
+
+      setLoading(false)
+    }
+
+    loadWeek()
+    return () => { cancelled = true }
+  }, [weekStart])
+
+  const rawRows = Array.isArray(weekRecord?.plan_json) ? weekRecord.plan_json : []
+
+  const appointments = rawRows
+    .filter(row => String(row?.Owner || '').trim())
+    .map((row,index) => {
+      const completion = String(row['Completion Status'] || '').trim()
+      const apptStatus = String(row['Appointment Status'] || '').trim()
+      const locked = String(row['Locked Time'] || '').trim()
+      const rawStatus = String(row.Status || '').trim()
+
+      let note = rawStatus
+      let statusClass = 'confirmed'
+
+      if (completion === 'Completed') {
+        note = 'Completed'
+        statusClass = 'confirmed'
+      } else if (apptStatus === 'Cancelled') {
+        note = 'Cancelled'
+        statusClass = 'pending'
+      } else if (apptStatus === 'Moved to another week') {
+        note = row['Rescheduled To']
+          ? `Moved to ${row['Rescheduled To']}`
+          : 'Moved to another week'
+        statusClass = 'pending'
+      } else if (locked) {
+        note = note ? `${note} · Fixed time` : 'Fixed time'
+        statusClass = 'locked'
+      } else if (/overdue/i.test(rawStatus)) {
+        statusClass = 'pending'
+      }
+
+      const driveRaw =
+        row['Drive From Previous Min'] ??
+        row['Drive Minutes'] ??
+        row['Drive From Previous Minutes']
+
+      return {
+        id: `${row['Household ID'] || row.Owner}-${row.Date || index}-${index}`,
+        date: String(row.Date || '').slice(0,10),
+        day: row.Day || '',
+        groomer: String(row.Groomer || '').trim(),
+        time: String(row['Start Time'] || locked || '').trim(),
+        endTime: String(row['End Time'] || '').trim(),
+        owner: String(row.Owner || '').trim(),
+        dogs: String(row.Dogs || '').trim(),
+        area: String(row['Area Cluster'] || row.Area || '').trim(),
+        price: Number(row.Price || 0),
+        drive: Number(driveRaw),
+        note,
+        statusClass
+      }
+    })
+
+  const days = Array.from({length:5},(_,i)=>addDays(weekStart,i))
+  const visibleAppointments =
+    groomer === 'All'
+      ? appointments
+      : appointments.filter(a => a.groomer === groomer)
+
+  const statusLabel = weekRecord?.status === 'confirmed' ? 'Confirmed week' : 'Draft week'
+  const weekEnd = addDays(weekStart,4)
+
   return (
     <section>
       <div className="page-head">
-        <div><div className="eyebrow">Sep 29 – Oct 3</div><h1>Week</h1></div>
-        <button className="primary-mini"><Plus size={16}/>Add client</button>
-      </div>
-      <div className="segmented">{['All','Jen','Haley'].map(x=><button key={x} className={groomer===x?'active':''} onClick={()=>setGroomer(x)}>{x}</button>)}</div>
-      {visible.map(d=>(
-        <div className="day-block" key={`${d.day}-${d.date}`}>
-          <div className="day-head">
-            <div><strong>{d.day}</strong><span>{d.date}</span></div>
-            <div className="day-actions">
-              <button className="day-ai" onClick={()=>onAsk(`Fill an opening on ${d.day} for ${d.groomer}`)}><Sparkles size={14}/>Fill opening</button>
-              <button className="day-add"><Plus size={15}/>Add</button>
-            </div>
+        <div>
+          <div className="eyebrow">
+            {displayDate(weekStart)} – {displayDate(weekEnd)} · {weekRecord ? statusLabel : 'No saved week'}
           </div>
-          <div className="appt-list">{d.appointments.map((a,i)=><ApptCard key={i} appt={a} onOpen={()=>openEditor(a)}/>)}</div>
+          <h1>Week</h1>
         </div>
-      ))}
+
+        <div className="month-arrows">
+          <button className="icon-btn" onClick={()=>setWeekStart(addDays(weekStart,-7))}>
+            <ChevronLeft size={18}/>
+          </button>
+          <button className="icon-btn" onClick={()=>setWeekStart(addDays(weekStart,7))}>
+            <ChevronRight size={18}/>
+          </button>
+        </div>
+      </div>
+
+      <div className="segmented">
+        {['All','Jen','Haley'].map(x=>(
+          <button
+            key={x}
+            className={groomer===x?'active':''}
+            onClick={()=>setGroomer(x)}
+          >
+            {x}
+          </button>
+        ))}
+      </div>
+
+      {loading && <div className="prototype-note">Loading your saved week…</div>}
+      {error && <div className="login-message">{error}</div>}
+
+      {!loading && !error && !weekRecord && (
+        <div className="prototype-note">
+          No saved weekly draft exists for this week yet.
+        </div>
+      )}
+
+      {!loading && !error && weekRecord && days.map(dayDate => {
+        const dateKey = ymd(dayDate)
+        const dayAppointments = visibleAppointments.filter(a => a.date === dateKey)
+        const revenue = dayAppointments.reduce((sum,a)=>sum+(Number.isFinite(a.price)?a.price:0),0)
+
+        return (
+          <div className="day-block" key={dateKey}>
+            <div className="day-head">
+              <div>
+                <strong>{displayDay(dayDate)}</strong>
+                <span>{dayDate.getDate()}</span>
+              </div>
+
+              <div className="day-actions">
+                <button
+                  className="day-ai"
+                  onClick={()=>onAsk(`Fill an opening on ${displayDay(dayDate)} ${displayDate(dayDate)}`)}
+                >
+                  <Sparkles size={14}/>Fill opening
+                </button>
+              </div>
+            </div>
+
+            {dayAppointments.length > 0 ? (
+              <>
+                <div style={{fontSize:11,color:'#8a8f99',margin:'0 0 8px 2px'}}>
+                  {dayAppointments.length} stop{dayAppointments.length===1?'':'s'} · ${Math.round(revenue)}
+                </div>
+                <div className="appt-list">
+                  {dayAppointments
+                    .slice()
+                    .sort((a,b)=>String(a.time).localeCompare(String(b.time)))
+                    .map(appt=>(
+                      <ApptCard key={appt.id} appt={appt}/>
+                    ))}
+                </div>
+              </>
+            ) : (
+              <div className="prototype-note" style={{marginTop:8}}>
+                No appointments
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      {weekRecord && (
+        <div className="prototype-note">
+          This first live Week view is read-only so we can verify it matches your existing planner before allowing changes.
+        </div>
+      )}
     </section>
   )
 }
@@ -599,7 +812,7 @@ export default function App() {
   if (tab === 'Today') {
     body = <Today openEditor={setEditing} onAsk={ask}/>
   } else if (tab === 'Week') {
-    body = <Week openEditor={setEditing} onAsk={ask}/>
+    body = <Week onAsk={ask}/>
   } else if (tab === 'Month') {
     body = <Month/>
   } else if (tab === 'Clients') {
