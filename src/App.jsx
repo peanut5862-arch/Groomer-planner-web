@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
+import { supabase } from './supabase.js'
 import {
   CalendarDays, ChevronLeft, ChevronRight, Clock3, Dog, Ellipsis, Home,
   MapPin, Plus, Route, Search, Settings, Sparkles, Users, WalletCards, X,
@@ -244,11 +245,123 @@ function AssistantSheet({open,initial,onClose}) {
   )
 }
 
+
+function LoginScreen({ onSignedIn }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState('')
+
+  const signIn = async (event) => {
+    event.preventDefault()
+    setMessage('')
+
+    if (!supabase) {
+      setMessage('Supabase is not configured yet.')
+      return
+    }
+
+    setLoading(true)
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password
+    })
+    setLoading(false)
+
+    if (error) {
+      setMessage(error.message)
+      return
+    }
+
+    onSignedIn(data.session)
+  }
+
+  return (
+    <div className="login-shell">
+      <div className="login-card">
+        <div className="login-brand">GP</div>
+        <div className="eyebrow">Private business dashboard</div>
+        <h1>Grooming Planner</h1>
+        <p className="login-copy">
+          Sign in to access clients, routes, appointments and planning tools.
+        </p>
+
+        <form className="login-form" onSubmit={signIn}>
+          <label>
+            Email
+            <input
+              type="email"
+              value={email}
+              onChange={event => setEmail(event.target.value)}
+              autoComplete="email"
+              required
+            />
+          </label>
+
+          <label>
+            Password
+            <input
+              type="password"
+              value={password}
+              onChange={event => setPassword(event.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </label>
+
+          {message && <div className="login-message">{message}</div>}
+
+          <button className="login-button" type="submit" disabled={loading}>
+            {loading ? 'Signing in…' : 'Sign in'}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
+  const [session, setSession] = useState(null)
+  const [authReady, setAuthReady] = useState(false)
   const [tab,setTab]=useState('Today')
   const [editing,setEditing]=useState(null)
   const [assistant,setAssistant]=useState({open:false,initial:''})
   const ask=(initial='')=>setAssistant({open:true,initial})
+
+  useEffect(() => {
+    if (!supabase) {
+      setAuthReady(true)
+      return
+    }
+
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session ?? null)
+      setAuthReady(true)
+    })
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_event, nextSession) => {
+        setSession(nextSession)
+        setAuthReady(true)
+      }
+    )
+
+    return () => {
+      authListener.subscription.unsubscribe()
+    }
+  }, [])
+
+  if (!authReady) {
+    return (
+      <div className="login-shell">
+        <div className="login-card">Loading…</div>
+      </div>
+    )
+  }
+
+  if (!session) {
+    return <LoginScreen onSignedIn={setSession} />
+  }
 
   const body=useMemo(()=>{
     if(tab==='Today')return <Today openEditor={setEditing} onAsk={ask}/>
