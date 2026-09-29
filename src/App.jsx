@@ -1,4 +1,3 @@
-// pro deployment test
 import React, { useEffect, useState } from 'react'
 import { supabase } from './supabase.js'
 import {
@@ -171,7 +170,7 @@ function todayAppointments(rows, dateKey, groomer) {
     .sort(compareAppointmentTimes)
 }
 
-function Today({onOpen,onComplete,onUndo,completingId,revision}) {
+function Today({onOpen,onComplete,onUndo,onAddAppointment,completingId,revision}) {
   const [groomer,setGroomer] = useState('All')
   const [dateKey,setDateKey] = useState(() => businessDateKey())
   const [result,setResult] = useState(null)
@@ -229,9 +228,14 @@ function Today({onOpen,onComplete,onUndo,completingId,revision}) {
     <section>
       <div className="page-head">
         <div><div className="eyebrow">{dateLabel}</div><h1>Today</h1></div>
-        <button className="text-btn" disabled={loading} onClick={()=>setRefresh(value=>value+1)}>
-          {loading ? 'Loading…' : 'Refresh'}
-        </button>
+        <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          <button className="text-btn" type="button" onClick={()=>onAddAppointment?.(dateKey)}>
+            <Plus size={15}/> Add appointment
+          </button>
+          <button className="text-btn" disabled={loading} onClick={()=>setRefresh(value=>value+1)}>
+            {loading ? 'Loading…' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       <div className="segmented" aria-label="Filter by groomer">
@@ -302,7 +306,7 @@ function compareAppointmentTimes(a, b) {
   return first < second ? -1 : 1
 }
 
-function Week({onAsk,onOpen,onComplete,onUndo,completingId,revision}) {
+function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,completingId,revision}) {
   const [groomer,setGroomer]=useState('All')
   const [weekStart,setWeekStart]=useState(() => {
     const now = new Date()
@@ -497,7 +501,10 @@ function Week({onAsk,onOpen,onComplete,onUndo,completingId,revision}) {
                 <span>{dayDate.getDate()}</span>
               </div>
 
-              <div className="day-actions">
+              <div className="day-actions" style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
+                <button className="day-ai" type="button" onClick={()=>onAddAppointment?.(dateKey)}>
+                  <Plus size={14}/>Add appointment
+                </button>
                 <button
                   className="day-ai"
                   onClick={()=>onAsk(`Fill an opening on ${displayDay(dayDate)} ${displayDate(dayDate)}`)}
@@ -536,6 +543,217 @@ function Week({onAsk,onOpen,onComplete,onUndo,completingId,revision}) {
         </div>
       )}
     </section>
+  )
+}
+
+
+function serviceDefaultsForDog(row, service) {
+  const canonical = canonicalServiceLabel(service)
+  const numberValue = (...keys) => {
+    for (const key of keys) {
+      const raw = row?.[key]
+      if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+        const value = Number(String(raw).replace(/[$,]/g,''))
+        if (Number.isFinite(value)) return value
+      }
+    }
+    return 0
+  }
+  if (canonical === 'Bath' || canonical === 'Bath Only') {
+    return {
+      price:numberValue('bath_price','Bath Price','price','Price'),
+      minutes:numberValue('bath_minutes','Bath Minutes','minutes','Minutes')
+    }
+  }
+  if (canonical === 'Partial Groom') {
+    return {
+      price:numberValue('partial_groom_price','Partial Groom Price','price','Price'),
+      minutes:numberValue('partial_groom_minutes','Partial Groom Minutes','minutes','Minutes')
+    }
+  }
+  return {
+    price:numberValue('groom_price','Groom Price','price','Price'),
+    minutes:numberValue('groom_minutes','Groom Minutes','minutes','Minutes')
+  }
+}
+
+function AddAppointmentSheet({open,dateKey,dogs,onClose,onSaved}) {
+  const [date,setDate] = useState(dateKey || businessDateKey())
+  const [clientKey,setClientKey] = useState('')
+  const [selectedDogs,setSelectedDogs] = useState({})
+  const [groomer,setGroomer] = useState('Jen')
+  const [time,setTime] = useState('08:30')
+  const [fixed,setFixed] = useState(false)
+  const [note,setNote] = useState('')
+  const [saving,setSaving] = useState(false)
+  const [message,setMessage] = useState('')
+
+  const keyOf = row => String(row?.household_id || row?.['Household ID'] || '').trim()
+    ? `h:${String(row?.household_id || row?.['Household ID']).trim()}`
+    : `o:${String(row?.owner || row?.Owner || '').trim().toLowerCase()}`
+  const ownerOf = row => String(row?.owner || row?.Owner || '').trim()
+  const dogOf = row => String(row?.dog || row?.Dog || '').trim()
+  const areaOf = row => canonicalAreaLabel(row?.area || row?.Area || '')
+
+  const clients = Object.values((dogs || []).reduce((map,row) => {
+    const owner = ownerOf(row)
+    const dog = dogOf(row)
+    if (!owner || !dog) return map
+    const key = keyOf(row)
+    if (!map[key]) map[key] = {key,owner,household:String(row?.household_id || row?.['Household ID'] || '').trim(),rows:[]}
+    map[key].rows.push(row)
+    return map
+  },{})).sort((a,b)=>a.owner.localeCompare(b.owner))
+
+  const client = clients.find(item=>item.key===clientKey) || null
+
+  useEffect(()=>{
+    if (!open) return
+    setDate(dateKey || businessDateKey())
+    setClientKey('')
+    setSelectedDogs({})
+    setGroomer('Jen')
+    setTime('08:30')
+    setFixed(false)
+    setNote('')
+    setMessage('')
+  },[open,dateKey])
+
+  useEffect(()=>{
+    if (!client) { setSelectedDogs({}); return }
+    const initial = {}
+    for (const row of client.rows) {
+      const name = dogOf(row)
+      let service = canonicalServiceLabel(row?.service_pattern || row?.['Service Pattern'] || '')
+      if (service === 'Service Varies' || !appointmentServiceOptions.includes(service)) service = 'Groom'
+      initial[name] = {checked:true,service}
+    }
+    setSelectedDogs(initial)
+    const preferred = client.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).find(Boolean)
+    if (preferred === 'Jen' || preferred === 'Haley') setGroomer(preferred)
+  },[clientKey])
+
+  if (!open) return null
+
+  const chosen = client ? client.rows.filter(row=>selectedDogs[dogOf(row)]?.checked) : []
+  const totals = chosen.reduce((acc,row)=>{
+    const name = dogOf(row)
+    const service = selectedDogs[name]?.service || 'Groom'
+    const defaults = serviceDefaultsForDog(row,service)
+    acc.price += defaults.price
+    acc.minutes += defaults.minutes
+    return acc
+  },{price:0,minutes:0})
+
+  const save = async () => {
+    if (!supabase || saving) return
+    if (!client) { setMessage('Choose a client.'); return }
+    if (!chosen.length) { setMessage('Choose at least one dog.'); return }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { setMessage('Choose an appointment date.'); return }
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) { setMessage('Choose a valid appointment time.'); return }
+    setSaving(true)
+    setMessage('')
+    try {
+      const dogServices = chosen.map(row=>{
+        const name = dogOf(row)
+        return `${name} (${selectedDogs[name]?.service || 'Groom'})`
+      }).join(', ')
+      const area = areaOf(chosen[0]) || areaOf(client.rows[0])
+      const {data,error} = await supabase.rpc('add_grooming_appointment',{
+        p_date:date,
+        p_household_id:client.household || null,
+        p_owner:client.owner,
+        p_dogs:dogServices,
+        p_groomer:groomer,
+        p_start_time:time,
+        p_fixed:fixed,
+        p_price:totals.price,
+        p_minutes:Math.max(1,Math.round(totals.minutes || 1)),
+        p_area:area || null,
+        p_note:String(note || '').trim() || null
+      })
+      if (error) {
+        if (error.code === 'PGRST202' || error.code === '42883') throw new Error('Add Appointment needs its one-time Supabase setup first.')
+        throw error
+      }
+      if (data?.status !== 'added') throw new Error('The appointment could not be confirmed.')
+      onSaved?.(`${client.owner} added to ${date} at ${time}.`)
+    } catch(err) {
+      setMessage(err?.message || 'Could not add appointment.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet" onClick={event=>event.stopPropagation()}>
+        <div className="sheet-head">
+          <div><div className="eyebrow">New appointment</div><h2>Add appointment</h2></div>
+          <button className="icon-btn" type="button" onClick={onClose}><X size={18}/></button>
+        </div>
+
+        <div style={{display:'grid',gap:12}}>
+          <label className="field-label">Date
+            <input type="date" value={date} onChange={event=>setDate(event.target.value)}/>
+          </label>
+
+          <label className="field-label">Client
+            <select value={clientKey} onChange={event=>setClientKey(event.target.value)}>
+              <option value="">Choose client…</option>
+              {clients.map(item=><option key={item.key} value={item.key}>{item.owner}</option>)}
+            </select>
+          </label>
+
+          {client && <div className="prototype-note" style={{margin:0}}>
+            <strong>Dogs & services</strong>
+            <div style={{display:'grid',gap:10,marginTop:10}}>
+              {client.rows.map(row=>{
+                const name = dogOf(row)
+                const state = selectedDogs[name] || {checked:false,service:'Groom'}
+                return <div key={name} style={{display:'grid',gridTemplateColumns:'auto 1fr',gap:10,alignItems:'center'}}>
+                  <input type="checkbox" checked={Boolean(state.checked)} onChange={event=>setSelectedDogs(current=>({...current,[name]:{...state,checked:event.target.checked}}))}/>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr minmax(130px,1fr)',gap:8,alignItems:'center'}}>
+                    <strong>{name}</strong>
+                    <select value={state.service} onChange={event=>setSelectedDogs(current=>({...current,[name]:{...state,service:event.target.value}}))}>
+                      {appointmentServiceOptions.map(service=><option key={service} value={service}>{service}</option>)}
+                    </select>
+                  </div>
+                </div>
+              })}
+            </div>
+          </div>}
+
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            <label className="field-label">Groomer
+              <select value={groomer} onChange={event=>setGroomer(event.target.value)}>
+                <option>Jen</option><option>Haley</option>
+              </select>
+            </label>
+            <label className="field-label">Start time
+              <input type="time" value={time} onChange={event=>setTime(event.target.value)}/>
+            </label>
+          </div>
+
+          <label style={{display:'flex',gap:9,alignItems:'center',fontSize:13,fontWeight:700}}>
+            <input type="checkbox" checked={fixed} onChange={event=>setFixed(event.target.checked)}/>
+            Fixed appointment time
+          </label>
+
+          <label className="field-label">Appointment note
+            <textarea rows="3" value={note} onChange={event=>setNote(event.target.value)} placeholder="Optional note"/>
+          </label>
+
+          <div className="prototype-note" style={{margin:0}}>
+            <strong>Total:</strong> ${Math.round(totals.price)} · {Math.round(totals.minutes)} min
+            {client && <div style={{marginTop:4}}>Area: {areaOf(chosen[0]) || areaOf(client.rows[0]) || 'Not set'}</div>}
+          </div>
+
+          {message && <div className="login-message" role="alert">{message}</div>}
+          <button className="login-button" type="button" disabled={saving} onClick={save}>{saving?'Saving…':'Add appointment'}</button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -2001,6 +2219,7 @@ export default function App() {
   const [saveMessage,setSaveMessage]=useState('')
   const [completingId,setCompletingId]=useState('')
   const [assistant,setAssistant]=useState({open:false,initial:''})
+  const [addAppointment,setAddAppointment]=useState({open:false,date:businessDateKey()})
   const ask=(initial='')=>setAssistant({open:true,initial})
   const completeFromSchedule = async (appt) => {
     if (!appt || completingId) return
@@ -2132,9 +2351,9 @@ export default function App() {
 
   let body
   if (tab === 'Today') {
-    body = <Today onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} completingId={completingId} revision={scheduleRevision}/>
+    body = <Today onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onAddAppointment={date=>setAddAppointment({open:true,date})} completingId={completingId} revision={scheduleRevision}/>
   } else if (tab === 'Week') {
-    body = <Week onAsk={ask} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} completingId={completingId} revision={scheduleRevision}/>
+    body = <Week onAsk={ask} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onAddAppointment={date=>setAddAppointment({open:true,date})} completingId={completingId} revision={scheduleRevision}/>
   } else if (tab === 'Month') {
     body = <Month onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Clients') {
@@ -2176,6 +2395,11 @@ export default function App() {
         setSaveMessage(message)
         setScheduleRevision(value=>value+1)
       }}/>}
+      <AddAppointmentSheet open={addAppointment.open} dateKey={addAppointment.date} dogs={dogs} onClose={()=>setAddAppointment(current=>({...current,open:false}))} onSaved={message=>{
+        setAddAppointment(current=>({...current,open:false}))
+        setSaveMessage(message)
+        setScheduleRevision(value=>value+1)
+      }}/>
       <AssistantSheet open={assistant.open} initial={assistant.initial} onClose={()=>setAssistant({open:false,initial:''})}/>
     </div>
   )
