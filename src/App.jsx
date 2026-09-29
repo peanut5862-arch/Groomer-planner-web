@@ -40,13 +40,15 @@ function Stat({label,value,subtle}) {
   return <div className={`stat ${subtle?'subtle':''}`}><span>{label}</span><strong>{value}</strong></div>
 }
 
-function ApptCard({appt,onOpen,onComplete,completing}) {
+function ApptCard({appt,onOpen,onComplete,onUndo,completing}) {
   const row = appt?.sourceRow || {}
   const today = businessDateKey()
   const date = String(row.Date || appt?.date || '').slice(0,10)
   const completed = appt?.completed || String(row['Completion Status'] || '').trim().toLowerCase()==='completed'
   const inactive = appt?.inactive || ['cancelled','canceled','moved to another week'].includes(String(row['Appointment Status'] || '').trim().toLowerCase())
   const canComplete = Boolean(onComplete) && !completed && !inactive && /^\d{4}-\d{2}-\d{2}$/.test(date) && date<=today
+  const hasUndoSnapshot = Boolean(row['Completion Snapshot'] && typeof row['Completion Snapshot'] === 'object')
+  const canUndo = Boolean(onUndo) && completed && !inactive && hasUndoSnapshot
   return (
     <div className="appt-card" style={{cursor:onOpen?'pointer':'default'}} onClick={onOpen} role={onOpen?'button':undefined} tabIndex={onOpen?0:undefined}
       onKeyDown={onOpen ? event=>{ if(event.key==='Enter' || event.key===' '){event.preventDefault();onOpen()} } : undefined}>
@@ -76,6 +78,8 @@ function ApptCard({appt,onOpen,onComplete,completing}) {
       <div style={{display:'flex',alignItems:'center',gap:8,marginLeft:'auto'}}>
         {canComplete && <button type="button" className="save" disabled={completing} onClick={event=>{event.stopPropagation();onComplete(appt)}}
           style={{padding:'8px 11px',fontSize:12,whiteSpace:'nowrap'}}>{completing?'Saving...':'Complete'}</button>}
+        {canUndo && <button type="button" className="secondary" disabled={completing} onClick={event=>{event.stopPropagation();onUndo(appt)}}
+          style={{padding:'8px 11px',fontSize:12,whiteSpace:'nowrap'}}>{completing?'Saving...':'Undo Complete'}</button>}
         {onOpen && <ChevronRight size={18} className="chev"/>}
       </div>
     </div>
@@ -130,7 +134,7 @@ function todayAppointments(rows, dateKey, groomer) {
     .sort(compareAppointmentTimes)
 }
 
-function Today({onOpen,onComplete,completingId,revision}) {
+function Today({onOpen,onComplete,onUndo,completingId,revision}) {
   const [groomer,setGroomer] = useState('All')
   const [dateKey,setDateKey] = useState(() => businessDateKey())
   const [result,setResult] = useState(null)
@@ -218,7 +222,7 @@ function Today({onOpen,onComplete,completingId,revision}) {
           {missingPrices && <div className="prototype-note">Some appointments have no price saved; the total includes known prices only.</div>}
           <div className="section-title"><h3>Appointments</h3></div>
           {appointments.length ? (
-            <div className="appt-list">{appointments.map(appt=><ApptCard key={appt.id} appt={appt} onOpen={()=>onOpen(appt)} onComplete={onComplete} completing={completingId===appt.id}/>)}</div>
+            <div className="appt-list">{appointments.map(appt=><ApptCard key={appt.id} appt={appt} onOpen={()=>onOpen(appt)} onComplete={onComplete} onUndo={onUndo} completing={completingId===appt.id}/>)}</div>
           ) : (
             <div className="prototype-note">No appointments scheduled today{groomer === 'All' ? '' : ` for ${groomer}`}.</div>
           )}
@@ -261,7 +265,7 @@ function compareAppointmentTimes(a, b) {
   return first < second ? -1 : 1
 }
 
-function Week({onAsk,onOpen,onComplete,completingId,revision}) {
+function Week({onAsk,onOpen,onComplete,onUndo,completingId,revision}) {
   const [groomer,setGroomer]=useState('All')
   const [weekStart,setWeekStart]=useState(() => {
     const now = new Date()
@@ -476,7 +480,7 @@ function Week({onAsk,onOpen,onComplete,completingId,revision}) {
                     .slice()
                     .sort(compareAppointmentTimes)
                     .map(appt=>(
-                      <ApptCard key={appt.id} appt={appt} onOpen={()=>onOpen(appt)} onComplete={onComplete} completing={completingId===appt.id}/>
+                      <ApptCard key={appt.id} appt={appt} onOpen={()=>onOpen(appt)} onComplete={onComplete} onUndo={onUndo} completing={completingId===appt.id}/>
                     ))}
                 </div>
               </>
@@ -1667,13 +1671,13 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
     savingRef.current=true; setSaving(true); setError('')
     try {
       if (!supabase) throw new Error('Your schedule connection is not configured.')
-      const {data,error:saveError} = await supabase.rpc('complete_grooming_appointment',{
+      const {data,error:saveError} = await supabase.rpc('complete_grooming_appointment_safe',{
         p_week_start:appt.weekStart,
         p_expected_row:row,
         p_completed_date:originalDate
       })
       if (saveError) {
-        if (saveError.code==='PGRST202' || saveError.code==='42883') throw new Error('Complete has not been enabled yet. Please finish its one-time setup first.')
+        if (saveError.code==='PGRST202' || saveError.code==='42883') throw new Error('Complete/Undo has not been enabled yet. Run its one-time Supabase setup first.')
         throw saveError
       }
       if (!['completed','already_completed'].includes(data?.status)) throw new Error('The completion could not be confirmed. Close and refresh before trying again.')
@@ -1973,13 +1977,13 @@ export default function App() {
     try {
       if (!supabase) throw new Error('Your schedule connection is not configured.')
       const completedDate = String(row.Date || today).slice(0,10)
-      const {data,error} = await supabase.rpc('complete_grooming_appointment',{
+      const {data,error} = await supabase.rpc('complete_grooming_appointment_safe',{
         p_week_start:appt.weekStart,
         p_expected_row:row,
         p_completed_date:completedDate
       })
       if (error) {
-        if (error.code==='PGRST202' || error.code==='42883') throw new Error('Complete has not been enabled yet. Please finish its one-time setup first.')
+        if (error.code==='PGRST202' || error.code==='42883') throw new Error('Complete/Undo has not been enabled yet. Run its one-time Supabase setup first.')
         throw error
       }
       if (!['completed','already_completed'].includes(data?.status)) throw new Error('The completion could not be confirmed. Refresh before trying again.')
@@ -1989,6 +1993,32 @@ export default function App() {
       setScheduleRevision(value=>value+1)
     } catch (err) {
       setSaveMessage(err.message || 'Could not confirm completion. Refresh before trying again.')
+    } finally {
+      setCompletingId('')
+    }
+  }
+
+  const undoCompleteFromSchedule = async (appt) => {
+    if (!appt || completingId) return
+    if (!window.confirm(`Undo completion for ${appt.owner}? This will restore the appointment to Scheduled and recalculate the dogs’ last-service dates.`)) return
+    const row = appt.sourceRow || {}
+    setCompletingId(appt.id)
+    setSaveMessage('')
+    try {
+      if (!supabase) throw new Error('Your schedule connection is not configured.')
+      const {data,error} = await supabase.rpc('undo_grooming_appointment_completion',{
+        p_week_start:appt.weekStart,
+        p_expected_row:row
+      })
+      if (error) {
+        if (error.code==='PGRST202' || error.code==='42883') throw new Error('Undo Complete has not been enabled yet. Run its one-time Supabase setup first.')
+        throw error
+      }
+      if (!['undone','not_completed'].includes(data?.status)) throw new Error('The undo could not be confirmed. Refresh before trying again.')
+      setSaveMessage(data.status==='undone' ? `${appt.owner} completion was undone and service history was recalculated.` : `${appt.owner} was not marked completed.`)
+      setScheduleRevision(value=>value+1)
+    } catch (err) {
+      setSaveMessage(err.message || 'Could not undo completion. Refresh before trying again.')
     } finally {
       setCompletingId('')
     }
@@ -2066,9 +2096,9 @@ export default function App() {
 
   let body
   if (tab === 'Today') {
-    body = <Today onOpen={setEditing} onComplete={completeFromSchedule} completingId={completingId} revision={scheduleRevision}/>
+    body = <Today onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} completingId={completingId} revision={scheduleRevision}/>
   } else if (tab === 'Week') {
-    body = <Week onAsk={ask} onOpen={setEditing} onComplete={completeFromSchedule} completingId={completingId} revision={scheduleRevision}/>
+    body = <Week onAsk={ask} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} completingId={completingId} revision={scheduleRevision}/>
   } else if (tab === 'Month') {
     body = <Month onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Clients') {
