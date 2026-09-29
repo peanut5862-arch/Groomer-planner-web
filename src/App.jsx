@@ -670,6 +670,7 @@ function clientDueInfo(rows) {
 
 function Clients({ dogs, loading, error, onOpen, revision }) {
   const [query, setQuery] = useState('')
+  const [clientFilter, setClientFilter] = useState('all')
   const [selectedClient, setSelectedClient] = useState(null)
   const [history, setHistory] = useState([])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -837,7 +838,9 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
     })
     .filter(client => {
       const haystack = `${client.owner} ${client.dogs.join(' ')} ${client.area} ${client.groomer}`.toLowerCase()
-      return haystack.includes(query.trim().toLowerCase())
+      const matchesSearch = haystack.includes(query.trim().toLowerCase())
+      const needsScheduling = !client.dueInfo.scheduled && ['Overdue','Due today','Due this week','Due soon'].includes(client.dueInfo.status)
+      return matchesSearch && (clientFilter === 'all' || needsScheduling)
     })
     .sort((a,b) => a.dueInfo.rank - b.dueInfo.rank ||
       (a.dueInfo.dueDate || '9999-99-99').localeCompare(b.dueInfo.dueDate || '9999-99-99') ||
@@ -986,8 +989,29 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
         />
       </div>
 
+      <div style={{display:'flex',gap:8,marginTop:12,marginBottom:4}}>
+        <button
+          type="button"
+          className={clientFilter === 'all' ? 'primary-mini' : 'secondary-btn'}
+          onClick={() => setClientFilter('all')}
+          style={{flex:1,justifyContent:'center'}}
+        >
+          All Clients
+        </button>
+        <button
+          type="button"
+          className={clientFilter === 'needs' ? 'primary-mini' : 'secondary-btn'}
+          onClick={() => setClientFilter('needs')}
+          style={{flex:1,justifyContent:'center'}}
+        >
+          Needs Scheduling
+        </button>
+      </div>
+
       <div className="prototype-note" style={{marginTop:10}}>
-        Clients who still need attention are shown first. Already-booked clients show Scheduled instead of Overdue.
+        {clientFilter === 'needs'
+          ? 'Showing due or overdue clients who do not already have an active appointment booked.'
+          : 'Clients who still need attention are shown first. Already-booked clients show Scheduled instead of Overdue.'}
       </div>
 
       {loading && <div className="prototype-note">Loading your clients…</div>}
@@ -1111,7 +1135,6 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
                         <div><strong>Next service:</strong> {nextService ? textDate(nextService) : '—'}</div>
                         <div><strong>Next due:</strong> {due.dueDate ? textDate(due.dueDate) : '—'}</div>
                         {due.scheduled && (
-                          <div><strong>Scheduled:</strong> {textDate(due.scheduleDate)}{due.scheduleTime ? ` at ${due.scheduleTime}` : ''}</div>
                         )}
                         <div style={{fontWeight:700,color:
                           due.status === 'Overdue' ? '#b63b36' :
