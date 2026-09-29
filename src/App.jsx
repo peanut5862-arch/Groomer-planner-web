@@ -674,6 +674,7 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
   const [history, setHistory] = useState([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState('')
+  const [scheduledLookup, setScheduledLookup] = useState({})
 
   const valueOf = (row, ...keys) => {
     for (const key of keys) {
@@ -692,6 +693,108 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
     const date = new Date(`${key}T12:00:00Z`)
     return date.toLocaleDateString('en-US',{timeZone:'UTC',month:'short',day:'numeric',year:'numeric'})
   }
+
+  const normalizedKey = value => String(value || '').trim().toLowerCase()
+  const householdScheduleKey = value => value ? `h:${normalizedKey(value)}` : ''
+  const ownerScheduleKey = value => value ? `o:${normalizedKey(value)}` : ''
+
+  const scheduleForClient = client => {
+    const byHousehold = householdScheduleKey(client.household)
+    const byOwner = ownerScheduleKey(client.owner)
+    return (byHousehold && scheduledLookup[byHousehold]) || (byOwner && scheduledLookup[byOwner]) || null
+  }
+
+  const scheduledDueInfo = (baseDue, scheduleInfo) => {
+    if (!scheduleInfo?.date) return baseDue
+    const today = businessDateKey()
+    const thisWeek = mondayForDate(today)
+    const appointmentWeek = mondayForDate(scheduleInfo.date)
+    const status = scheduleInfo.date === today
+      ? 'Scheduled today'
+      : appointmentWeek === thisWeek
+        ? 'Scheduled this week'
+        : 'Scheduled'
+    return {
+      ...baseDue,
+      status,
+      detail: scheduleInfo.time ? `${textDate(scheduleInfo.date)} · ${scheduleInfo.time}` : textDate(scheduleInfo.date),
+      rank:4,
+      scheduled:true,
+      scheduleDate:scheduleInfo.date,
+      scheduleTime:scheduleInfo.time || '',
+      scheduleGroomer:scheduleInfo.groomer || ''
+    }
+  }
+
+  useEffect(() => {
+    if (!supabase) {
+      setScheduledLookup({})
+      return
+    }
+
+    let cancelled = false
+
+    const loadScheduledAppointments = async () => {
+      try {
+        const today = businessDateKey()
+        const startWeek = mondayForDate(today)
+        const endDate = new Date(`${today}T12:00:00Z`)
+        endDate.setUTCDate(endDate.getUTCDate() + 84)
+        const endWeek = mondayForDate(endDate.toISOString().slice(0,10))
+
+        const {data,error:scheduleError} = await supabase
+          .from('weekly_drafts')
+          .select('week_start,plan_json')
+          .gte('week_start',startWeek)
+          .lte('week_start',endWeek)
+          .order('week_start',{ascending:true})
+
+        if (scheduleError) throw scheduleError
+        if (cancelled) return
+
+        const lookup = {}
+        const remember = (key, info) => {
+          if (!key) return
+          const current = lookup[key]
+          if (!current || `${info.date} ${info.time || ''}` < `${current.date} ${current.time || ''}`) {
+            lookup[key] = info
+          }
+        }
+
+        for (const week of (data || [])) {
+          for (const row of (Array.isArray(week.plan_json) ? week.plan_json : [])) {
+            if (!row || !String(row.Owner || '').trim()) continue
+            const date = String(row.Date || '').slice(0,10)
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < today) continue
+
+            const appointmentStatus = String(row['Appointment Status'] || '').trim().toLowerCase()
+            const completionStatus = String(row['Completion Status'] || '').trim().toLowerCase()
+            if (['cancelled','canceled','moved to another week'].includes(appointmentStatus)) continue
+            if (completionStatus === 'completed') continue
+
+            const info = {
+              date,
+              time:String(row['Start Time'] || row['Locked Time'] || '').trim(),
+              groomer:String(row.Groomer || '').trim(),
+              dogs:String(row.Dogs || '').trim()
+            }
+            remember(householdScheduleKey(row['Household ID']), info)
+            remember(ownerScheduleKey(row.Owner), info)
+          }
+        }
+
+        setScheduledLookup(lookup)
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Could not load scheduled client status', err)
+          setScheduledLookup({})
+        }
+      }
+    }
+
+    loadScheduledAppointments()
+    return () => { cancelled = true }
+  }, [revision])
 
   const grouped = Object.values(
     (dogs || []).reduce((acc, row) => {
@@ -727,7 +830,11 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
   ).sort((a, b) => a.owner.localeCompare(b.owner))
 
   const filtered = grouped
-    .map(client => ({...client, dueInfo:clientDueInfo(client.rows)}))
+    .map(client => {
+      const baseDue = clientDueInfo(client.rows)
+      const scheduleInfo = scheduleForClient(client)
+      return {...client, scheduleInfo, dueInfo:scheduledDueInfo(baseDue,scheduleInfo)}
+    })
     .filter(client => {
       const haystack = `${client.owner} ${client.dogs.join(' ')} ${client.area} ${client.groomer}`.toLowerCase()
       return haystack.includes(query.trim().toLowerCase())
@@ -880,7 +987,7 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
       </div>
 
       <div className="prototype-note" style={{marginTop:10}}>
-        Clients are sorted by next service due date: overdue first, then due this week, due soon, and upcoming.
+        Clients who still need attention are shown first. Already-booked clients show Scheduled instead of Overdue.
       </div>
 
       {loading && <div className="prototype-note">Loading your clients…</div>}
@@ -907,7 +1014,9 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
                 client.dueInfo.status === 'Overdue' ? '#b63b36' :
                 ['Due today','Due this week'].includes(client.dueInfo.status) ? '#9a6b18' :
                 client.dueInfo.status === 'Due soon' ? '#53617a' : '#7b828e'}}>
-                {client.dueInfo.status}{client.dueInfo.dueDate ? ` · ${textDate(client.dueInfo.dueDate)}` : ''}
+                {client.dueInfo.status}{client.dueInfo.scheduled
+                  ? ` · ${textDate(client.dueInfo.scheduleDate)}`
+                  : client.dueInfo.dueDate ? ` · ${textDate(client.dueInfo.dueDate)}` : ''}
               </small>
             </span>
             <ChevronRight size={17}/>
@@ -981,7 +1090,8 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
                   const frequency = valueOf(row, 'frequency_weeks', 'Frequency Weeks')
                   const lastGroom = valueOf(row, 'last_groom', 'Last Groom', 'last_groom_date', 'Last Groom Date')
                   const lastBath = valueOf(row, 'last_bath', 'Last Bath', 'last_bath_date', 'Last Bath Date')
-                  const due = dogDueInfo(row)
+                  const baseDue = dogDueInfo(row)
+                  const due = scheduledDueInfo(baseDue,selectedClient.scheduleInfo)
 
                   return (
                     <div
@@ -1000,6 +1110,9 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
                         <div><strong>Last bath:</strong> {lastBath ? textDate(lastBath) : '—'}</div>
                         <div><strong>Next service:</strong> {nextService ? textDate(nextService) : '—'}</div>
                         <div><strong>Next due:</strong> {due.dueDate ? textDate(due.dueDate) : '—'}</div>
+                        {due.scheduled && (
+                          <div><strong>Scheduled:</strong> {textDate(due.scheduleDate)}{due.scheduleTime ? ` at ${due.scheduleTime}` : ''}</div>
+                        )}
                         <div style={{fontWeight:700,color:
                           due.status === 'Overdue' ? '#b63b36' :
                           ['Due today','Due this week'].includes(due.status) ? '#9a6b18' :
