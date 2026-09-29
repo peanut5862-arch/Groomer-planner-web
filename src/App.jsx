@@ -668,7 +668,45 @@ function clientDueInfo(rows) {
   return {...mostUrgent,detail,infos}
 }
 
-function Clients({ dogs, loading, error, onOpen, revision }) {
+function canonicalAreaLabel(value) {
+  const raw = String(value || '').trim().replace(/\s+/g,' ')
+  if (!raw) return ''
+
+  const key = raw
+    .toLowerCase()
+    .replace(/[’]/g, "'")
+    .replace(/\s+/g,' ')
+
+  const known = {
+    'april sound':'April Sound',
+    'april sounds':'April Sound',
+    'back woodlands':'Back Woodlands',
+    "back woodlands's":'Back Woodlands',
+    'middle woodlands':'Middle Woodlands',
+    'middle spring':'Middle Spring',
+    'old magnolia':'Old Magnolia',
+    'hmr':'HMR',
+    'hockley':'Hockley',
+    'conroe':'Conroe',
+    'montgomery':'Montgomery',
+    'spring':'Spring',
+    'willis':'Willis',
+    'woodforest':'Woodforest',
+    'the woodlands':'The Woodlands',
+    'tomball':'Tomball',
+    'cypress':'Cypress'
+  }
+
+  if (known[key]) return known[key]
+
+  return raw.split(' ').map(word => {
+    if (!word) return word
+    if (word.toUpperCase() === word && word.length <= 4) return word
+    return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+  }).join(' ')
+}
+
+function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
   const [query, setQuery] = useState('')
   const [clientFilter, setClientFilter] = useState('all')
   const [areaFilter, setAreaFilter] = useState('all')
@@ -677,6 +715,11 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState('')
   const [scheduledLookup, setScheduledLookup] = useState({})
+  const [areaEditValue, setAreaEditValue] = useState('')
+  const [addingArea, setAddingArea] = useState(false)
+  const [newArea, setNewArea] = useState('')
+  const [areaSaving, setAreaSaving] = useState(false)
+  const [areaMessage, setAreaMessage] = useState('')
 
   const valueOf = (row, ...keys) => {
     for (const key of keys) {
@@ -810,7 +853,7 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
           household,
           owner,
           dogs: [],
-          area: valueOf(row, 'area', 'Area'),
+          area: canonicalAreaLabel(valueOf(row, 'area', 'Area')),
           groomer: valueOf(row, 'groomer', 'Groomer'),
           phone: valueOf(row, 'phone', 'Phone'),
           address: valueOf(row, 'address', 'Address'),
@@ -843,7 +886,7 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
 
   const areaOptions = [...new Set(
     preparedClients
-      .map(client => String(client.area || '').trim())
+      .map(client => canonicalAreaLabel(client.area))
       .filter(Boolean)
   )].sort((a,b) => a.localeCompare(b))
 
@@ -858,6 +901,61 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
     .sort((a,b) => a.dueInfo.rank - b.dueInfo.rank ||
       (a.dueInfo.dueDate || '9999-99-99').localeCompare(b.dueInfo.dueDate || '9999-99-99') ||
       a.owner.localeCompare(b.owner))
+
+  useEffect(() => {
+    if (!selectedClient) {
+      setAreaEditValue('')
+      setAddingArea(false)
+      setNewArea('')
+      setAreaMessage('')
+      return
+    }
+    setAreaEditValue(canonicalAreaLabel(selectedClient.area))
+    setAddingArea(false)
+    setNewArea('')
+    setAreaMessage('')
+  }, [selectedClient?.household, selectedClient?.owner])
+
+  const saveClientArea = async rawArea => {
+    if (!selectedClient || !supabase || areaSaving) return
+    const area = canonicalAreaLabel(rawArea)
+    if (!area) {
+      setAreaMessage('Enter an area name first.')
+      return
+    }
+
+    setAreaSaving(true)
+    setAreaMessage('')
+    try {
+      const {data,error:saveError} = await supabase.rpc('update_client_area', {
+        p_household_id:String(selectedClient.household || '').trim() || null,
+        p_owner:String(selectedClient.owner || '').trim(),
+        p_area:area
+      })
+      if (saveError) {
+        if (saveError.code === 'PGRST202' || saveError.code === '42883') {
+          throw new Error('Area editing needs its one-time Supabase setup first.')
+        }
+        throw saveError
+      }
+      if (data?.status && data.status !== 'updated') throw new Error('The area change could not be confirmed.')
+
+      setSelectedClient(current => current ? {
+        ...current,
+        area,
+        rows:(current.rows || []).map(row => ({...row, area, Area:area}))
+      } : current)
+      setAreaEditValue(area)
+      setAddingArea(false)
+      setNewArea('')
+      setAreaMessage(`Area saved as ${area}.`)
+      onDataChanged?.(`Area updated to ${area}.`)
+    } catch (err) {
+      setAreaMessage(err?.message || 'Could not save the area.')
+    } finally {
+      setAreaSaving(false)
+    }
+  }
 
   useEffect(() => {
     if (!selectedClient || !supabase) {
@@ -1134,10 +1232,72 @@ function Clients({ dogs, loading, error, onOpen, revision }) {
                 />
               </label>
 
-              <label>
+              <label style={{gridColumn:'1 / -1'}}>
                 Area
-                <input readOnly value={selectedClient.area || '—'} />
+                <select
+                  value={addingArea ? '__new__' : areaEditValue}
+                  disabled={areaSaving}
+                  onChange={event => {
+                    const value = event.target.value
+                    setAreaMessage('')
+                    if (value === '__new__') {
+                      setAddingArea(true)
+                      setNewArea('')
+                    } else {
+                      setAddingArea(false)
+                      setAreaEditValue(value)
+                    }
+                  }}
+                  style={{width:'100%'}}
+                >
+                  {!areaEditValue && <option value="">Choose an area</option>}
+                  {areaEditValue && !areaOptions.includes(areaEditValue) && (
+                    <option value={areaEditValue}>{areaEditValue}</option>
+                  )}
+                  {areaOptions.map(area => <option key={area} value={area}>{area}</option>)}
+                  <option value="__new__">+ Add new area</option>
+                </select>
               </label>
+
+              {addingArea ? (
+                <div style={{gridColumn:'1 / -1',display:'grid',gridTemplateColumns:'1fr auto',gap:8,alignItems:'end'}}>
+                  <label>
+                    New area name
+                    <input
+                      value={newArea}
+                      disabled={areaSaving}
+                      placeholder="Example: Tomball"
+                      onChange={event => setNewArea(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="primary-mini"
+                    disabled={areaSaving || !newArea.trim()}
+                    onClick={() => saveClientArea(newArea)}
+                    style={{height:46,marginBottom:1}}
+                  >
+                    {areaSaving ? 'Saving…' : 'Add & save'}
+                  </button>
+                </div>
+              ) : (
+                <div style={{gridColumn:'1 / -1',display:'flex',justifyContent:'flex-end'}}>
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    disabled={areaSaving || !areaEditValue || canonicalAreaLabel(selectedClient.area) === canonicalAreaLabel(areaEditValue)}
+                    onClick={() => saveClientArea(areaEditValue)}
+                  >
+                    {areaSaving ? 'Saving…' : 'Save Area'}
+                  </button>
+                </div>
+              )}
+
+              {areaMessage && (
+                <div className="prototype-note" style={{gridColumn:'1 / -1',marginTop:-2}} role="status">
+                  {areaMessage}
+                </div>
+              )}
 
               <label>
                 Dogs
@@ -1662,7 +1822,7 @@ export default function App() {
   } else if (tab === 'Month') {
     body = <Month onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Clients') {
-    body = <Clients dogs={dogs} loading={dataLoading} error={dataError} onOpen={setEditing} revision={scheduleRevision}/>
+    body = <Clients dogs={dogs} loading={dataLoading} error={dataError} onOpen={setEditing} revision={scheduleRevision} onDataChanged={message=>{ setSaveMessage(message); setScheduleRevision(value=>value+1) }}/>
   } else {
     body = <More/>
   }
