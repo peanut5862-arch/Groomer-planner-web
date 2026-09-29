@@ -153,13 +153,79 @@ function Month() {
   )
 }
 
-function Clients() {
-  const clients=['Amber — Oakley + Indy','Nikki — Lulu','Leah — Beau','Misty — 3 dogs','Betty — Tux','Sheri Rose — Ruby','Susan Hensley — Peanut']
+function Clients({ dogs, loading, error }) {
+  const [query, setQuery] = useState('')
+
+  const grouped = Object.values(
+    (dogs || []).reduce((acc, row) => {
+      const owner = row.owner ?? row.Owner ?? 'Unknown owner'
+      const dog = row.dog ?? row.Dog ?? 'Unnamed dog'
+      const household = row.household_id ?? row['Household ID'] ?? owner
+      const key = String(household || owner)
+
+      if (!acc[key]) {
+        acc[key] = {
+          owner,
+          dogs: [],
+          area: row.area ?? row.Area ?? '',
+          groomer: row.groomer ?? row.Groomer ?? ''
+        }
+      }
+
+      if (dog && !acc[key].dogs.includes(dog)) {
+        acc[key].dogs.push(dog)
+      }
+
+      return acc
+    }, {})
+  ).sort((a, b) => a.owner.localeCompare(b.owner))
+
+  const filtered = grouped.filter(client => {
+    const haystack = `${client.owner} ${client.dogs.join(' ')} ${client.area} ${client.groomer}`.toLowerCase()
+    return haystack.includes(query.trim().toLowerCase())
+  })
+
   return (
     <section>
-      <div className="page-head"><div><div className="eyebrow">Directory</div><h1>Clients</h1></div><button className="primary-mini"><Plus size={16}/>New</button></div>
-      <div className="search"><Search size={17}/><input placeholder="Search owner or dog"/></div>
-      <div className="client-list">{clients.map((c,i)=><button key={i}><div className="avatar"><Dog size={18}/></div><span>{c}</span><ChevronRight size={17}/></button>)}</div>
+      <div className="page-head">
+        <div>
+          <div className="eyebrow">Live Supabase data</div>
+          <h1>Clients</h1>
+        </div>
+        <button className="primary-mini"><Plus size={16}/>New</button>
+      </div>
+
+      <div className="search">
+        <Search size={17}/>
+        <input
+          placeholder="Search owner or dog"
+          value={query}
+          onChange={event => setQuery(event.target.value)}
+        />
+      </div>
+
+      {loading && <div className="prototype-note">Loading your clients…</div>}
+      {error && <div className="login-message">{error}</div>}
+      {!loading && !error && filtered.length === 0 && (
+        <div className="prototype-note">No matching clients found.</div>
+      )}
+
+      <div className="client-list">
+        {filtered.map((client, index) => (
+          <button key={`${client.owner}-${index}`}>
+            <div className="avatar"><Dog size={18}/></div>
+            <span>
+              {client.owner} — {client.dogs.join(' + ')}
+              {(client.area || client.groomer) && (
+                <small style={{display:'block',fontWeight:500,color:'#7b828e',marginTop:2}}>
+                  {[client.area, client.groomer].filter(Boolean).join(' · ')}
+                </small>
+              )}
+            </span>
+            <ChevronRight size={17}/>
+          </button>
+        ))}
+      </div>
     </section>
   )
 }
@@ -323,6 +389,9 @@ function LoginScreen({ onSignedIn }) {
 export default function App() {
   const [session, setSession] = useState(null)
   const [authReady, setAuthReady] = useState(false)
+  const [dogs, setDogs] = useState([])
+  const [dataLoading, setDataLoading] = useState(false)
+  const [dataError, setDataError] = useState('')
   const [tab,setTab]=useState('Today')
   const [editing,setEditing]=useState(null)
   const [assistant,setAssistant]=useState({open:false,initial:''})
@@ -351,6 +420,41 @@ export default function App() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!session || !supabase) {
+      setDogs([])
+      return
+    }
+
+    let cancelled = false
+
+    const loadDogs = async () => {
+      setDataLoading(true)
+      setDataError('')
+
+      const { data, error } = await supabase
+        .from('dogs')
+        .select('*')
+
+      if (cancelled) return
+
+      if (error) {
+        setDataError(error.message)
+        setDogs([])
+      } else {
+        setDogs(data || [])
+      }
+
+      setDataLoading(false)
+    }
+
+    loadDogs()
+
+    return () => {
+      cancelled = true
+    }
+  }, [session])
+
   if (!authReady) {
     return (
       <div className="login-shell">
@@ -371,7 +475,7 @@ export default function App() {
   } else if (tab === 'Month') {
     body = <Month/>
   } else if (tab === 'Clients') {
-    body = <Clients/>
+    body = <Clients dogs={dogs} loading={dataLoading} error={dataError}/>
   } else {
     body = <More/>
   }
