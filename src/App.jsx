@@ -46,7 +46,7 @@ function ApptCard({appt,onOpen,onComplete,onUndo,completing}) {
   const date = String(row.Date || appt?.date || '').slice(0,10)
   const completed = appt?.completed || String(row['Completion Status'] || '').trim().toLowerCase()==='completed'
   const inactive = appt?.inactive || ['cancelled','canceled','moved to another week'].includes(String(row['Appointment Status'] || '').trim().toLowerCase())
-  const canComplete = Boolean(onComplete) && !completed && !inactive && /^\d{4}-\d{2}-\d{2}$/.test(date) && date<=today
+  const canComplete = Boolean(onComplete) && !completed && !inactive && /^\d{4}-\d{2}-\d{2}$/.test(date)
   const hasUndoSnapshot = Boolean(row['Completion Snapshot'] && typeof row['Completion Snapshot'] === 'object')
   const canUndo = Boolean(onUndo) && completed && !inactive && hasUndoSnapshot
   return (
@@ -1616,7 +1616,6 @@ function completionBlockReason(row,today) {
   if (['cancelled','canceled','moved to another week'].includes(String(row?.['Appointment Status'] || '').trim().toLowerCase())) return 'Cancelled or moved appointments cannot be completed.'
   const date = String(row?.Date || '').slice(0,10)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 'This appointment needs a valid scheduled date.'
-  if (date>today) return 'This appointment is in the future. Use Reschedule if the service happened early.'
   if (!String(row?.['Household ID'] || '').trim() || !String(row?.Dogs || '').trim()) return 'Household or service details are missing. Update this appointment in the existing planner first.'
   return ''
 }
@@ -1989,6 +1988,11 @@ export default function App() {
     const today = businessDateKey()
     const blocked = completionBlockReason(row,today)
     if (blocked) { setSaveMessage(blocked); return }
+    const scheduledDate = String(row.Date || '').slice(0,10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate) && scheduledDate > today) {
+      const label = textDate(scheduledDate)
+      if (!window.confirm(`This appointment is scheduled for ${label}. Mark it complete early?`)) return
+    }
     setCompletingId(appt.id)
     setSaveMessage('')
     try {
