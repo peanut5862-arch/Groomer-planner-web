@@ -35,3 +35,4 @@ Do **not** put the Supabase `service_role` key in this front end. A public web a
 
 ## Build
 `npm run build`
+Deployment trigger
