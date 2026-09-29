@@ -636,8 +636,11 @@ function dogDueInfo(row, todayKey = businessDateKey()) {
   const explicitDue = dateKey(pick('next_service_date', 'Next Service Date')) || dateKey(nextRaw)
   const nextLabel = explicitDue ? '' : String(nextRaw || '').trim()
 
+  const servicePattern = String(pick('service_pattern', 'Service Pattern') || '').trim().toLowerCase()
   let baseDate = ''
-  if (nextLabel.toLowerCase().includes('groom')) baseDate = lastGroom
+  if (servicePattern === 'bath only' || servicePattern === 'bath') baseDate = lastBath
+  else if (servicePattern === 'groom' || servicePattern === 'partial groom') baseDate = lastGroom
+  else if (nextLabel.toLowerCase().includes('groom')) baseDate = lastGroom
   else if (nextLabel.toLowerCase().includes('bath')) baseDate = lastBath
   else baseDate = [lastGroom,lastBath].filter(Boolean).sort().at(-1) || ''
 
@@ -720,6 +723,10 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
   const [newArea, setNewArea] = useState('')
   const [areaSaving, setAreaSaving] = useState(false)
   const [areaMessage, setAreaMessage] = useState('')
+  const [dogEditor, setDogEditor] = useState(null)
+  const [newClientOpen, setNewClientOpen] = useState(false)
+  const [dogSaving, setDogSaving] = useState(false)
+  const [dogMessage, setDogMessage] = useState('')
 
   const valueOf = (row, ...keys) => {
     for (const key of keys) {
@@ -957,6 +964,54 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
     }
   }
 
+  const blankDogForm = (client = null) => ({
+    household_id:client?.household || '', owner:client?.owner || '', original_dog:'', dog:'',
+    phone:client?.phone || '', groomer:client?.groomer || '', area:client?.area || '',
+    address:client?.address || '', city:client?.city || '', state:client?.state || 'TX', zip:client?.zip || '',
+    service:'Groom', price:'', minutes:'', frequency_weeks:'', last_groom:'', last_bath:''
+  })
+
+  const editDog = row => {
+    const client = selectedClient
+    setDogEditor({
+    household_id:selectedClient.household || '', owner:selectedClient.owner || '',
+    original_dog:valueOf(row,'dog','Dog') || '', dog:valueOf(row,'dog','Dog') || '',
+    phone:selectedClient.phone || '', groomer:valueOf(row,'groomer','Groomer') || selectedClient.groomer || '',
+    area:selectedClient.area || '', address:selectedClient.address || '', city:selectedClient.city || '',
+    state:selectedClient.state || 'TX', zip:selectedClient.zip || '',
+    service:valueOf(row,'service_pattern','Service Pattern') || 'Groom',
+    price:valueOf(row,'price','Price'), minutes:valueOf(row,'minutes','Minutes'),
+    frequency_weeks:valueOf(row,'frequency_weeks','Frequency Weeks'),
+    last_groom:String(valueOf(row,'last_groom','Last Groom','last_groom_date','Last Groom Date') || '').slice(0,10),
+    last_bath:String(valueOf(row,'last_bath','Last Bath','last_bath_date','Last Bath Date') || '').slice(0,10)
+    })
+    setSelectedClient(null)
+  }
+
+  const saveDogForm = async (form, closeNew=false) => {
+    if (!supabase || dogSaving) return
+    if (!String(form.owner||'').trim() || !String(form.dog||'').trim()) { setDogMessage('Owner and dog name are required.'); return }
+    setDogSaving(true); setDogMessage('')
+    try {
+      const num = v => String(v ?? '').trim()==='' ? null : Number(v)
+      const {data,error:saveError} = await supabase.rpc('save_grooming_dog', {
+        p_household_id:String(form.household_id||'').trim() || null,
+        p_owner:String(form.owner||'').trim(), p_original_dog:String(form.original_dog||'').trim() || null,
+        p_dog:String(form.dog||'').trim(), p_phone:String(form.phone||'').trim() || null,
+        p_groomer:String(form.groomer||'').trim() || null, p_area:canonicalAreaLabel(form.area) || null,
+        p_address:String(form.address||'').trim() || null, p_city:String(form.city||'').trim() || null,
+        p_state:String(form.state||'').trim() || null, p_zip:String(form.zip||'').trim() || null,
+        p_service:form.service || 'Groom', p_price:num(form.price), p_minutes:num(form.minutes),
+        p_frequency_weeks:num(form.frequency_weeks), p_last_groom:form.last_groom || null, p_last_bath:form.last_bath || null
+      })
+      if (saveError) throw saveError
+      setDogEditor(null); if (closeNew) setNewClientOpen(false)
+      onDataChanged?.(`${form.dog} saved.`)
+      if (selectedClient) setSelectedClient(null)
+    } catch(err) { setDogMessage(err?.message || 'Could not save dog.') }
+    finally { setDogSaving(false) }
+  }
+
   useEffect(() => {
     if (!selectedClient || !supabase) {
       setHistory([])
@@ -1088,7 +1143,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
           <div className="eyebrow">Live Supabase data</div>
           <h1>Clients</h1>
         </div>
-        <button className="primary-mini"><Plus size={16}/>New</button>
+        <button className="primary-mini" onClick={() => { setDogMessage(''); setNewClientOpen(true); setDogEditor(blankDogForm()) }}><Plus size={16}/>New</button>
       </div>
 
       <div className="search">
@@ -1188,6 +1243,34 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
           </button>
         ))}
       </div>
+
+      {dogEditor && (
+        <div className="sheet-backdrop" onMouseDown={() => { setDogEditor(null); if(newClientOpen) setNewClientOpen(false) }}>
+          <div className="sheet" onMouseDown={e=>e.stopPropagation()} style={{maxHeight:'90dvh',overflowY:'auto'}}>
+            <div className="sheet-handle" />
+            <div className="sheet-title"><div><span>{dogEditor.original_dog ? 'Edit dog' : newClientOpen ? 'New client' : 'Add dog'}</span><h2>{dogEditor.original_dog || dogEditor.dog || 'Dog details'}</h2></div><button className="icon-btn" onClick={()=>{setDogEditor(null);setNewClientOpen(false)}}><X size={18}/></button></div>
+            <div className="form-grid">
+              <label>Owner<input value={dogEditor.owner} onChange={e=>setDogEditor({...dogEditor,owner:e.target.value})}/></label>
+              <label>Dog name<input value={dogEditor.dog} onChange={e=>setDogEditor({...dogEditor,dog:e.target.value})}/></label>
+              <label>Phone<input value={dogEditor.phone} onChange={e=>setDogEditor({...dogEditor,phone:e.target.value})}/></label>
+              <label>Groomer<input value={dogEditor.groomer} onChange={e=>setDogEditor({...dogEditor,groomer:e.target.value})}/></label>
+              <label style={{gridColumn:'1 / -1'}}>Area<input value={dogEditor.area} placeholder="Example: Conroe" onChange={e=>setDogEditor({...dogEditor,area:e.target.value})}/></label>
+              <label style={{gridColumn:'1 / -1'}}>Address<input value={dogEditor.address} onChange={e=>setDogEditor({...dogEditor,address:e.target.value})}/></label>
+              <label>City<input value={dogEditor.city} onChange={e=>setDogEditor({...dogEditor,city:e.target.value})}/></label>
+              <label>ZIP<input value={dogEditor.zip} onChange={e=>setDogEditor({...dogEditor,zip:e.target.value})}/></label>
+              <label style={{gridColumn:'1 / -1'}}>Service<select value={dogEditor.service} onChange={e=>setDogEditor({...dogEditor,service:e.target.value})}><option>Groom</option><option>Bath Only</option><option>Bath</option><option>Partial Groom</option></select></label>
+              <label>Price<input type="number" inputMode="decimal" value={dogEditor.price} onChange={e=>setDogEditor({...dogEditor,price:e.target.value})}/></label>
+              <label>Minutes<input type="number" inputMode="numeric" value={dogEditor.minutes} onChange={e=>setDogEditor({...dogEditor,minutes:e.target.value})}/></label>
+              <label>Frequency (weeks)<input type="number" inputMode="numeric" value={dogEditor.frequency_weeks} onChange={e=>setDogEditor({...dogEditor,frequency_weeks:e.target.value})}/></label>
+              <label>Last groom<input type="date" value={dogEditor.last_groom} onChange={e=>setDogEditor({...dogEditor,last_groom:e.target.value})}/></label>
+              <label>Last bath<input type="date" value={dogEditor.last_bath} onChange={e=>setDogEditor({...dogEditor,last_bath:e.target.value})}/></label>
+            </div>
+            <div className="prototype-note" style={{marginTop:12}}>Service options: Groom, Bath Only, Bath, or Partial Groom. Last groom and last bath stay separate, so you only enter the date that actually happened.</div>
+            {dogMessage && <div className="login-message" style={{marginTop:10}}>{dogMessage}</div>}
+            <div className="sheet-actions"><button className="ghost" onClick={()=>{setDogEditor(null);setNewClientOpen(false)}}>Cancel</button><button className="save" disabled={dogSaving} onClick={()=>saveDogForm(dogEditor,newClientOpen)}>{dogSaving?'Saving…':'Save'}</button></div>
+          </div>
+        </div>
+      )}
 
       {selectedClient && (
         <div className="sheet-backdrop" onMouseDown={() => setSelectedClient(null)}>
@@ -1332,6 +1415,9 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
                       }}
                     >
                       <strong style={{display:'block',marginBottom:6}}>{dog}</strong>
+                      <div style={{display:'flex',gap:8,marginBottom:8}}>
+                        <button type="button" className="secondary-btn" onClick={() => { setDogMessage(''); editDog(row) }}>Edit Dog</button>
+                      </div>
                       <div style={{fontSize:12,color:'#59616e',lineHeight:1.65}}>
                         <div><strong>Last groom:</strong> {lastGroom ? textDate(lastGroom) : '—'}</div>
                         <div><strong>Last bath:</strong> {lastBath ? textDate(lastBath) : '—'}</div>
@@ -1355,6 +1441,10 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
                   )
                 })}
               </div>
+            </div>
+
+            <div style={{display:'flex',justifyContent:'flex-end',marginTop:10}}>
+              <button type="button" className="primary-mini" onClick={() => { const form=blankDogForm(selectedClient); setDogMessage(''); setDogEditor(form); setSelectedClient(null) }}><Plus size={15}/>Add Dog</button>
             </div>
 
             <div style={{marginTop:18}}>
