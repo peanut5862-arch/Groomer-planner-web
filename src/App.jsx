@@ -100,6 +100,8 @@ function todayAppointments(rows, dateKey, groomer) {
       const price = priceText === '' ? NaN : Number(priceText)
       return {
         id:`${row['Household ID'] || row.Owner}-${index}`,
+        sourceRow:row,
+        weekStart:mondayForDate(String(row.Date).slice(0,10)),
         owner:String(row.Owner).trim(),
         dogs:String(row.Dogs || '').trim(),
         area:String(row['Area Cluster'] || row.Area || '').trim(),
@@ -115,7 +117,7 @@ function todayAppointments(rows, dateKey, groomer) {
     .sort(compareAppointmentTimes)
 }
 
-function Today() {
+function Today({onOpen,revision}) {
   const [groomer,setGroomer] = useState('All')
   const [dateKey,setDateKey] = useState(() => businessDateKey())
   const [result,setResult] = useState(null)
@@ -156,7 +158,7 @@ function Today() {
     }
     load()
     return () => { cancelled = true }
-  },[dateKey,refresh])
+  },[dateKey,refresh,revision])
 
   const current = result?.dateKey === dateKey
   const ready = !loading && !error && current
@@ -203,7 +205,7 @@ function Today() {
           {missingPrices && <div className="prototype-note">Some appointments have no price saved; the total includes known prices only.</div>}
           <div className="section-title"><h3>Appointments</h3></div>
           {appointments.length ? (
-            <div className="appt-list">{appointments.map(appt=><ApptCard key={appt.id} appt={appt}/>)}</div>
+            <div className="appt-list">{appointments.map(appt=><ApptCard key={appt.id} appt={appt} onOpen={()=>onOpen(appt)}/>)}</div>
           ) : (
             <div className="prototype-note">No appointments scheduled today{groomer === 'All' ? '' : ` for ${groomer}`}.</div>
           )}
@@ -246,7 +248,7 @@ function compareAppointmentTimes(a, b) {
   return first < second ? -1 : 1
 }
 
-function Week({onAsk}) {
+function Week({onAsk,onOpen,revision}) {
   const [groomer,setGroomer]=useState('All')
   const [weekStart,setWeekStart]=useState(() => {
     const now = new Date()
@@ -314,7 +316,7 @@ function Week({onAsk}) {
 
     loadWeek()
     return () => { cancelled = true }
-  }, [weekStart])
+  }, [weekStart,revision])
 
   const rawRows = Array.isArray(weekRecord?.plan_json) ? weekRecord.plan_json : []
 
@@ -354,6 +356,8 @@ function Week({onAsk}) {
 
       return {
         id: `${row['Household ID'] || row.Owner}-${row.Date || index}-${index}`,
+        sourceRow:row,
+        weekStart:ymd(weekStart),
         date: String(row.Date || '').slice(0,10),
         day: row.Day || '',
         groomer: String(row.Groomer || '').trim(),
@@ -452,7 +456,7 @@ function Week({onAsk}) {
                     .slice()
                     .sort(compareAppointmentTimes)
                     .map(appt=>(
-                      <ApptCard key={appt.id} appt={appt}/>
+                      <ApptCard key={appt.id} appt={appt} onOpen={()=>onOpen(appt)}/>
                     ))}
                 </div>
               </>
@@ -467,7 +471,7 @@ function Week({onAsk}) {
 
       {weekRecord && (
         <div className="prototype-note">
-          This first live Week view is read-only so we can verify it matches your existing planner before allowing changes.
+          Tap an appointment to view its details or mark its services completed.
         </div>
       )}
     </section>
@@ -496,7 +500,7 @@ function moveMonth(monthKey,offset) {
   return day.toISOString().slice(0,7)
 }
 
-function Month() {
+function Month({onOpen,revision}) {
   const [month,setMonth] = useState(()=>businessDateKey().slice(0,7))
   const [groomer,setGroomer] = useState('All')
   const [selected,setSelected] = useState(()=>businessDateKey())
@@ -527,7 +531,7 @@ function Month() {
     }
     load()
     return ()=>{cancelled=true}
-  },[month,firstWeek,lastWeek,refresh])
+  },[month,firstWeek,lastWeek,refresh,revision])
 
   const ready = !loading && !error && result?.month === month
   const weeks = result?.month === month ? result.weeks : []
@@ -591,7 +595,7 @@ function Month() {
         </div>
         <div className="section-title"><h3>{new Date(`${selected}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric'})}</h3></div>
         {selectedWeek && <div className="eyebrow" style={{marginBottom:12}}>{selectedWeek.status==='confirmed'?'Confirmed week':'Draft week'}</div>}
-        <div className="appt-list">{selectedAppointments.map(appt=><ApptCard key={appt.id} appt={appt}/>)}</div>
+        <div className="appt-list">{selectedAppointments.map(appt=><ApptCard key={appt.id} appt={appt} onOpen={()=>onOpen(appt)}/>)}</div>
         {!selectedAppointments.length && <div className="prototype-note">{selectedWeek
           ? `No appointments scheduled${groomer==='All'?'':` for ${groomer}`} on this date.`
           : 'No saved schedule for this week yet.'}</div>}
@@ -818,26 +822,94 @@ function More() {
   )
 }
 
-function EditorSheet({appt,onClose}) {
-  if(!appt)return null
-  return (
-    <div className="sheet-backdrop" onMouseDown={onClose}>
-      <div className="sheet" onMouseDown={e=>e.stopPropagation()}>
-        <div className="sheet-handle"/>
-        <div className="sheet-title">
-          <div><span>Edit appointment</span><h2>{appt.owner}</h2><p>{appt.dogs}</p></div>
-          <button className="icon-btn" onClick={onClose}><X size={18}/></button>
-        </div>
-        <div className="form-grid">
-          <label>Arrival time<input type="time" defaultValue="08:30"/></label>
-          <label>Date<input type="date" defaultValue="2026-09-30"/></label>
-          <label>Groomer<select defaultValue="Jen"><option>Jen</option><option>Haley</option></select></label>
-          <label>Status<select defaultValue="Confirmed"><option>Confirmed</option><option>Awaiting reply</option><option>Cancelled</option></select></label>
-        </div>
-        <div className="sheet-actions"><button className="danger">Cancel appointment</button><button className="save">Save changes</button></div>
+function completionBlockReason(row,today) {
+  if (String(row?.['Completion Status'] || '').trim().toLowerCase()==='completed') return 'This appointment is already completed.'
+  if (['cancelled','canceled','moved to another week'].includes(String(row?.['Appointment Status'] || '').trim().toLowerCase())) return 'Cancelled or moved appointments cannot be completed.'
+  const date = String(row?.Date || '').slice(0,10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 'This appointment needs a valid scheduled date.'
+  if (date>today) return 'This appointment is in the future. Reschedule it in the existing planner if the service happened early.'
+  if (!String(row?.['Household ID'] || '').trim() || !String(row?.Dogs || '').trim()) return 'Household or service details are missing. Update this appointment in the existing planner first.'
+  return ''
+}
+
+function CompletionSheet({appt,onClose,onSaved}) {
+  const row = appt.sourceRow
+  const today = businessDateKey()
+  const [completedDate,setCompletedDate] = useState(()=>String(row.Date || today).slice(0,10))
+  const [saving,setSaving] = useState(false)
+  const [error,setError] = useState('')
+  const savingRef = React.useRef(false)
+  const closeRef = React.useRef(null)
+  const blocked = completionBlockReason(row,today)
+  const close = () => { if (!savingRef.current) onClose() }
+
+  useEffect(()=>{
+    const previous = document.activeElement
+    closeRef.current?.focus()
+    const escape = event => {if(event.key==='Escape' && !savingRef.current) onClose()}
+    document.addEventListener('keydown',escape)
+    return ()=>{document.removeEventListener('keydown',escape);previous?.focus?.()}
+  },[])
+
+  const complete = async event => {
+    event.preventDefault()
+    if (savingRef.current || blocked) return
+    if (!completedDate || completedDate>businessDateKey()) {
+      setError('Choose a completion date that is today or earlier.')
+      return
+    }
+    savingRef.current=true
+    setSaving(true)
+    setError('')
+    try {
+      if (!supabase) throw new Error('Your schedule connection is not configured.')
+      const {data,error:saveError} = await supabase.rpc('complete_grooming_appointment',{
+        p_week_start:appt.weekStart,
+        p_expected_row:row,
+        p_completed_date:completedDate
+      })
+      if (saveError) {
+        if (saveError.code==='PGRST202' || saveError.code==='42883') throw new Error('Appointment completion has not been enabled yet. Please finish the one-time setup first.')
+        throw saveError
+      }
+      if (!['completed','already_completed'].includes(data?.status)) throw new Error('The save result could not be confirmed. Close this appointment and refresh before trying again.')
+      onSaved(data.status==='already_completed' ? `${appt.owner} was already completed.` : `${appt.owner} marked completed. Service history updated for ${data.dogs_updated} dog${data.dogs_updated===1?'':'s'}.`)
+    } catch (err) {
+      setError(err.message || 'Could not confirm the save. Close and refresh before trying again.')
+    } finally {
+      savingRef.current=false
+      setSaving(false)
+    }
+  }
+
+  return <div className="sheet-backdrop" onMouseDown={close}>
+    <div className="sheet" role="dialog" aria-modal="true" aria-labelledby="completion-title"
+      onMouseDown={event=>event.stopPropagation()} style={{maxHeight:'85dvh',overflowY:'auto'}}>
+      <div className="sheet-handle"/>
+      <div className="sheet-title">
+        <div><span>Appointment details</span><h2 id="completion-title">{appt.owner}</h2><p>{appt.dogs}</p></div>
+        <button ref={closeRef} className="icon-btn" aria-label="Close appointment" disabled={saving} onClick={close}><X size={18}/></button>
       </div>
+      <div className="prototype-note" style={{textAlign:'left',marginBottom:16}}>
+        {String(row.Date || '').slice(0,10)} · {appt.time || 'Time not set'} · {row.Groomer || 'Groomer not set'}
+        {row['Completed Date'] && <div>Completed: {String(row['Completed Date']).slice(0,10)}</div>}
+      </div>
+      {blocked ? <div className="prototype-note">{blocked}</div> : <form onSubmit={complete}>
+        <div className="form-grid">
+          <label style={{gridColumn:'1 / -1'}}>Date services were completed
+            <input type="date" value={completedDate} max={today} required disabled={saving}
+              onChange={event=>setCompletedDate(event.target.value)}/>
+          </label>
+        </div>
+        <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>Marks every listed service completed. Baths update bath history; full grooms update both bath and groom history.</p>
+        {error && <div className="login-message" role="alert">{error}</div>}
+        <div className="sheet-actions">
+          <button type="button" className="ghost" disabled={saving} onClick={close}>Close</button>
+          <button type="submit" className="save" disabled={saving}>{saving?'Saving…':'Mark completed'}</button>
+        </div>
+      </form>}
     </div>
-  )
+  </div>
 }
 
 function AssistantSheet({open,initial,onClose}) {
@@ -969,6 +1041,8 @@ export default function App() {
   const [dataError, setDataError] = useState('')
   const [tab,setTab]=useState('Today')
   const [editing,setEditing]=useState(null)
+  const [scheduleRevision,setScheduleRevision]=useState(0)
+  const [saveMessage,setSaveMessage]=useState('')
   const [assistant,setAssistant]=useState({open:false,initial:''})
   const ask=(initial='')=>setAssistant({open:true,initial})
 
@@ -1028,7 +1102,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [session])
+  }, [session,scheduleRevision])
 
   if (!authReady) {
     return (
@@ -1044,11 +1118,11 @@ export default function App() {
 
   let body
   if (tab === 'Today') {
-    body = <Today/>
+    body = <Today onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Week') {
-    body = <Week onAsk={ask}/>
+    body = <Week onAsk={ask} onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Month') {
-    body = <Month/>
+    body = <Month onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Clients') {
     body = <Clients dogs={dogs} loading={dataLoading} error={dataError}/>
   } else {
@@ -1064,7 +1138,12 @@ export default function App() {
         <div><strong>Grooming Planner</strong><span>Mobile business dashboard</span></div>
         <button className="top-ai" onClick={()=>ask()}><Sparkles size={16}/>Ask Planner</button>
       </header>
-      <main>{body}</main>
+      <main>
+        {saveMessage && <div className="prototype-note" role="status" style={{marginBottom:16}}>
+          {saveMessage} <button className="text-btn" onClick={()=>setSaveMessage('')}>Dismiss</button>
+        </div>}
+        {body}
+      </main>
 
       <button className="floating-ai" onClick={()=>ask()}>
         <Sparkles size={18}/><span>Ask Planner</span>
@@ -1078,7 +1157,11 @@ export default function App() {
         ))}
       </nav>
 
-      <EditorSheet appt={editing} onClose={()=>setEditing(null)}/>
+      {editing && <CompletionSheet appt={editing} onClose={()=>setEditing(null)} onSaved={message=>{
+        setEditing(null)
+        setSaveMessage(message)
+        setScheduleRevision(value=>value+1)
+      }}/>}
       <AssistantSheet open={assistant.open} initial={assistant.initial} onClose={()=>setAssistant({open:false,initial:''})}/>
     </div>
   )
