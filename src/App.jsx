@@ -2297,7 +2297,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
               status = 'Rescheduled'
               statusClass = 'pending'
             } else if (date && date < today && explicitlyMissed) {
-              status = 'Missed'
+              status = 'No-show'
               statusClass = 'pending'
             } else if (date && date < today) {
               status = 'Needs review'
@@ -2430,31 +2430,44 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
       )}
 
       <div className="client-list">
-        {filtered.map((client, index) => (
-          <button
-            key={`${client.owner}-${index}`}
-            onClick={() => setSelectedClient(client)}
-          >
-            <div className="avatar"><Dog size={18}/></div>
-            <span>
-              {client.owner} — {client.dogs.join(' + ')}
-              {(client.area || client.groomer) && (
-                <small style={{display:'block',fontWeight:500,color:'#7b828e',marginTop:2}}>
-                  {[client.area, client.groomer].filter(Boolean).join(' · ')}
+        {filtered.map((client, index) => {
+          const status = client.dueInfo.status
+          const statusStyle = client.dueInfo.scheduled
+            ? {background:'#eef5fb',border:'#c9dced',color:'#31577a'}
+            : status === 'Overdue'
+              ? {background:'#fff0ef',border:'#e8b5b0',color:'#9b3832'}
+              : ['Due today','Due this week'].includes(status)
+                ? {background:'#fff7e8',border:'#ead39d',color:'#7a5719'}
+                : status === 'Due soon'
+                  ? {background:'#f3f1ed',border:'#ddd8cf',color:'#59616e'}
+                  : {background:'#f7f7f5',border:'#e5e2dc',color:'#737b89'}
+          return (
+            <button
+              key={`${client.owner}-${index}`}
+              onClick={() => setSelectedClient(client)}
+              style={{alignItems:'flex-start'}}
+            >
+              <div className="avatar"><Dog size={18}/></div>
+              <span style={{minWidth:0,flex:1,textAlign:'left'}}>
+                <strong style={{display:'block',fontSize:15,color:'#172038',lineHeight:1.25}}>{client.owner}</strong>
+                <small style={{display:'block',fontSize:12,fontWeight:650,color:'#59616e',marginTop:3,lineHeight:1.35}}>
+                  {client.dogs.join(' + ')}
                 </small>
-              )}
-              <small style={{display:'block',fontWeight:700,marginTop:4,color:
-                client.dueInfo.status === 'Overdue' ? '#b63b36' :
-                ['Due today','Due this week'].includes(client.dueInfo.status) ? '#9a6b18' :
-                client.dueInfo.status === 'Due soon' ? '#53617a' : '#7b828e'}}>
-                {client.dueInfo.status}{client.dueInfo.scheduled
-                  ? ` · ${textDate(client.dueInfo.scheduleDate)}`
-                  : client.dueInfo.dueDate ? ` · ${textDate(client.dueInfo.dueDate)}` : ''}
-              </small>
-            </span>
-            <ChevronRight size={17}/>
-          </button>
-        ))}
+                {(client.area || client.groomer) && (
+                  <small style={{display:'block',fontWeight:500,color:'#8a919d',marginTop:4}}>
+                    {[client.area, client.groomer].filter(Boolean).join(' · ')}
+                  </small>
+                )}
+                <small style={{display:'inline-flex',alignItems:'center',marginTop:7,padding:'4px 7px',borderRadius:999,border:`1px solid ${statusStyle.border}`,background:statusStyle.background,color:statusStyle.color,fontWeight:800,fontSize:10.5,lineHeight:1.2}}>
+                  {client.dueInfo.scheduled
+                    ? `${status} · ${textDate(client.dueInfo.scheduleDate)}${client.dueInfo.scheduleTime ? ` · ${displayClockTime(client.dueInfo.scheduleTime)}` : ''}`
+                    : `${status}${client.dueInfo.dueDate ? ` · ${textDate(client.dueInfo.dueDate)}` : ''}`}
+                </small>
+              </span>
+              <ChevronRight size={17} style={{marginTop:4}}/>
+            </button>
+          )
+        })}
       </div>
 
       {dogEditor && (
@@ -2615,6 +2628,36 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
               </button>
             </div>
 
+            <div style={{
+              margin:'2px 0 16px',
+              padding:'13px 14px',
+              borderRadius:15,
+              border:`1px solid ${selectedClient.scheduleInfo ? '#c9dced' : ['Overdue','Due today','Due this week','Due soon'].includes(selectedClient.dueInfo.status) ? '#ead39d' : '#e5e2dc'}`,
+              background:selectedClient.scheduleInfo ? '#eef5fb' : ['Overdue','Due today','Due this week','Due soon'].includes(selectedClient.dueInfo.status) ? '#fff7e8' : '#f8f7f4'
+            }}>
+              {selectedClient.scheduleInfo ? (
+                <>
+                  <div style={{fontSize:11,fontWeight:900,textTransform:'uppercase',letterSpacing:'.08em',color:'#647187'}}>Next appointment</div>
+                  <div style={{fontSize:15,fontWeight:900,color:'#172038',marginTop:4}}>
+                    {textDate(selectedClient.scheduleInfo.date)}{selectedClient.scheduleInfo.time ? ` · ${displayClockTime(selectedClient.scheduleInfo.time)}` : ''}
+                  </div>
+                  <div style={{fontSize:12,color:'#59616e',marginTop:3}}>
+                    {[selectedClient.scheduleInfo.groomer,selectedClient.scheduleInfo.dogs].filter(Boolean).join(' · ')}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{fontSize:11,fontWeight:900,textTransform:'uppercase',letterSpacing:'.08em',color:'#7a5719'}}>Rebook status</div>
+                  <div style={{fontSize:15,fontWeight:900,color:'#172038',marginTop:4}}>
+                    {['Overdue','Due today','Due this week','Due soon'].includes(selectedClient.dueInfo.status) ? 'Needs scheduling' : 'No appointment booked'}
+                  </div>
+                  <div style={{fontSize:12,color:'#59616e',marginTop:3}}>
+                    {selectedClient.dueInfo.status}{selectedClient.dueInfo.dueDate ? ` · next due ${textDate(selectedClient.dueInfo.dueDate)}` : ''}
+                  </div>
+                </>
+              )}
+            </div>
+
             <div className="form-grid">
               <label>
                 Phone
@@ -2715,7 +2758,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
             </div>
 
             <div style={{marginTop:18}}>
-              <div className="eyebrow" style={{marginBottom:8}}>Dogs & service history</div>
+              <div className="eyebrow" style={{marginBottom:8}}>Dogs & services</div>
               <div className="client-list">
                 {selectedClient.rows.map((row, index) => {
                   const dog = valueOf(row, 'dog', 'Dog') || 'Unnamed dog'
@@ -2740,28 +2783,46 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                         marginBottom:8
                       }}
                     >
-                      <strong style={{display:'block',marginBottom:6}}>{dog}</strong>
-                      <div style={{display:'flex',gap:8,marginBottom:8}}>
-                        <button type="button" className="secondary-btn" onClick={() => { setDogMessage(''); editDog(row) }}>Edit Dog</button>
+                      <div style={{display:'flex',justifyContent:'space-between',gap:10,alignItems:'flex-start'}}>
+                        <div style={{minWidth:0}}>
+                          <strong style={{display:'block',fontSize:15,color:'#172038'}}>{dog}</strong>
+                          <div style={{fontSize:11,color:'#7b828e',marginTop:3}}>
+                            {[nextService || servicePattern, frequency !== '' ? `Every ${frequency} wks` : ''].filter(Boolean).join(' · ') || 'Service details not set'}
+                          </div>
+                        </div>
+                        <button type="button" className="secondary-btn" onClick={() => { setDogMessage(''); editDog(row) }} style={{flex:'0 0 auto'}}>Edit</button>
                       </div>
-                      <div style={{fontSize:12,color:'#59616e',lineHeight:1.65}}>
-                        <div><strong>Last groom:</strong> {lastGroom ? textDate(lastGroom) : '—'}</div>
-                        <div><strong>Last bath:</strong> {lastBath ? textDate(lastBath) : '—'}</div>
-                        <div><strong>{nextService === 'Service Varies' ? 'Usual service:' : 'Next service:'}</strong> {nextService || '—'}</div>
-                        <div><strong>Next due:</strong> {due.dueDate ? textDate(due.dueDate) : '—'}</div>
-                        <div style={{fontWeight:700,color:
-                          due.status === 'Overdue' ? '#b63b36' :
-                          ['Due today','Due this week'].includes(due.status) ? '#9a6b18' :
-                          due.status === 'Due soon' ? '#53617a' : '#7b828e'}}>
-                          {due.status}{due.detail && due.status !== due.detail ? ` · ${due.detail}` : ''}
+
+                      {!lastGroom && !lastBath ? (
+                        <div style={{marginTop:10,padding:'9px 10px',borderRadius:11,background:selectedClient.scheduleInfo ? '#eef5fb' : '#f7f7f5',border:'1px solid #e3e2de',fontSize:11.5,color:'#59616e'}}>
+                          {selectedClient.scheduleInfo
+                            ? `No completed service yet · first visit ${textDate(selectedClient.scheduleInfo.date)}${selectedClient.scheduleInfo.time ? ` at ${displayClockTime(selectedClient.scheduleInfo.time)}` : ''}`
+                            : 'No completed service history yet.'}
+                        </div>
+                      ) : (
+                        <div style={{fontSize:11.5,color:'#59616e',lineHeight:1.55,marginTop:10}}>
+                          {lastGroom && <div><strong>Last groom:</strong> {textDate(lastGroom)}</div>}
+                          {lastBath && <div><strong>Last bath:</strong> {textDate(lastBath)}</div>}
+                        </div>
+                      )}
+
+                      <div style={{display:'flex',justifyContent:'space-between',gap:10,alignItems:'center',marginTop:10,paddingTop:9,borderTop:'1px solid #eeeae4'}}>
+                        <div>
+                          <div style={{fontSize:10.5,fontWeight:850,textTransform:'uppercase',letterSpacing:'.05em',color:'#8a919d'}}>Next due</div>
+                          <div style={{fontSize:12,fontWeight:800,color:'#172038',marginTop:2}}>{due.dueDate ? textDate(due.dueDate) : 'Not set'}</div>
+                        </div>
+                        <div style={{fontSize:10.5,fontWeight:850,padding:'4px 7px',borderRadius:999,background:
+                          due.scheduled ? '#eef5fb' : due.status === 'Overdue' ? '#fff0ef' : ['Due today','Due this week'].includes(due.status) ? '#fff7e8' : '#f4f3f0',
+                          color:due.scheduled ? '#31577a' : due.status === 'Overdue' ? '#9b3832' : ['Due today','Due this week'].includes(due.status) ? '#7a5719' : '#687080'}}>
+                          {due.status}
                         </div>
                       </div>
-                      <div style={{fontSize:12,color:'#7b828e',marginTop:6,lineHeight:1.5}}>
+
+                      <div style={{fontSize:11.5,color:'#7b828e',marginTop:9,lineHeight:1.5}}>
                         {[servicePattern,
                           price !== '' ? `$${price}` : '',
                           minutes !== '' ? `${minutes} min` : '',
-                          frequency !== '' ? `Every ${frequency} wks` : ''
-                        ].filter(Boolean).join(' · ') || 'Service details not set'}
+                        ].filter(Boolean).join(' · ') || 'Saved price/time not set'}
                       </div>
                     </div>
                   )
@@ -2778,7 +2839,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
               {historyLoading && <div className="prototype-note">Loading appointment history…</div>}
               {historyError && <div className="login-message">{historyError}</div>}
               {!historyLoading && !historyError && history.length === 0 && (
-                <div className="prototype-note">No completed, cancelled, rescheduled, or past appointments found yet.</div>
+                <div className="prototype-note">No completed, cancelled, rescheduled, no-show, or past appointments found yet.</div>
               )}
               {!historyLoading && !historyError && history.length > 0 && (
                 <div className="appt-list">
@@ -2797,7 +2858,11 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                         weekStart:item.weekStart,
                         sourceRow:item.sourceRow
                       }) : undefined}
-                      style={needsReview ? {width:'100%',textAlign:'left',cursor:'pointer',font:'inherit',color:'inherit'} : undefined}
+                      style={{
+                        ...(needsReview ? {width:'100%',textAlign:'left',cursor:'pointer',font:'inherit',color:'inherit'} : {}),
+                        background:item.status === 'Completed' ? '#edf7ef' : item.status === 'Cancelled' ? '#fff4f2' : item.status === 'Rescheduled' ? '#eef5fb' : item.status === 'No-show' ? '#fff7e8' : '#fff',
+                        borderColor:item.status === 'Completed' ? '#bfd9c5' : item.status === 'Cancelled' ? '#e9c2bd' : item.status === 'Rescheduled' ? '#c9dced' : item.status === 'No-show' ? '#ead39d' : '#e5e2dc'
+                      }}
                     >
                       <div className="time-pill">{item.date ? textDate(item.date).replace(/, \d{4}$/,'') : '—'}</div>
                       <div className="appt-main">
@@ -2819,6 +2884,9 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                         )}
                         {item.status === 'Rescheduled' && item.rescheduledTo && (
                           <div style={{fontSize:11,color:'#7b828e',marginTop:5}}>Moved to {textDate(item.rescheduledTo)}</div>
+                        )}
+                        {item.status === 'No-show' && item.date && (
+                          <div style={{fontSize:11,color:'#7b828e',marginTop:5}}>No-show on {textDate(item.date)}</div>
                         )}
                         {item.note && <div style={{fontSize:11,color:'#7b828e',marginTop:5}}>{item.note}</div>}
                         {needsReview && <div style={{fontSize:11,color:'#53617a',marginTop:6,fontWeight:700}}>Tap to review →</div>}
