@@ -1,1 +1,11 @@
-
+{
+  "id": "/",
+  "name": "Grooming Planner",
+  "short_name": "Grooming",
+  "description": "Private mobile dog-grooming schedule and route planner.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f4ef",
+  "theme_color": "#17223f"
+}
