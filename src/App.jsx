@@ -4610,14 +4610,34 @@ function OwnerPushNotifications({session}) {
       try{
         const registration = await navigator.serviceWorker.getRegistration('/push-sw.js') || await navigator.serviceWorker.getRegistration()
         const subscription = await registration?.pushManager?.getSubscription?.()
-        if(!cancelled) setState({loading:false,enabled:Boolean(subscription && Notification.permission==='granted'),message:''})
-      }catch{
-        if(!cancelled) setState({loading:false,enabled:false,message:''})
+        const browserEnabled = Boolean(subscription && Notification.permission==='granted')
+        if(!browserEnabled){
+          if(!cancelled) setState({loading:false,enabled:false,message:''})
+          return
+        }
+        if(!session?.access_token){
+          if(!cancelled) setState({loading:false,enabled:false,message:'Sign in again before enabling notifications.'})
+          return
+        }
+
+        // A browser can still hold a valid push subscription even if an earlier
+        // server save failed. Re-sync it on load so ON means the phone is actually
+        // registered in Supabase, not merely that iOS granted permission.
+        const response=await fetch('/api/push-subscribe',{
+          method:'POST',
+          headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`},
+          body:JSON.stringify({subscription:subscription.toJSON()})
+        })
+        const payload=await response.json().catch(()=>({}))
+        if(!response.ok) throw new Error(payload?.error || 'Could not sync this phone for notifications.')
+        if(!cancelled) setState({loading:false,enabled:true,message:'Finish notifications are enabled on this phone.'})
+      }catch(error){
+        if(!cancelled) setState({loading:false,enabled:false,message:error?.message || 'Could not sync this phone for notifications.'})
       }
     }
     check()
     return()=>{cancelled=true}
-  },[supported])
+  },[supported,session?.access_token])
 
   const enable=async()=>{
     if(state.loading || state.enabled) return
