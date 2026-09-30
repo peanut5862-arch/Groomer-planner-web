@@ -1484,7 +1484,7 @@ function dogDueInfo(row, todayKey = businessDateKey()) {
 
   const dueDate = explicitDue || (Number.isFinite(frequency) && frequency > 0 ? addWeeks(baseDate,frequency) : '')
   if (!dueDate) {
-    return { dueDate:'', status:'Not enough data', detail:'Add a last service date and frequency', rank:5, days:null, nextLabel }
+    return { dueDate:'', status:'Not enough data', detail:'No completed service history yet', rank:5, days:null, nextLabel }
   }
 
   const today = new Date(`${todayKey}T12:00:00Z`)
@@ -1599,11 +1599,14 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
     const today = businessDateKey()
     const thisWeek = mondayForDate(today)
     const appointmentWeek = mondayForDate(scheduleInfo.date)
-    const status = scheduleInfo.date === today
-      ? 'Scheduled today'
-      : appointmentWeek === thisWeek
-        ? 'Scheduled this week'
-        : 'Scheduled'
+    const firstVisit = !baseDue?.dueDate && baseDue?.status === 'Not enough data'
+    const status = firstVisit
+      ? (scheduleInfo.date === today ? 'First visit today' : 'First visit scheduled')
+      : scheduleInfo.date === today
+        ? 'Scheduled today'
+        : appointmentWeek === thisWeek
+          ? 'Scheduled this week'
+          : 'Scheduled'
     return {
       ...baseDue,
       status,
@@ -1807,7 +1810,8 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
     household_id:client?.household || '', owner:client?.owner || '', original_dog:'', dog:'',
     phone:client?.phone || '', groomer:client?.groomer || '', area:client?.area || '', area_mode:'existing', new_area:'',
     address:client?.address || '', city:client?.city || '', state:client?.state || 'TX', zip:client?.zip || '',
-    service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'', groom_minutes:'', bath_minutes:'', partial_groom_minutes:'', frequency_weeks:'', frequency_mode:'preset', last_groom:'', last_bath:''
+    service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'', groom_minutes:'', bath_minutes:'', partial_groom_minutes:'', frequency_weeks:'', frequency_mode:'preset', last_groom:'', last_bath:'',
+    prior_service:'no', first_appointment_booked:false, first_appointment_date:'', first_appointment_groomer:'Jen', first_appointment_time:'09:00', first_appointment_service:'Groom', first_appointment_fixed:false
   })
 
   const editDog = row => {
@@ -1828,7 +1832,9 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
     frequency_weeks:valueOf(row,'frequency_weeks','Frequency Weeks'),
     frequency_mode:commonFrequencyOptions.includes(String(valueOf(row,'frequency_weeks','Frequency Weeks') || '')) ? 'preset' : (valueOf(row,'frequency_weeks','Frequency Weeks') ? 'custom' : 'preset'),
     last_groom:String(valueOf(row,'last_groom','Last Groom','last_groom_date','Last Groom Date') || '').slice(0,10),
-    last_bath:String(valueOf(row,'last_bath','Last Bath','last_bath_date','Last Bath Date') || '').slice(0,10)
+    last_bath:String(valueOf(row,'last_bath','Last Bath','last_bath_date','Last Bath Date') || '').slice(0,10),
+    prior_service:(valueOf(row,'last_groom','Last Groom','last_groom_date','Last Groom Date') || valueOf(row,'last_bath','Last Bath','last_bath_date','Last Bath Date')) ? 'yes' : 'no',
+    first_appointment_booked:false, first_appointment_date:'', first_appointment_groomer:'Jen', first_appointment_time:'09:00', first_appointment_service:'Groom', first_appointment_fixed:false
     })
     setSelectedClient(null)
   }
@@ -1836,9 +1842,25 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
   const saveDogForm = async (form, closeNew=false) => {
     if (!supabase || dogSaving) return
     if (!String(form.owner||'').trim() || !String(form.dog||'').trim()) { setDogMessage('Owner and dog name are required.'); return }
+
+    const bookingFirstVisit = Boolean(closeNew && form.prior_service === 'no' && form.first_appointment_booked)
+    if (bookingFirstVisit) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(form.first_appointment_date || ''))) { setDogMessage('Choose the first appointment date.'); return }
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(form.first_appointment_time || ''))) { setDogMessage('Choose a valid first appointment time.'); return }
+      if (!['Jen','Haley'].includes(form.first_appointment_groomer)) { setDogMessage('Choose Jen or Haley for the first appointment.'); return }
+      if (!appointmentServiceOptions.includes(form.first_appointment_service)) { setDogMessage('Choose the first appointment service.'); return }
+      const weekday = new Date(`${form.first_appointment_date}T12:00:00Z`).getUTCDay()
+      if (![1,2,3,4,5].includes(weekday)) { setDogMessage('First appointments must be Monday through Friday.'); return }
+      if (form.first_appointment_groomer === 'Jen' && ![2,3,4].includes(weekday)) { setDogMessage('Jen works Tuesday through Thursday.'); return }
+      if (['Jen','Haley'].includes(form.groomer) && form.first_appointment_groomer !== form.groomer) { setDogMessage(`This dog is assigned to ${form.groomer}. Choose ${form.groomer} for the first appointment.`); return }
+    }
+
     setDogSaving(true); setDogMessage('')
+    let dogSaved = false
     try {
       const num = v => String(v ?? '').trim()==='' ? null : Number(v)
+      const cleanLastGroom = closeNew && form.prior_service === 'no' ? null : (form.last_groom || null)
+      const cleanLastBath = closeNew && form.prior_service === 'no' ? null : (form.last_bath || null)
       const {data,error:saveError} = await supabase.rpc('save_grooming_dog', {
         p_household_id:String(form.household_id||'').trim() || null,
         p_owner:String(form.owner||'').trim(), p_original_dog:String(form.original_dog||'').trim() || null,
@@ -1850,15 +1872,47 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
         p_groom_price:num(form.groom_price), p_bath_price:num(form.bath_price), p_partial_groom_price:num(form.partial_groom_price),
         p_groom_minutes:num(form.groom_minutes), p_bath_minutes:num(form.bath_minutes), p_partial_groom_minutes:num(form.partial_groom_minutes),
         p_minutes:num(form.groom_minutes || form.bath_minutes || form.partial_groom_minutes),
-        p_frequency_weeks:num(form.frequency_weeks), p_last_groom:form.last_groom || null, p_last_bath:form.last_bath || null
+        p_frequency_weeks:num(form.frequency_weeks), p_last_groom:cleanLastGroom, p_last_bath:cleanLastBath
       })
       if (saveError) throw saveError
+      dogSaved = true
+
+      if (bookingFirstVisit) {
+        const defaults = serviceDefaultsForDog(form,form.first_appointment_service)
+        const savedRow = Array.isArray(data) ? data[0] : data
+        const savedHousehold = String(savedRow?.household_id || savedRow?.householdId || form.household_id || '').trim() || null
+        const area = canonicalAreaLabel(form.area_mode==='new' ? form.new_area : form.area)
+        const {data:appointmentData,error:appointmentError} = await supabase.rpc('add_grooming_appointment',{
+          p_date:form.first_appointment_date,
+          p_household_id:savedHousehold,
+          p_owner:String(form.owner||'').trim(),
+          p_dogs:`${String(form.dog||'').trim()} (${form.first_appointment_service})`,
+          p_groomer:form.first_appointment_groomer,
+          p_start_time:form.first_appointment_time,
+          p_fixed:Boolean(form.first_appointment_fixed),
+          p_price:defaults.price,
+          p_minutes:Math.max(1,Math.round(defaults.minutes || 1)),
+          p_area:area || null,
+          p_note:'First visit'
+        })
+        if (appointmentError) {
+          if (appointmentError.code === 'PGRST202' || appointmentError.code === '42883') throw new Error('Client saved, but Add Appointment needs its one-time Supabase setup first.')
+          throw new Error(`Client saved, but the first appointment could not be added: ${appointmentError.message || 'Unknown error'}`)
+        }
+        if (appointmentData?.status !== 'added') throw new Error('Client saved, but the first appointment could not be confirmed.')
+      }
+
       setDogEditor(null); if (closeNew) setNewClientOpen(false)
-      onDataChanged?.(`${form.dog} saved.`)
+      onDataChanged?.(bookingFirstVisit
+        ? `${form.owner} saved · first visit ${textDate(form.first_appointment_date)} at ${displayClockTime(form.first_appointment_time)}.`
+        : `${form.dog} saved.`)
       if (selectedClient) setSelectedClient(null)
-    } catch(err) { setDogMessage(err?.message || 'Could not save dog.') }
+    } catch(err) {
+      setDogMessage(err?.message || (dogSaved ? 'Client saved, but the appointment could not be added.' : 'Could not save dog.'))
+    }
     finally { setDogSaving(false) }
   }
+
 
   useEffect(() => {
     if (!selectedClient || !supabase) {
@@ -2101,7 +2155,16 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
               <label>Owner<input value={dogEditor.owner} onChange={e=>setDogEditor({...dogEditor,owner:e.target.value})}/></label>
               <label>Dog name<input value={dogEditor.dog} onChange={e=>setDogEditor({...dogEditor,dog:e.target.value})}/></label>
               <label>Phone<input value={dogEditor.phone} onChange={e=>setDogEditor({...dogEditor,phone:e.target.value})}/></label>
-              <label>Groomer<select value={dogEditor.groomer} onChange={e=>setDogEditor({...dogEditor,groomer:e.target.value})}>
+              <label>Groomer<select value={dogEditor.groomer} onChange={e=>{
+                const next=e.target.value
+                const patch={...dogEditor,groomer:next}
+                if(newClientOpen && ['Jen','Haley'].includes(next)) {
+                  const previousDefault=defaultFirstStopTime(dogEditor.first_appointment_groomer)
+                  patch.first_appointment_groomer=next
+                  if(!dogEditor.first_appointment_time || dogEditor.first_appointment_time===previousDefault) patch.first_appointment_time=defaultFirstStopTime(next)
+                }
+                setDogEditor(patch)
+              }}>
                 <option value="">Choose groomer</option><option>Either</option><option>Jen</option><option>Haley</option>
               </select></label>
               <label style={{gridColumn:'1 / -1'}}>Area<select value={dogEditor.area_mode==='new'?'__new__':dogEditor.area} onChange={e=>{
@@ -2118,7 +2181,10 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
               <label style={{gridColumn:'1 / -1'}}>Address<input value={dogEditor.address} onChange={e=>setDogEditor({...dogEditor,address:e.target.value})}/></label>
               <label>City<input value={dogEditor.city} onChange={e=>setDogEditor({...dogEditor,city:e.target.value})}/></label>
               <label>ZIP<input value={dogEditor.zip} onChange={e=>setDogEditor({...dogEditor,zip:e.target.value})}/></label>
-              <label style={{gridColumn:'1 / -1'}}>Service<select value={dogEditor.service} onChange={e=>setDogEditor({...dogEditor,service:e.target.value})}><option>Groom</option><option>Bath Only</option><option>Bath</option><option>Partial Groom</option><option>Service Varies</option></select></label>
+              <label style={{gridColumn:'1 / -1'}}>Service<select value={dogEditor.service} onChange={e=>{
+                const next=e.target.value
+                setDogEditor({...dogEditor,service:next,first_appointment_service:appointmentServiceOptions.includes(next)?next:(dogEditor.first_appointment_service || 'Groom')})
+              }}><option>Groom</option><option>Bath Only</option><option>Bath</option><option>Partial Groom</option><option>Service Varies</option></select></label>
               <label>Groom price<input type="number" inputMode="decimal" value={dogEditor.groom_price} onChange={e=>setDogEditor({...dogEditor,groom_price:e.target.value})}/></label>
               <label>Bath price<input type="number" inputMode="decimal" value={dogEditor.bath_price} onChange={e=>setDogEditor({...dogEditor,bath_price:e.target.value})}/></label>
               <label>Partial Groom price<input type="number" inputMode="decimal" value={dogEditor.partial_groom_price} onChange={e=>setDogEditor({...dogEditor,partial_groom_price:e.target.value})}/></label>
@@ -2135,10 +2201,39 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
                 <option value="__custom__">Other</option>
               </select></label>
               {dogEditor.frequency_mode==='custom' && <label>Custom weeks<input type="number" min="1" inputMode="numeric" value={dogEditor.frequency_weeks} onChange={e=>setDogEditor({...dogEditor,frequency_weeks:e.target.value})}/></label>}
-              <label>Last groom<input type="date" value={dogEditor.last_groom} onChange={e=>setDogEditor({...dogEditor,last_groom:e.target.value})}/></label>
-              <label>Last bath<input type="date" value={dogEditor.last_bath} onChange={e=>setDogEditor({...dogEditor,last_bath:e.target.value})}/></label>
+              {newClientOpen && <label style={{gridColumn:'1 / -1'}}>Have we serviced this dog before?<select value={dogEditor.prior_service || 'no'} onChange={e=>setDogEditor({...dogEditor,prior_service:e.target.value,last_groom:e.target.value==='no'?'':dogEditor.last_groom,last_bath:e.target.value==='no'?'':dogEditor.last_bath})}>
+                <option value="no">No — this is their first visit with us</option>
+                <option value="yes">Yes — we have service history</option>
+              </select></label>}
+              {(!newClientOpen || dogEditor.prior_service==='yes') && <>
+                <label>Last groom<input type="date" value={dogEditor.last_groom} onChange={e=>setDogEditor({...dogEditor,last_groom:e.target.value})}/></label>
+                <label>Last bath<input type="date" value={dogEditor.last_bath} onChange={e=>setDogEditor({...dogEditor,last_bath:e.target.value})}/></label>
+              </>}
+              {newClientOpen && dogEditor.prior_service==='no' && <div className="prototype-note" style={{gridColumn:'1 / -1',margin:0}}>
+                Leave Last Groom / Last Bath blank. When you complete their first appointment, Grooming Planner will automatically save that service as their real history.
+              </div>}
+              {newClientOpen && dogEditor.prior_service==='no' && <div style={{gridColumn:'1 / -1',border:'1px solid #e7e4de',borderRadius:14,padding:12,display:'grid',gap:10}}>
+                <label style={{display:'flex',gap:9,alignItems:'center',fontSize:13,fontWeight:800}}>
+                  <input type="checkbox" checked={Boolean(dogEditor.first_appointment_booked)} onChange={e=>setDogEditor({...dogEditor,first_appointment_booked:e.target.checked})}/>
+                  First appointment is already booked
+                </label>
+                {dogEditor.first_appointment_booked && <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                  <label style={{gridColumn:'1 / -1'}}>First appointment date<input type="date" value={dogEditor.first_appointment_date || ''} onChange={e=>setDogEditor({...dogEditor,first_appointment_date:e.target.value})}/></label>
+                  <label>Groomer<select value={dogEditor.first_appointment_groomer || 'Jen'} onChange={e=>{
+                    const next=e.target.value
+                    const previousDefault=defaultFirstStopTime(dogEditor.first_appointment_groomer)
+                    setDogEditor({...dogEditor,first_appointment_groomer:next,first_appointment_time:(!dogEditor.first_appointment_time || dogEditor.first_appointment_time===previousDefault)?defaultFirstStopTime(next):dogEditor.first_appointment_time})
+                  }}><option>Jen</option><option>Haley</option></select></label>
+                  <label>Time<input type="time" value={dogEditor.first_appointment_time || defaultFirstStopTime(dogEditor.first_appointment_groomer)} onChange={e=>setDogEditor({...dogEditor,first_appointment_time:e.target.value})}/></label>
+                  <label style={{gridColumn:'1 / -1'}}>First service<select value={dogEditor.first_appointment_service || 'Groom'} onChange={e=>setDogEditor({...dogEditor,first_appointment_service:e.target.value})}>{appointmentServiceOptions.map(service=><option key={service}>{service}</option>)}</select></label>
+                  <label style={{gridColumn:'1 / -1',display:'flex',gap:9,alignItems:'center',fontSize:13,fontWeight:700}}>
+                    <input type="checkbox" checked={Boolean(dogEditor.first_appointment_fixed)} onChange={e=>setDogEditor({...dogEditor,first_appointment_fixed:e.target.checked})}/>
+                    Fixed time (otherwise the normal ±30 minute arrival window applies)
+                  </label>
+                </div>}
+              </div>}
             </div>
-            <div className="prototype-note" style={{marginTop:12}}>Usual service: Groom, Bath Only, Bath, Partial Groom, or Service Varies. Each service can have its own price and time. Bath Only uses the Bath price and Bath time. Choose Service Varies when the dog comes on a regular schedule but the owner decides that week's service later. Last groom and last bath stay separate.</div>
+            <div className="prototype-note" style={{marginTop:12}}>Usual service: Groom, Bath Only, Bath, Partial Groom, or Service Varies. Each service can have its own price and time. For a brand-new client, do not use their upcoming appointment as Last Groom or Last Bath — schedule the first visit separately above.</div>
             {dogMessage && <div className="login-message" style={{marginTop:10}}>{dogMessage}</div>}
             <div className="sheet-actions"><button className="ghost" onClick={()=>{setDogEditor(null);setNewClientOpen(false)}}>Cancel</button><button className="save" disabled={dogSaving} onClick={()=>saveDogForm(dogEditor,newClientOpen)}>{dogSaving?'Saving…':'Save'}</button></div>
           </div>
