@@ -170,7 +170,7 @@ function todayAppointments(rows, dateKey, groomer) {
     .sort(compareAppointmentTimes)
 }
 
-function Today({onOpen,onComplete,onUndo,onAddAppointment,completingId,revision}) {
+function Today({onOpen,onComplete,onUndo,onAddAppointment,completingId,revision,dogs}) {
   const [groomer,setGroomer] = useState('All')
   const [dateKey,setDateKey] = useState(() => businessDateKey())
   const [result,setResult] = useState(null)
@@ -261,6 +261,7 @@ function Today({onOpen,onComplete,onUndo,onAddAppointment,completingId,revision}
             <Stat label="Completed" value={`${completed}/${appointments.length}`}/>
           </div>
           {missingPrices && <div className="prototype-note">Some appointments have no price saved; the total includes known prices only.</div>}
+          <GoogleRoutePanel appointments={appointments} dogs={dogs} selectedGroomer={groomer} dateLabel={dateLabel}/>
           <div className="section-title"><h3>Appointments</h3></div>
           {appointments.length ? (
             <div className="appt-list">{appointments.map(appt=><ApptCard key={appt.id} appt={appt} onOpen={()=>onOpen(appt)} onComplete={onComplete} onUndo={onUndo} completing={completingId===appt.id}/>)}</div>
@@ -318,7 +319,169 @@ function compareAppointmentTimes(a, b) {
   return first < second ? -1 : 1
 }
 
-function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,onFillOpening,completingId,revision}) {
+
+function routeValue(row, ...keys) {
+  for (const key of keys) {
+    const value = row?.[key]
+    if (value !== undefined && value !== null && String(value).trim() !== '') return String(value).trim()
+  }
+  return ''
+}
+
+function routeKey(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function fullClientAddress(row) {
+  const street = routeValue(row,'address','Address')
+  const city = routeValue(row,'city','City')
+  const state = routeValue(row,'state','State') || 'TX'
+  const zip = routeValue(row,'zip','ZIP','Zip')
+  if (!street) return ''
+  const cityState = [city,state].filter(Boolean).join(', ')
+  return [street,cityState,zip].filter(Boolean).join(' ').replace(/\s+/g,' ').trim()
+}
+
+function clientAddressLookup(dogs) {
+  const lookup = {}
+  for (const row of (Array.isArray(dogs) ? dogs : [])) {
+    const address = fullClientAddress(row)
+    if (!address) continue
+    const household = routeValue(row,'household_id','Household ID')
+    const owner = routeValue(row,'owner','Owner')
+    if (household && !lookup[`h:${routeKey(household)}`]) lookup[`h:${routeKey(household)}`] = address
+    if (owner && !lookup[`o:${routeKey(owner)}`]) lookup[`o:${routeKey(owner)}`] = address
+  }
+  return lookup
+}
+
+function appointmentAddress(appt, lookup) {
+  const row = appt?.sourceRow || {}
+  const direct = fullClientAddress(row)
+  if (direct) return direct
+  const household = routeValue(row,'Household ID','household_id')
+  const owner = appt?.owner || routeValue(row,'Owner','owner')
+  return (household && lookup[`h:${routeKey(household)}`]) || (owner && lookup[`o:${routeKey(owner)}`]) || ''
+}
+
+function googleMapsRouteUrl(stops) {
+  if (!Array.isArray(stops) || !stops.length) return ''
+  const addresses = stops.map(stop=>stop.address).filter(Boolean)
+  if (!addresses.length) return ''
+  const destination = addresses[addresses.length - 1]
+  const waypoints = addresses.slice(0,-1)
+  const params = new URLSearchParams({api:'1',destination,travelmode:'driving',dir_action:'navigate'})
+  if (waypoints.length) params.set('waypoints',waypoints.join('|'))
+  return `https://www.google.com/maps/dir/?${params.toString()}`
+}
+
+function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel}) {
+  const [loading,setLoading] = useState(false)
+  const [error,setError] = useState('')
+  const [result,setResult] = useState(null)
+
+  const sorted = (Array.isArray(appointments) ? appointments : [])
+    .filter(appt=>!appt?.inactive)
+    .slice()
+    .sort(compareAppointmentTimes)
+
+  const groomers = [...new Set(sorted.map(appt=>String(appt?.groomer || appt?.sourceRow?.Groomer || '').trim()).filter(Boolean))]
+  const mixedGroomers = selectedGroomer === 'All' && groomers.length > 1
+  const lookup = clientAddressLookup(dogs)
+  const stops = sorted.map((appt,index)=>({
+    id:appt.id || `${appt.owner}-${index}`,
+    owner:appt.owner || `Stop ${index+1}`,
+    address:appointmentAddress(appt,lookup)
+  }))
+  const missing = stops.filter(stop=>!stop.address)
+  const canCheck = !mixedGroomers && stops.length >= 2 && missing.length === 0 && !loading
+  const signature = stops.map(stop=>`${stop.id}:${stop.address}`).join('|') + `:${selectedGroomer}`
+
+  useEffect(()=>{
+    setResult(null)
+    setError('')
+  },[signature])
+
+  const checkTraffic = async () => {
+    if (mixedGroomers) {
+      setError('Choose Jen or Haley above so the app calculates one van route at a time.')
+      return
+    }
+    if (stops.length < 2) {
+      setError('At least two scheduled stops are needed to calculate a route.')
+      return
+    }
+    if (missing.length) {
+      setError(`Add a street address for ${missing.map(stop=>stop.owner).join(', ')} before checking traffic.`)
+      return
+    }
+    setLoading(true)
+    setError('')
+    setResult(null)
+    try {
+      const response = await fetch('/api/google-route',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({stops})
+      })
+      const payload = await response.json().catch(()=>({}))
+      if (!response.ok) throw new Error(payload?.error || `Route check failed (${response.status}).`)
+      setResult(payload)
+    } catch (err) {
+      setError(err?.message || 'Could not check Google traffic right now.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!sorted.length) return null
+
+  const mapsUrl = !mixedGroomers && missing.length===0 ? googleMapsRouteUrl(stops) : ''
+
+  return (
+    <div style={{margin:'8px 0 12px',padding:'11px 12px',border:'1px solid #e3e5e9',borderRadius:14,background:'#fafbfc'}}>
+      <div style={{display:'flex',gap:8,alignItems:'center',justifyContent:'space-between',flexWrap:'wrap'}}>
+        <div>
+          <div style={{fontSize:12,fontWeight:800,color:'#17223f',display:'flex',alignItems:'center',gap:6}}><Route size={15}/>Google route</div>
+          <div style={{fontSize:11,color:'#7b828e',marginTop:2}}>{dateLabel} · traffic-aware driving</div>
+        </div>
+        <button className="day-ai" type="button" onClick={checkTraffic} disabled={loading} style={{opacity:loading?0.65:1}}>
+          <Route size={14}/>{loading?'Checking…':'Check traffic'}
+        </button>
+      </div>
+
+      {mixedGroomers && <div style={{fontSize:11,color:'#7b828e',marginTop:8}}>Choose Jen or Haley above to calculate one route at a time.</div>}
+      {!mixedGroomers && stops.length < 2 && <div style={{fontSize:11,color:'#7b828e',marginTop:8}}>Add at least two stops to calculate driving time.</div>}
+      {!mixedGroomers && missing.length > 0 && <div style={{fontSize:11,color:'#9a5d19',marginTop:8}}>Missing address: {missing.map(stop=>stop.owner).join(', ')}</div>}
+      {error && <div className="login-message" role="alert" style={{marginTop:8}}>{error}</div>}
+
+      {result && (
+        <div style={{marginTop:9}}>
+          <div style={{fontSize:12,fontWeight:800,color:'#17223f'}}>
+            {Math.round(Number(result.totalMinutes || 0))} min driving · {Number(result.totalMiles || 0).toFixed(1)} mi
+          </div>
+          <div style={{fontSize:10,color:'#8a8f99',marginTop:2}}>Live traffic estimate from Google Routes</div>
+          <div style={{display:'grid',gap:5,marginTop:8}}>
+            {(result.legs || []).map((leg,index)=>(
+              <div key={`${leg.fromId}-${leg.toId}-${index}`} style={{fontSize:11,color:'#555f70',display:'flex',justifyContent:'space-between',gap:8}}>
+                <span>{leg.fromOwner} → {leg.toOwner}</span>
+                <span style={{whiteSpace:'nowrap',fontWeight:700}}>{Math.round(Number(leg.minutes || 0))} min · {Number(leg.miles || 0).toFixed(1)} mi{Number(leg.trafficDelayMinutes || 0)>=1 ? ` · +${Math.round(Number(leg.trafficDelayMinutes))} traffic` : ''}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {mapsUrl && (
+        <a href={mapsUrl} target="_blank" rel="noreferrer" style={{display:'inline-flex',alignItems:'center',gap:6,marginTop:9,fontSize:11,fontWeight:800,color:'#17223f',textDecoration:'none'}}>
+          <MapPin size={14}/>Open route in Google Maps
+        </a>
+      )}
+    </div>
+  )
+}
+
+function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,onFillOpening,completingId,revision,dogs}) {
   const [groomer,setGroomer]=useState('All')
   const [weekStart,setWeekStart]=useState(() => {
     const now = new Date()
@@ -537,6 +700,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,onFillOpening,com
                 <div style={{fontSize:11,color:'#8a8f99',margin:'0 0 8px 2px'}}>
                   {activeAppointments.length} stop{activeAppointments.length===1?'':'s'} · ${Math.round(revenue)}
                 </div>
+                <GoogleRoutePanel appointments={activeAppointments} dogs={dogs} selectedGroomer={groomer} dateLabel={`${displayDay(dayDate)} ${displayDate(dayDate)}`}/>
                 <div className="appt-list">
                   {dayAppointments
                     .slice()
@@ -2632,9 +2796,9 @@ export default function App() {
 
   let body
   if (tab === 'Today') {
-    body = <Today onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onAddAppointment={date=>setAddAppointment({open:true,date,preset:null})} completingId={completingId} revision={scheduleRevision}/>
+    body = <Today dogs={dogs} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onAddAppointment={date=>setAddAppointment({open:true,date,preset:null})} completingId={completingId} revision={scheduleRevision}/>
   } else if (tab === 'Week') {
-    body = <Week onAsk={ask} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onAddAppointment={date=>setAddAppointment({open:true,date,preset:null})} onFillOpening={payload=>setFillOpening({open:true,date:payload.date,groomer:payload.groomer,appointments:payload.appointments || []})} completingId={completingId} revision={scheduleRevision}/>
+    body = <Week dogs={dogs} onAsk={ask} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onAddAppointment={date=>setAddAppointment({open:true,date,preset:null})} onFillOpening={payload=>setFillOpening({open:true,date:payload.date,groomer:payload.groomer,appointments:payload.appointments || []})} completingId={completingId} revision={scheduleRevision}/>
   } else if (tab === 'Month') {
     body = <Month onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Clients') {
