@@ -295,13 +295,16 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
   const row = appt?.sourceRow || {}
   const savedPaymentStatus = String(row['Payment Status'] || '').trim()
   const savedPaymentMethod = String(row['Payment Method'] || '').trim()
+  const groomerPaymentType = String(row['Groomer Payment Type'] || '').trim()
   const savedTipRaw = Number(String(row.Tip ?? '').replace(/[$,]/g,'').trim())
   const savedTip = Number.isFinite(savedTipRaw) ? savedTipRaw : 0
   const savedAmountRaw = Number(String(row['Amount Paid'] ?? '').replace(/[$,]/g,'').trim())
   const savedAmount = Number.isFinite(savedAmountRaw) ? savedAmountRaw : null
   const paymentPaid = savedPaymentStatus.toLowerCase() === 'paid'
   const [showPayment,setShowPayment] = useState(false)
-  const [paymentMethod,setPaymentMethod] = useState(savedPaymentMethod)
+  const [paymentMethod,setPaymentMethod] = useState(
+    savedPaymentMethod || (['Cash','Check'].includes(groomerPaymentType) ? groomerPaymentType : '')
+  )
   const [tipInput,setTipInput] = useState(savedTip ? String(savedTip) : '')
   const [paymentError,setPaymentError] = useState('')
   const today = businessDateKey()
@@ -330,10 +333,10 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
   }
   useEffect(()=>{ setLastContact(readAppointmentContact(appt)); setCommunicationError('') },[appt?.id,appt?.date,appt?.time])
   useEffect(()=>{
-    setPaymentMethod(savedPaymentMethod)
+    setPaymentMethod(savedPaymentMethod || (['Cash','Check'].includes(groomerPaymentType) ? groomerPaymentType : ''))
     setTipInput(savedTip ? String(savedTip) : '')
     setPaymentError('')
-  },[appt?.id,savedPaymentMethod,savedTip])
+  },[appt?.id,savedPaymentMethod,savedTip,groomerPaymentType])
   const sendAppointmentText = (body,type) => {
     setLastContact(saveAppointmentContact(appt,type))
     setCommunicationError('')
@@ -373,6 +376,11 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
         {appt.note && (
           <div style={{fontSize:11,color:'#7b828e',marginTop:5}}>
             {appt.note}
+          </div>
+        )}
+        {!viewerMode && groomerPaymentType && (
+          <div style={{display:'inline-flex',alignItems:'center',gap:6,marginTop:8,padding:'5px 8px',borderRadius:999,background:'#f3f6fb',border:'1px solid #d8dfea',color:'#34415f',fontSize:11,fontWeight:850}}>
+            <WalletCards size={13}/>{appt.groomer || 'Groomer'} noted: {groomerPaymentType}
           </div>
         )}
         {!viewerMode && !inactive && !completed && onConfirmation && (
@@ -4804,7 +4812,8 @@ function groomerAppointmentFromRow(row,weekStart) {
     note:String(row?.['Appointment Note'] || row?.Notes || row?.Note || row?.['Client Notes'] || row?.['Status Note'] || '').trim(),
     inactive:['cancelled','canceled','moved to another week'].includes(status),
     completed,
-    finished
+    finished,
+    groomerPaymentType:String(row?.['Groomer Payment Type'] || '').trim()
   }
 }
 
@@ -4813,6 +4822,12 @@ function GroomerStopCard({appt,onFinish,finishing}) {
   const today=businessDateKey()
   const canFinish=!appt.inactive && !appt.finished && appt.date===today
   const mapsUrl=googleMapsAddressUrl(address)
+  const [paymentType,setPaymentType]=useState(appt.groomerPaymentType || '')
+
+  useEffect(()=>{
+    setPaymentType(appt.groomerPaymentType || '')
+  },[appt.id,appt.groomerPaymentType])
+
   return (
     <div className={`appt-card groomer-haley ${appt.finished?'completed-card':''}`} style={{cursor:'default'}}>
       <div className="time-pill">{displayClockTime(appt.time)}</div>
@@ -4824,9 +4839,43 @@ function GroomerStopCard({appt,onFinish,finishing}) {
           {address && <span><MapPin size={14}/>{address}</span>}
         </div>
         {appt.note && <div style={{fontSize:11,color:'#59616e',marginTop:7,lineHeight:1.45}}><strong>Notes:</strong> {appt.note}</div>}
+
+        {canFinish && (
+          <div style={{marginTop:12,padding:10,border:'1px solid #e0e5ec',borderRadius:12,background:'#f8fafc'}}>
+            <div style={{fontSize:11,fontWeight:900,color:'#34415f',marginBottom:7}}>Payment received</div>
+            <div style={{display:'flex',gap:7,flexWrap:'wrap'}}>
+              {['Cash','Check','Electronic'].map(type=>(
+                <button
+                  key={type}
+                  type="button"
+                  onClick={()=>setPaymentType(type)}
+                  style={{
+                    border:`1px solid ${paymentType===type?'#17223f':'#d7dde6'}`,
+                    background:paymentType===type?'#17223f':'#fff',
+                    color:paymentType===type?'#fff':'#31415f',
+                    borderRadius:999,
+                    padding:'7px 11px',
+                    fontSize:11,
+                    fontWeight:850
+                  }}
+                >
+                  {paymentType===type?'✓ ':''}{type}
+                </button>
+              ))}
+            </div>
+            {!paymentType && <div style={{fontSize:10.5,color:'#7b828e',marginTop:7}}>Choose Cash, Check, or Electronic before marking this stop finished.</div>}
+          </div>
+        )}
+
+        {appt.finished && appt.groomerPaymentType && (
+          <div style={{display:'inline-flex',alignItems:'center',gap:6,marginTop:10,padding:'5px 8px',borderRadius:999,background:'#edf7ef',border:'1px solid #bddcc5',color:'#267447',fontSize:11,fontWeight:850}}>
+            <WalletCards size={13}/>Payment: {appt.groomerPaymentType}
+          </div>
+        )}
+
         <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>
           {mapsUrl && <a href={mapsUrl} target="_blank" rel="noreferrer" className="day-ai" style={{textDecoration:'none',display:'inline-flex',alignItems:'center',gap:6}}><MapPin size={14}/>Open address</a>}
-          {canFinish && <button type="button" className="save" disabled={finishing} onClick={()=>onFinish(appt)}>{finishing?'Saving…':'✓ Finished'}</button>}
+          {canFinish && <button type="button" className="save" disabled={finishing || !paymentType} onClick={()=>onFinish(appt,paymentType)}>{finishing?'Saving…':'✓ Finished'}</button>}
           {appt.finished && <div style={{fontSize:12,fontWeight:900,color:'#267447',padding:'8px 0'}}>✓ Finished</div>}
         </div>
       </div>
@@ -4889,7 +4938,7 @@ function GroomerPortal({session,groomer}) {
     .filter(appt=>appt.groomer===groomer && !appt.inactive)
     .sort(compareAppointmentTimes)
 
-  const finishStop=async(appt)=>{
+  const finishStop=async(appt,paymentType)=>{
     if(finishingId || !appt) return
     setFinishingId(appt.id);setNotice('')
     try{
@@ -4898,7 +4947,8 @@ function GroomerPortal({session,groomer}) {
         p_week_start:appt.weekStart,
         p_row_index:appt.rowIndex,
         p_expected_date:appt.date,
-        p_expected_time:String(row['Start Time'] || '')
+        p_expected_time:String(row['Start Time'] || ''),
+        p_payment_type:paymentType
       })
       if(finishError) throw finishError
       if(['finished','already_finished'].includes(data?.status) && data?.event_id){
@@ -4911,7 +4961,7 @@ function GroomerPortal({session,groomer}) {
         if(!response.ok) setNotice(`Finished was saved, but the owner push could not be sent: ${payload?.error || 'notification error'}`)
         else if(payload?.alreadySent) setNotice(`${appt.owner} was already marked finished and the owner notification had already been sent.`)
         else if(Number(payload?.sent || 0) < 1) setNotice(`${appt.owner} is marked finished, but no owner phone is registered for push notifications yet.`)
-        else setNotice(`${appt.owner} is marked finished. The owner notification was sent.`)
+        else setNotice(`${appt.owner} is marked finished · ${paymentType}. The owner notification was sent.`)
       }else if(data?.status==='already_finished'){
         setNotice(`${appt.owner} was already marked finished.`)
       }else{
