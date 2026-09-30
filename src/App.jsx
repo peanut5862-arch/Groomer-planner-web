@@ -261,7 +261,7 @@ function Today({onOpen,onComplete,onUndo,onAddAppointment,completingId,revision,
             <Stat label="Completed" value={`${completed}/${appointments.length}`}/>
           </div>
           {missingPrices && <div className="prototype-note">Some appointments have no price saved; the total includes known prices only.</div>}
-          <GoogleRoutePanel appointments={appointments} dogs={dogs} selectedGroomer={groomer} dateLabel={dateLabel}/>
+          <GoogleRoutePanel appointments={appointments} dogs={dogs} selectedGroomer={groomer} dateLabel={dateLabel} dateKey={dateKey}/>
           <div className="section-title"><h3>Appointments</h3></div>
           {appointments.length ? (
             <div className="appt-list">{appointments.map(appt=><ApptCard key={appt.id} appt={appt} onOpen={()=>onOpen(appt)} onComplete={onComplete} onUndo={onUndo} completing={completingId===appt.id}/>)}</div>
@@ -306,6 +306,16 @@ function displayClockTime(value) {
   const wholeMinutes = Math.floor(minutes)
   const hours24 = Math.floor(wholeMinutes / 60) % 24
   const mins = wholeMinutes % 60
+  const period = hours24 >= 12 ? 'PM' : 'AM'
+  const hours12 = hours24 % 12 || 12
+  return `${hours12}:${String(mins).padStart(2,'0')} ${period}`
+}
+
+function displayClockFromMinutes(totalMinutes) {
+  if (!Number.isFinite(totalMinutes)) return ''
+  const normalized = ((Math.round(totalMinutes) % 1440) + 1440) % 1440
+  const hours24 = Math.floor(normalized / 60)
+  const mins = normalized % 60
   const period = hours24 >= 12 ? 'PM' : 'AM'
   const hours12 = hours24 % 12 || 12
   return `${hours12}:${String(mins).padStart(2,'0')} ${period}`
@@ -378,7 +388,7 @@ function appointmentWindowText(value) {
   return `${fmt(minutes - 30)}–${fmt(minutes + 30)}`
 }
 
-function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel}) {
+function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey}) {
   const [loading,setLoading] = useState(false)
   const [error,setError] = useState('')
   const [result,setResult] = useState(null)
@@ -407,6 +417,14 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel}) {
 
   const cacheKey = `grooming-route-v2:${signature}`
   const cacheMs = 15 * 60 * 1000
+  const isToday = String(dateKey || '') === businessDateKey()
+  const firstLeg = result?.legs?.[0]
+  const firstStop = stops?.[0]
+  const firstStopMinutes = clockMinutesForDisplay(firstStop?.time)
+  const firstDriveMinutes = Number(firstLeg?.minutes || 0)
+  const suggestedDeparture = Number.isFinite(firstStopMinutes) && firstDriveMinutes > 0
+    ? displayClockFromMinutes(firstStopMinutes - Math.ceil(firstDriveMinutes))
+    : ''
 
   const checkTraffic = async ({force=false}={}) => {
     if (mixedGroomers) {
@@ -499,6 +517,21 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel}) {
           <div style={{fontSize:10,color:'#8a8f99',marginTop:2}}>
             Google traffic estimate · customer times stay unchanged{updatedAt ? ` · updated ${Math.max(0,Math.round((Date.now()-updatedAt)/60000))} min ago` : ''}
           </div>
+          {suggestedDeparture && isToday && firstStop && (
+            <div style={{marginTop:8,padding:'8px 9px',border:'1px solid #e3e5e9',borderRadius:10,background:'#fff'}}>
+              <div style={{fontSize:11,fontWeight:800,color:'#17223f'}}>
+                Leave {routeGroomer} home around {suggestedDeparture}
+              </div>
+              <div style={{fontSize:10,color:'#6b7280',marginTop:2}}>
+                About {Math.ceil(firstDriveMinutes)} min to {firstStop.owner} · targets {displayClockTime(firstStop.time)} · window {firstStop.window || '—'}
+              </div>
+            </div>
+          )}
+          {!isToday && firstStop && (
+            <div style={{fontSize:10,color:'#8a8f99',marginTop:6}}>
+              Home departure time appears on the day using live Google traffic.
+            </div>
+          )}
           <div style={{display:'grid',gap:5,marginTop:8}}>
             {(result.legs || []).map((leg,index)=>(
               <div key={`${leg.fromId}-${leg.toId}-${index}`} style={{fontSize:11,color:'#555f70',display:'flex',justifyContent:'space-between',gap:8}}>
@@ -750,7 +783,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,onFillOpening,com
                 <div style={{fontSize:11,color:'#8a8f99',margin:'0 0 8px 2px'}}>
                   {activeAppointments.length} stop{activeAppointments.length===1?'':'s'} · ${Math.round(revenue)}
                 </div>
-                <GoogleRoutePanel appointments={activeAppointments} dogs={dogs} selectedGroomer={groomer} dateLabel={`${displayDay(dayDate)} ${displayDate(dayDate)}`}/>
+                <GoogleRoutePanel appointments={activeAppointments} dogs={dogs} selectedGroomer={groomer} dateLabel={`${displayDay(dayDate)} ${displayDate(dayDate)}`} dateKey={dateKey}/>
                 <div className="appt-list">
                   {dayAppointments
                     .slice()
