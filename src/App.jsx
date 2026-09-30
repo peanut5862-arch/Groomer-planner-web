@@ -364,15 +364,18 @@ function appointmentAddress(appt, lookup) {
   return (household && lookup[`h:${routeKey(household)}`]) || (owner && lookup[`o:${routeKey(owner)}`]) || ''
 }
 
-function googleMapsRouteUrl(stops) {
-  if (!Array.isArray(stops) || !stops.length) return ''
-  const addresses = stops.map(stop=>stop.address).filter(Boolean)
-  if (!addresses.length) return ''
-  const destination = addresses[addresses.length - 1]
-  const waypoints = addresses.slice(0,-1)
-  const params = new URLSearchParams({api:'1',destination,travelmode:'driving',dir_action:'navigate'})
-  if (waypoints.length) params.set('waypoints',waypoints.join('|'))
-  return `https://www.google.com/maps/dir/?${params.toString()}`
+function appointmentWindowText(value) {
+  const minutes = clockMinutesForDisplay(String(value || ''))
+  if (!Number.isFinite(minutes)) return ''
+  const fmt = total => {
+    const normalized = ((Math.round(total) % 1440) + 1440) % 1440
+    const hours24 = Math.floor(normalized / 60)
+    const mins = normalized % 60
+    const period = hours24 >= 12 ? 'PM' : 'AM'
+    const hours12 = hours24 % 12 || 12
+    return `${hours12}:${String(mins).padStart(2,'0')} ${period}`
+  }
+  return `${fmt(minutes - 30)}–${fmt(minutes + 30)}`
 }
 
 function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel}) {
@@ -387,15 +390,19 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel}) {
 
   const groomers = [...new Set(sorted.map(appt=>String(appt?.groomer || appt?.sourceRow?.Groomer || '').trim()).filter(Boolean))]
   const mixedGroomers = selectedGroomer === 'All' && groomers.length > 1
+  const routeGroomer = selectedGroomer !== 'All' ? selectedGroomer : (groomers.length === 1 ? groomers[0] : '')
   const lookup = clientAddressLookup(dogs)
   const stops = sorted.map((appt,index)=>({
     id:appt.id || `${appt.owner}-${index}`,
     owner:appt.owner || `Stop ${index+1}`,
-    address:appointmentAddress(appt,lookup)
+    address:appointmentAddress(appt,lookup),
+    time:String(appt?.time || '').trim(),
+    window:appointmentWindowText(appt?.time)
   }))
   const missing = stops.filter(stop=>!stop.address)
-  const canCheck = !mixedGroomers && stops.length >= 2 && missing.length === 0 && !loading
-  const signature = stops.map(stop=>`${stop.id}:${stop.address}`).join('|') + `:${selectedGroomer}`
+  const validGroomer = ['Jen','Haley'].includes(routeGroomer)
+  const canCheck = !mixedGroomers && validGroomer && stops.length >= 1 && missing.length === 0 && !loading
+  const signature = stops.map(stop=>`${stop.id}:${stop.address}:${stop.time}`).join('|') + `:${routeGroomer}`
 
   useEffect(()=>{
     setResult(null)
@@ -407,8 +414,12 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel}) {
       setError('Choose Jen or Haley above so the app calculates one van route at a time.')
       return
     }
-    if (stops.length < 2) {
-      setError('At least two scheduled stops are needed to calculate a route.')
+    if (!validGroomer) {
+      setError('Choose Jen or Haley so the app knows which home base to use.')
+      return
+    }
+    if (!stops.length) {
+      setError('Add at least one scheduled stop to calculate a route.')
       return
     }
     if (missing.length) {
@@ -422,7 +433,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel}) {
       const response = await fetch('/api/google-route',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({stops})
+        body:JSON.stringify({stops,groomer:routeGroomer})
       })
       const payload = await response.json().catch(()=>({}))
       if (!response.ok) throw new Error(payload?.error || `Route check failed (${response.status}).`)
@@ -436,31 +447,29 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel}) {
 
   if (!sorted.length) return null
 
-  const mapsUrl = !mixedGroomers && missing.length===0 ? googleMapsRouteUrl(stops) : ''
-
   return (
     <div style={{margin:'8px 0 12px',padding:'11px 12px',border:'1px solid #e3e5e9',borderRadius:14,background:'#fafbfc'}}>
       <div style={{display:'flex',gap:8,alignItems:'center',justifyContent:'space-between',flexWrap:'wrap'}}>
         <div>
           <div style={{fontSize:12,fontWeight:800,color:'#17223f',display:'flex',alignItems:'center',gap:6}}><Route size={15}/>Google route</div>
-          <div style={{fontSize:11,color:'#7b828e',marginTop:2}}>{dateLabel} · traffic-aware driving</div>
+          <div style={{fontSize:11,color:'#7b828e',marginTop:2}}>{dateLabel} · {routeGroomer ? `${routeGroomer} home → clients → ${routeGroomer} home` : 'traffic-aware driving'}</div>
         </div>
-        <button className="day-ai" type="button" onClick={checkTraffic} disabled={loading} style={{opacity:loading?0.65:1}}>
+        <button className="day-ai" type="button" onClick={checkTraffic} disabled={!canCheck} style={{opacity:canCheck?1:0.6}}>
           <Route size={14}/>{loading?'Checking…':'Check traffic'}
         </button>
       </div>
 
       {mixedGroomers && <div style={{fontSize:11,color:'#7b828e',marginTop:8}}>Choose Jen or Haley above to calculate one route at a time.</div>}
-      {!mixedGroomers && stops.length < 2 && <div style={{fontSize:11,color:'#7b828e',marginTop:8}}>Add at least two stops to calculate driving time.</div>}
-      {!mixedGroomers && missing.length > 0 && <div style={{fontSize:11,color:'#9a5d19',marginTop:8}}>Missing address: {missing.map(stop=>stop.owner).join(', ')}</div>}
+      {!mixedGroomers && !validGroomer && <div style={{fontSize:11,color:'#7b828e',marginTop:8}}>Choose Jen or Haley so the correct home base is used.</div>}
+      {!mixedGroomers && validGroomer && missing.length > 0 && <div style={{fontSize:11,color:'#9a5d19',marginTop:8}}>Missing address: {missing.map(stop=>stop.owner).join(', ')}</div>}
       {error && <div className="login-message" role="alert" style={{marginTop:8}}>{error}</div>}
 
       {result && (
         <div style={{marginTop:9}}>
           <div style={{fontSize:12,fontWeight:800,color:'#17223f'}}>
-            {Math.round(Number(result.totalMinutes || 0))} min driving · {Number(result.totalMiles || 0).toFixed(1)} mi
+            {Math.round(Number(result.totalMinutes || 0))} min driving · {Number(result.totalMiles || 0).toFixed(1)} mi round trip
           </div>
-          <div style={{fontSize:10,color:'#8a8f99',marginTop:2}}>Live traffic estimate from Google Routes</div>
+          <div style={{fontSize:10,color:'#8a8f99',marginTop:2}}>Live traffic estimate from Google Routes · customer times stay unchanged</div>
           <div style={{display:'grid',gap:5,marginTop:8}}>
             {(result.legs || []).map((leg,index)=>(
               <div key={`${leg.fromId}-${leg.toId}-${index}`} style={{fontSize:11,color:'#555f70',display:'flex',justifyContent:'space-between',gap:8}}>
@@ -469,12 +478,24 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel}) {
               </div>
             ))}
           </div>
+          {stops.some(stop=>stop.window) && (
+            <div style={{marginTop:9,paddingTop:8,borderTop:'1px solid #eceef1'}}>
+              <div style={{fontSize:10,fontWeight:800,color:'#7b828e',marginBottom:4}}>CUSTOMER ARRIVAL WINDOWS</div>
+              <div style={{display:'grid',gap:3}}>
+                {stops.filter(stop=>stop.window).map(stop=>(
+                  <div key={`window-${stop.id}`} style={{fontSize:10,color:'#6b7280'}}>
+                    {stop.owner}: {displayClockTime(stop.time)} · window {stop.window}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {mapsUrl && (
-        <a href={mapsUrl} target="_blank" rel="noreferrer" style={{display:'inline-flex',alignItems:'center',gap:6,marginTop:9,fontSize:11,fontWeight:800,color:'#17223f',textDecoration:'none'}}>
-          <MapPin size={14}/>Open route in Google Maps
+      {result?.mapsUrl && (
+        <a href={result.mapsUrl} target="_blank" rel="noreferrer" style={{display:'inline-flex',alignItems:'center',gap:6,marginTop:9,fontSize:11,fontWeight:800,color:'#17223f',textDecoration:'none'}}>
+          <MapPin size={14}/>Open round trip in Google Maps
         </a>
       )}
     </div>
