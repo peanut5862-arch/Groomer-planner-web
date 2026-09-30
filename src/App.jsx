@@ -318,7 +318,7 @@ function compareAppointmentTimes(a, b) {
   return first < second ? -1 : 1
 }
 
-function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,completingId,revision}) {
+function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,onFillOpening,completingId,revision}) {
   const [groomer,setGroomer]=useState('All')
   const [weekStart,setWeekStart]=useState(() => {
     const now = new Date()
@@ -520,7 +520,12 @@ function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,completingId,revi
                 </button>
                 <button
                   className="day-ai"
-                  onClick={()=>onAsk(`Fill an opening on ${displayDay(dayDate)} ${displayDate(dayDate)}`)}
+                  type="button"
+                  onClick={()=>onFillOpening?.({
+                    date:dateKey,
+                    groomer,
+                    appointments:activeWeekAppointments.filter(appt=>appt.date===dateKey)
+                  })}
                 >
                   <Sparkles size={14}/>Fill opening
                 </button>
@@ -590,7 +595,7 @@ function serviceDefaultsForDog(row, service) {
   }
 }
 
-function AddAppointmentSheet({open,dateKey,dogs,onClose,onSaved}) {
+function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
   const [date,setDate] = useState(dateKey || businessDateKey())
   const [clientKey,setClientKey] = useState('')
   const [selectedDogs,setSelectedDogs] = useState({})
@@ -623,14 +628,14 @@ function AddAppointmentSheet({open,dateKey,dogs,onClose,onSaved}) {
   useEffect(()=>{
     if (!open) return
     setDate(dateKey || businessDateKey())
-    setClientKey('')
+    setClientKey(preset?.clientKey || '')
     setSelectedDogs({})
-    setGroomer('Jen')
-    setTime('08:30')
-    setFixed(false)
-    setNote('')
+    setGroomer(['Jen','Haley'].includes(preset?.groomer) ? preset.groomer : 'Jen')
+    setTime(/^([01]\d|2[0-3]):[0-5]\d$/.test(String(preset?.time || '')) ? preset.time : '08:30')
+    setFixed(Boolean(preset?.fixed))
+    setNote(preset?.note || '')
     setMessage('')
-  },[open,dateKey])
+  },[open,dateKey,preset?.clientKey,preset?.groomer,preset?.time,preset?.fixed,preset?.note])
 
   useEffect(()=>{
     if (!client) { setSelectedDogs({}); return }
@@ -643,8 +648,9 @@ function AddAppointmentSheet({open,dateKey,dogs,onClose,onSaved}) {
     }
     setSelectedDogs(initial)
     const preferred = client.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).find(Boolean)
-    if (preferred === 'Jen' || preferred === 'Haley') setGroomer(preferred)
-  },[clientKey])
+    if (['Jen','Haley'].includes(preset?.groomer)) setGroomer(preset.groomer)
+    else if (preferred === 'Jen' || preferred === 'Haley') setGroomer(preferred)
+  },[clientKey,preset?.groomer])
 
   if (!open) return null
 
@@ -770,6 +776,214 @@ function AddAppointmentSheet({open,dateKey,dogs,onClose,onSaved}) {
           {message && <div className="login-message" role="alert">{message}</div>}
           <button className="login-button" type="button" disabled={saving} onClick={save}>{saving?'Saving…':'Add appointment'}</button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+
+function fillClockValue(minutes) {
+  if (!Number.isFinite(minutes)) return '08:30'
+  const clamped = Math.max(0,Math.min(23*60+59,Math.round(minutes)))
+  return `${String(Math.floor(clamped/60)).padStart(2,'0')}:${String(clamped%60).padStart(2,'0')}`
+}
+
+function appointmentDurationMinutes(appt) {
+  const row = appt?.sourceRow || {}
+  const raw = row.Minutes ?? row['Service Minutes'] ?? row['Duration Minutes'] ?? row.Duration
+  const value = Number(String(raw ?? '').replace(/[^0-9.]/g,''))
+  return Number.isFinite(value) && value > 0 ? value : 60
+}
+
+function openingForDuration(appointments, duration, groomer) {
+  const startOfDay = 8 * 60
+  const endOfDay = 17 * 60 + 30
+  const buffer = 15
+  const occupied = (appointments || [])
+    .filter(appt => !groomer || appt.groomer === groomer)
+    .map(appt => {
+      const start = clockMinutesForDisplay(appt.time)
+      if (!Number.isFinite(start)) return null
+      return {start,end:start + appointmentDurationMinutes(appt)}
+    })
+    .filter(Boolean)
+    .sort((a,b)=>a.start-b.start)
+
+  let cursor = startOfDay
+  for (const slot of occupied) {
+    if (slot.start - cursor >= duration) return fillClockValue(cursor)
+    cursor = Math.max(cursor,slot.end + buffer)
+  }
+  if (endOfDay - cursor >= duration) return fillClockValue(cursor)
+  return ''
+}
+
+function FillOpeningSheet({open,dateKey,preferredGroomer,dayAppointments,dogs,onClose,onChoose}) {
+  const [booked,setBooked] = useState({})
+  const [loading,setLoading] = useState(false)
+  const [error,setError] = useState('')
+
+  const normalized = value => String(value || '').trim().toLowerCase()
+  const keyFor = row => {
+    const household = String(row?.household_id || row?.['Household ID'] || '').trim()
+    const owner = String(row?.owner || row?.Owner || '').trim()
+    return household ? `h:${normalized(household)}` : `o:${normalized(owner)}`
+  }
+  const ownerOf = row => String(row?.owner || row?.Owner || '').trim()
+  const dogOf = row => String(row?.dog || row?.Dog || '').trim()
+  const areaOf = row => canonicalAreaLabel(row?.area || row?.Area || '')
+  const groomerOf = row => String(row?.groomer || row?.Groomer || '').trim()
+
+  useEffect(()=>{
+    if (!open || !supabase) return
+    let cancelled = false
+    const load = async () => {
+      setLoading(true)
+      setError('')
+      try {
+        const today = businessDateKey()
+        const startWeek = mondayForDate(today)
+        const end = new Date(`${today}T12:00:00Z`)
+        end.setUTCDate(end.getUTCDate()+84)
+        const endWeek = mondayForDate(end.toISOString().slice(0,10))
+        const {data,error:loadError} = await supabase
+          .from('weekly_drafts')
+          .select('week_start,plan_json')
+          .gte('week_start',startWeek)
+          .lte('week_start',endWeek)
+          .order('week_start',{ascending:true})
+        if (loadError) throw loadError
+        if (cancelled) return
+        const next = {}
+        for (const week of (data || [])) {
+          for (const row of (Array.isArray(week.plan_json) ? week.plan_json : [])) {
+            if (!row || !String(row.Owner || '').trim()) continue
+            const date = String(row.Date || '').slice(0,10)
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < today) continue
+            const apptStatus = String(row['Appointment Status'] || '').trim().toLowerCase()
+            const completion = String(row['Completion Status'] || '').trim().toLowerCase()
+            const status = String(row.Status || '').trim().toLowerCase()
+            if (completion === 'completed') continue
+            if (['cancelled','canceled','moved to another week','missed','no show','no-show','noshow'].includes(apptStatus)) continue
+            if (['cancelled','canceled','rescheduled','completed','missed','no show','no-show','noshow'].includes(status)) continue
+            const household = String(row['Household ID'] || '').trim()
+            const owner = String(row.Owner || row.Client || '').trim()
+            const info = {date,time:String(row['Start Time'] || row['Locked Time'] || '').trim()}
+            if (household) next[`h:${normalized(household)}`] = info
+            if (owner) next[`o:${normalized(owner)}`] = info
+          }
+        }
+        setBooked(next)
+      } catch(err) {
+        if (!cancelled) setError(err?.message || 'Could not check existing appointments.')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return ()=>{cancelled=true}
+  },[open,dateKey])
+
+  if (!open) return null
+
+  const grouped = Object.values((dogs || []).reduce((map,row)=>{
+    const owner = ownerOf(row)
+    const dog = dogOf(row)
+    if (!owner || !dog) return map
+    const key = keyFor(row)
+    if (!map[key]) map[key] = {key,owner,household:String(row?.household_id || row?.['Household ID'] || '').trim(),rows:[]}
+    map[key].rows.push(row)
+    return map
+  },{}))
+
+  const weekday = new Date(`${dateKey}T12:00:00Z`).getUTCDay()
+  const dayAreas = [...new Set((dayAppointments || []).map(appt=>canonicalAreaLabel(appt.area)).filter(Boolean))]
+  const dayCounts = (dayAppointments || []).reduce((acc,appt)=>{
+    if (appt.groomer === 'Jen' || appt.groomer === 'Haley') acc[appt.groomer] += 1
+    return acc
+  },{Jen:0,Haley:0})
+
+  const candidates = grouped.map(client=>{
+    if (booked[client.key] || booked[`o:${normalized(client.owner)}`]) return null
+    const due = clientDueInfo(client.rows)
+    if (!due.dueDate || !['Overdue','Due today','Due this week','Due soon','Upcoming'].includes(due.status)) return null
+
+    const assigned = [...new Set(client.rows.map(groomerOf).filter(name=>name==='Jen' || name==='Haley'))]
+    const exclusive = assigned.length === 1 ? assigned[0] : ''
+    let targetGroomer = ['Jen','Haley'].includes(preferredGroomer) ? preferredGroomer : ''
+    if (!targetGroomer) {
+      if (weekday === 1 || weekday === 5) targetGroomer = 'Haley'
+      else if (exclusive) targetGroomer = exclusive
+      else targetGroomer = dayCounts.Jen <= dayCounts.Haley ? 'Jen' : 'Haley'
+    }
+    if ((weekday === 1 || weekday === 5) && targetGroomer !== 'Haley') return null
+    if (targetGroomer === 'Jen' && ![2,3,4].includes(weekday)) return null
+    if (exclusive && exclusive !== targetGroomer) return null
+
+    const defaults = client.rows.reduce((acc,row)=>{
+      let service = canonicalServiceLabel(row?.service_pattern || row?.['Service Pattern'] || '')
+      if (service === 'Service Varies' || !appointmentServiceOptions.includes(service)) {
+        const next = canonicalServiceLabel(row?.next_service || row?.['Next Service'] || '')
+        service = appointmentServiceOptions.includes(next) ? next : 'Groom'
+      }
+      const values = serviceDefaultsForDog(row,service)
+      acc.price += Number(values.price || 0)
+      acc.minutes += Number(values.minutes || 0)
+      return acc
+    },{price:0,minutes:0})
+    const minutes = Math.max(30,Math.round(defaults.minutes || 60))
+    const suggestedTime = openingForDuration(dayAppointments,minutes,targetGroomer)
+    const area = areaOf(client.rows[0])
+    const exactArea = Boolean(area && dayAreas.some(item=>normalized(item)===normalized(area)))
+    const duePoints = due.status === 'Overdue' ? 100 : due.status === 'Due today' ? 92 : due.status === 'Due this week' ? 82 : due.status === 'Due soon' ? 65 : 30
+    const overdueBonus = due.days < 0 ? Math.min(25,Math.abs(due.days)) : 0
+    const routePoints = exactArea ? 35 : dayAreas.length ? 0 : 8
+    const openingPoints = suggestedTime ? 30 : -20
+    const groomerPoints = (dayAppointments || []).some(appt=>appt.groomer===targetGroomer) ? 8 : 0
+    return {
+      ...client,due,area,targetGroomer,minutes,price:Math.round(defaults.price || 0),suggestedTime,exactArea,
+      score:duePoints+overdueBonus+routePoints+openingPoints+groomerPoints
+    }
+  }).filter(Boolean).sort((a,b)=>b.score-a.score || (a.due.dueDate || '').localeCompare(b.due.dueDate || '') || a.owner.localeCompare(b.owner)).slice(0,6)
+
+  const dateLabel = new Date(`${dateKey}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric'})
+
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet" onClick={event=>event.stopPropagation()} style={{maxHeight:'90dvh',overflowY:'auto'}}>
+        <div className="sheet-head">
+          <div><div className="eyebrow">Route suggestions</div><h2>Fill opening · {dateLabel}</h2></div>
+          <button className="icon-btn" type="button" onClick={onClose}><X size={18}/></button>
+        </div>
+        <div className="prototype-note" style={{marginTop:0,textAlign:'left'}}>
+          Ranked using due date, area match, groomer rules, saved service time, and whether the client fits an open spot that day. Clients who already have an active appointment are excluded.
+        </div>
+        {loading && <div className="prototype-note">Checking your schedule…</div>}
+        {error && <div className="login-message">{error}</div>}
+        {!loading && !error && candidates.length === 0 && <div className="prototype-note">No unscheduled due clients fit this day right now.</div>}
+        {!loading && !error && candidates.length > 0 && (
+          <div style={{display:'grid',gap:10,marginTop:12}}>
+            {candidates.map((candidate,index)=>(
+              <button key={candidate.key} type="button" className="candidate" style={{textAlign:'left',width:'100%'}} onClick={()=>onChoose?.({
+                date:dateKey,
+                clientKey:candidate.key,
+                groomer:candidate.targetGroomer,
+                time:candidate.suggestedTime || '08:30',
+                fixed:false,
+                note:'Added from Fill Opening'
+              })}>
+                <div className="candidate-rank">{index+1}</div>
+                <div className="candidate-main">
+                  <strong>{candidate.owner} · {candidate.rows.map(dogOf).join(' + ')}</strong>
+                  <span>{candidate.due.detail} · {candidate.area || 'Area not set'} · {candidate.minutes} min</span>
+                  <span>{candidate.targetGroomer}{candidate.suggestedTime ? ` · Suggested ${displayClockTime(candidate.suggestedTime)}` : ' · Choose a time manually'}{candidate.exactArea ? ' · Same area' : ''}</span>
+                </div>
+                <div className="candidate-price">${candidate.price}</div>
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="prototype-note" style={{marginTop:12}}>Tap a client to open Add Appointment with the client, groomer, and suggested time already filled in. You can review services before saving.</div>
       </div>
     </div>
   )
@@ -2260,7 +2474,8 @@ export default function App() {
   const [saveMessage,setSaveMessage]=useState('')
   const [completingId,setCompletingId]=useState('')
   const [assistant,setAssistant]=useState({open:false,initial:''})
-  const [addAppointment,setAddAppointment]=useState({open:false,date:businessDateKey()})
+  const [addAppointment,setAddAppointment]=useState({open:false,date:businessDateKey(),preset:null})
+  const [fillOpening,setFillOpening]=useState({open:false,date:businessDateKey(),groomer:'All',appointments:[]})
   const ask=(initial='')=>setAssistant({open:true,initial})
   const completeFromSchedule = async (appt) => {
     if (!appt || completingId) return
@@ -2392,9 +2607,9 @@ export default function App() {
 
   let body
   if (tab === 'Today') {
-    body = <Today onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onAddAppointment={date=>setAddAppointment({open:true,date})} completingId={completingId} revision={scheduleRevision}/>
+    body = <Today onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onAddAppointment={date=>setAddAppointment({open:true,date,preset:null})} completingId={completingId} revision={scheduleRevision}/>
   } else if (tab === 'Week') {
-    body = <Week onAsk={ask} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onAddAppointment={date=>setAddAppointment({open:true,date})} completingId={completingId} revision={scheduleRevision}/>
+    body = <Week onAsk={ask} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onAddAppointment={date=>setAddAppointment({open:true,date,preset:null})} onFillOpening={payload=>setFillOpening({open:true,date:payload.date,groomer:payload.groomer,appointments:payload.appointments || []})} completingId={completingId} revision={scheduleRevision}/>
   } else if (tab === 'Month') {
     body = <Month onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Clients') {
@@ -2436,8 +2651,12 @@ export default function App() {
         setSaveMessage(message)
         setScheduleRevision(value=>value+1)
       }}/>}
-      <AddAppointmentSheet open={addAppointment.open} dateKey={addAppointment.date} dogs={dogs} onClose={()=>setAddAppointment(current=>({...current,open:false}))} onSaved={message=>{
-        setAddAppointment(current=>({...current,open:false}))
+      <FillOpeningSheet open={fillOpening.open} dateKey={fillOpening.date} preferredGroomer={fillOpening.groomer} dayAppointments={fillOpening.appointments} dogs={dogs} onClose={()=>setFillOpening(current=>({...current,open:false}))} onChoose={preset=>{
+        setFillOpening(current=>({...current,open:false}))
+        setAddAppointment({open:true,date:preset.date,preset})
+      }}/>
+      <AddAppointmentSheet open={addAppointment.open} dateKey={addAppointment.date} dogs={dogs} preset={addAppointment.preset} onClose={()=>setAddAppointment(current=>({...current,open:false,preset:null}))} onSaved={message=>{
+        setAddAppointment(current=>({...current,open:false,preset:null}))
         setSaveMessage(message)
         setScheduleRevision(value=>value+1)
       }}/>
