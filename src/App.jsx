@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { supabase } from './supabase.js'
 import {
   CalendarDays, ChevronLeft, ChevronRight, Clock3, Dog, Ellipsis, Home,
@@ -1047,6 +1047,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
   const [loading,setLoading]=useState(true)
   const [error,setError]=useState('')
   const [confirmationFilter,setConfirmationFilter]=useState('All')
+  const loadedWeekRef=useRef('')
 
   const ymd = (date) => {
     const y = date.getFullYear()
@@ -1079,22 +1080,27 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
 
     const loadWeek = async () => {
       if (!supabase) return
-      setLoading(true)
+      const requestedWeek=ymd(weekStart)
+      // Keep the current week rendered during same-week refreshes (such as
+      // confirmation changes) so the page height does not collapse and
+      // Safari does not jump the user back to the top.
+      if (loadedWeekRef.current !== requestedWeek) setLoading(true)
       setError('')
 
       const {data,error} = await supabase
         .from('weekly_drafts')
         .select('week_start,plan_json,status,confirmed_at')
-        .eq('week_start', ymd(weekStart))
+        .eq('week_start', requestedWeek)
         .limit(1)
 
       if (cancelled) return
 
       if (error) {
         setError(error.message)
-        setWeekRecord(null)
+        if (loadedWeekRef.current !== requestedWeek) setWeekRecord(null)
       } else {
         setWeekRecord(data?.[0] || null)
+        loadedWeekRef.current=requestedWeek
       }
 
       setLoading(false)
@@ -3509,9 +3515,19 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false}) {
   const bookedRows = rows.filter(row=>String(row?.Owner || '').trim() && rowState(row).booked)
   const completedRows = bookedRows.filter(row=>rowState(row).completed)
   const openRows = bookedRows.filter(row=>!rowState(row).completed)
+  const tipForRow = row => {
+    const value = Number(String(row?.Tip ?? '').replace(/[$,]/g,'').trim())
+    return Number.isFinite(value) ? Math.max(0,value) : 0
+  }
+  const isPaidRow = row => lower(row?.['Payment Status']) === 'paid'
+
   const scheduledRevenue = bookedRows.reduce((sum,row)=>sum+priced(row),0)
   const completedRevenue = completedRows.reduce((sum,row)=>sum+priced(row),0)
   const remainingRevenue = Math.max(0,scheduledRevenue-completedRevenue)
+  const paidRows = bookedRows.filter(isPaidRow)
+  const serviceReceived = paidRows.reduce((sum,row)=>sum+priced(row),0)
+  const tipsReceived = paidRows.reduce((sum,row)=>sum+tipForRow(row),0)
+  const totalReceived = serviceReceived + tipsReceived
   const dogCount = bookedRows.reduce((sum,row)=>sum+dogCountForRow(row),0)
   const cancelledCount = rows.filter(row=>rowState(row).cancelled).length
   const noShowCount = rows.filter(row=>rowState(row).noShow).length
@@ -3519,8 +3535,21 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false}) {
   const groomerTotals = ['Jen','Haley'].map(name=>{
     const groomerRows = bookedRows.filter(row=>String(row?.Groomer || '').trim()===name)
     const done = groomerRows.filter(row=>rowState(row).completed)
-    return {name,appointments:groomerRows.length,scheduled:groomerRows.reduce((sum,row)=>sum+priced(row),0),completed:done.reduce((sum,row)=>sum+priced(row),0)}
+    const completedService = done.reduce((sum,row)=>sum+priced(row),0)
+    const tips = done.filter(isPaidRow).reduce((sum,row)=>sum+tipForRow(row),0)
+    const commission = name==='Haley' ? completedService * 0.5 : 0
+    const payout = name==='Haley' ? commission + tips : 0
+    return {
+      name,
+      appointments:groomerRows.length,
+      scheduled:groomerRows.reduce((sum,row)=>sum+priced(row),0),
+      completed:completedService,
+      tips,
+      commission,
+      payout
+    }
   })
+  const haleyTotals = groomerTotals.find(item=>item.name==='Haley') || {commission:0,tips:0,payout:0}
 
   const confirmations = openRows.reduce((acc,row)=>{
     const status = clientConfirmationStatus(row)
@@ -3573,8 +3602,13 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false}) {
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
           <div style={{...reportCard,background:'#fff9ec'}}><div style={smallLabel}>Scheduled revenue</div><div style={metricValue}>{money(scheduledRevenue)}</div><div style={{fontSize:11,color:'#7b828e',marginTop:5}}>{bookedRows.length} appointment{bookedRows.length===1?'':'s'}</div></div>
           <div style={{...reportCard,background:'#effaf2'}}><div style={smallLabel}>Completed revenue</div><div style={metricValue}>{money(completedRevenue)}</div><div style={{fontSize:11,color:'#4c7259',marginTop:5}}>{completedRows.length} completed</div></div>
+          <div style={reportCard}><div style={smallLabel}>Service received</div><div style={metricValue}>{money(serviceReceived)}</div><div style={{fontSize:11,color:'#7b828e',marginTop:5}}>paid service only</div></div>
+          <div style={reportCard}><div style={smallLabel}>Tips received</div><div style={metricValue}>{money(tipsReceived)}</div><div style={{fontSize:11,color:'#7b828e',marginTop:5}}>recorded tips</div></div>
+          <div style={{...reportCard,background:'#f5f2ff'}}><div style={smallLabel}>Total received</div><div style={metricValue}>{money(totalReceived)}</div><div style={{fontSize:11,color:'#66579a',marginTop:5}}>service + tips</div></div>
           <div style={reportCard}><div style={smallLabel}>Remaining</div><div style={metricValue}>{money(remainingRevenue)}</div><div style={{fontSize:11,color:'#7b828e',marginTop:5}}>scheduled, not completed</div></div>
           <div style={reportCard}><div style={smallLabel}>Dogs</div><div style={metricValue}>{dogCount}</div><div style={{fontSize:11,color:'#7b828e',marginTop:5}}>across {bookedRows.length} stops</div></div>
+          <div style={{...reportCard,background:'#eef7ff'}}><div style={smallLabel}>Haley payout</div><div style={metricValue}>{money(haleyTotals.payout)}</div><div style={{fontSize:11,color:'#52657a',marginTop:5}}>50% commission + 100% tips</div></div>
+          <div style={{...reportCard,background:'#fff4ed'}}><div style={smallLabel}>Your share from Haley</div><div style={metricValue}>{money(haleyTotals.commission)}</div><div style={{fontSize:11,color:'#8a5a3b',marginTop:5}}>your 50% of Haley's completed service revenue</div></div>
         </div>
 
         {!weekRecord && <div className="prototype-note" style={{marginTop:12}}>No saved schedule exists for this week yet.</div>}
@@ -3583,8 +3617,16 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false}) {
           <div className="section-title" style={{margin:'0 0 12px'}}><h3>Groomer totals</h3></div>
           <div style={{display:'grid',gap:10}}>
             {groomerTotals.map(item=><div key={item.name} style={{display:'grid',gridTemplateColumns:'1fr auto',gap:10,alignItems:'center',padding:12,borderRadius:14,background:item.name==='Jen'?'#f1f3ff':'#eff8f0',border:`1px solid ${item.name==='Jen'?'#dfe3ff':'#d9ecdc'}`}}>
-              <div><strong style={{fontSize:14,color:'#172038'}}>{item.name}</strong><div style={{fontSize:11,color:'#7b828e',marginTop:3}}>{item.appointments} appointment{item.appointments===1?'':'s'}</div></div>
-              <div style={{textAlign:'right'}}><strong style={{fontSize:16,color:'#172038'}}>{money(item.scheduled)}</strong><div style={{fontSize:10,color:'#6b7280',marginTop:2}}>{money(item.completed)} completed</div></div>
+              <div>
+                <strong style={{fontSize:14,color:'#172038'}}>{item.name}</strong>
+                <div style={{fontSize:11,color:'#7b828e',marginTop:3}}>{item.appointments} appointment{item.appointments===1?'':'s'}</div>
+                {item.name==='Haley' && <div style={{fontSize:10.5,color:'#52657a',marginTop:4}}>50% service commission · keeps 100% of tips</div>}
+              </div>
+              <div style={{textAlign:'right'}}>
+                <strong style={{fontSize:16,color:'#172038'}}>{money(item.scheduled)}</strong>
+                <div style={{fontSize:10,color:'#6b7280',marginTop:2}}>{money(item.completed)} completed</div>
+                {item.name==='Haley' && <div style={{fontSize:10,color:'#267447',marginTop:3,fontWeight:800}}>{money(item.commission)} commission + {money(item.tips)} tips = {money(item.payout)} pay</div>}
+              </div>
             </div>)}
           </div>
         </div>
