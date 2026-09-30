@@ -450,10 +450,11 @@ function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,completingId,revi
     })
 
   const days = Array.from({length:5},(_,i)=>addDays(weekStart,i))
+  const activeWeekAppointments = appointments.filter(appt => !appt.inactive)
   const visibleAppointments =
     groomer === 'All'
-      ? appointments
-      : appointments.filter(a => a.groomer === groomer)
+      ? activeWeekAppointments
+      : activeWeekAppointments.filter(a => a.groomer === groomer)
 
   const statusLabel = weekRecord?.status === 'confirmed' ? 'Confirmed week' : 'Draft week'
   const weekEnd = addDays(weekStart,4)
@@ -551,7 +552,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,completingId,revi
 
       {weekRecord && (
         <div className="prototype-note">
-          Tap an appointment to edit, change services, cancel, reschedule, or mark a no-show. Use Complete directly on the schedule card.
+          Tap an appointment to edit, change services, cancel, reschedule, or mark a no-show. Cancelled appointments and appointments moved to another week are hidden from the active schedule.
         </div>
       )}
     </section>
