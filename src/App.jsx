@@ -1282,11 +1282,12 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
     }
   }
 
+  const commonFrequencyOptions = ['2','4','6','8','10','12']
   const blankDogForm = (client = null) => ({
     household_id:client?.household || '', owner:client?.owner || '', original_dog:'', dog:'',
-    phone:client?.phone || '', groomer:client?.groomer || '', area:client?.area || '',
+    phone:client?.phone || '', groomer:client?.groomer || '', area:client?.area || '', area_mode:'existing', new_area:'',
     address:client?.address || '', city:client?.city || '', state:client?.state || 'TX', zip:client?.zip || '',
-    service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'', groom_minutes:'', bath_minutes:'', partial_groom_minutes:'', frequency_weeks:'', last_groom:'', last_bath:''
+    service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'', groom_minutes:'', bath_minutes:'', partial_groom_minutes:'', frequency_weeks:'', frequency_mode:'preset', last_groom:'', last_bath:''
   })
 
   const editDog = row => {
@@ -1295,7 +1296,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
     household_id:selectedClient.household || '', owner:selectedClient.owner || '',
     original_dog:valueOf(row,'dog','Dog') || '', dog:valueOf(row,'dog','Dog') || '',
     phone:selectedClient.phone || '', groomer:valueOf(row,'groomer','Groomer') || selectedClient.groomer || '',
-    area:selectedClient.area || '', address:selectedClient.address || '', city:selectedClient.city || '',
+    area:selectedClient.area || '', area_mode:'existing', new_area:'', address:selectedClient.address || '', city:selectedClient.city || '',
     state:selectedClient.state || 'TX', zip:selectedClient.zip || '',
     service:canonicalServiceLabel(valueOf(row,'service_pattern','Service Pattern')) || 'Groom',
     groom_price:valueOf(row,'groom_price','Groom Price') || (['Groom','Service Varies'].includes(canonicalServiceLabel(valueOf(row,'service_pattern','Service Pattern'))) ? valueOf(row,'price','Price') : ''),
@@ -1305,6 +1306,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
     bath_minutes:valueOf(row,'bath_minutes','Bath Minutes') || (['Bath','Bath Only'].includes(canonicalServiceLabel(valueOf(row,'service_pattern','Service Pattern'))) ? valueOf(row,'minutes','Minutes') : ''),
     partial_groom_minutes:valueOf(row,'partial_groom_minutes','Partial Groom Minutes') || (canonicalServiceLabel(valueOf(row,'service_pattern','Service Pattern'))==='Partial Groom' ? valueOf(row,'minutes','Minutes') : ''),
     frequency_weeks:valueOf(row,'frequency_weeks','Frequency Weeks'),
+    frequency_mode:commonFrequencyOptions.includes(String(valueOf(row,'frequency_weeks','Frequency Weeks') || '')) ? 'preset' : (valueOf(row,'frequency_weeks','Frequency Weeks') ? 'custom' : 'preset'),
     last_groom:String(valueOf(row,'last_groom','Last Groom','last_groom_date','Last Groom Date') || '').slice(0,10),
     last_bath:String(valueOf(row,'last_bath','Last Bath','last_bath_date','Last Bath Date') || '').slice(0,10)
     })
@@ -1321,7 +1323,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
         p_household_id:String(form.household_id||'').trim() || null,
         p_owner:String(form.owner||'').trim(), p_original_dog:String(form.original_dog||'').trim() || null,
         p_dog:String(form.dog||'').trim(), p_phone:String(form.phone||'').trim() || null,
-        p_groomer:String(form.groomer||'').trim() || null, p_area:canonicalAreaLabel(form.area) || null,
+        p_groomer:String(form.groomer||'').trim() || null, p_area:canonicalAreaLabel(form.area_mode==='new' ? form.new_area : form.area) || null,
         p_address:String(form.address||'').trim() || null, p_city:String(form.city||'').trim() || null,
         p_state:String(form.state||'').trim() || null, p_zip:String(form.zip||'').trim() || null,
         p_service:form.service || 'Groom', p_price:num(form.groom_price || form.bath_price || form.partial_groom_price),
@@ -1579,8 +1581,20 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
               <label>Owner<input value={dogEditor.owner} onChange={e=>setDogEditor({...dogEditor,owner:e.target.value})}/></label>
               <label>Dog name<input value={dogEditor.dog} onChange={e=>setDogEditor({...dogEditor,dog:e.target.value})}/></label>
               <label>Phone<input value={dogEditor.phone} onChange={e=>setDogEditor({...dogEditor,phone:e.target.value})}/></label>
-              <label>Groomer<input value={dogEditor.groomer} onChange={e=>setDogEditor({...dogEditor,groomer:e.target.value})}/></label>
-              <label style={{gridColumn:'1 / -1'}}>Area<input value={dogEditor.area} placeholder="Example: Conroe" onChange={e=>setDogEditor({...dogEditor,area:e.target.value})}/></label>
+              <label>Groomer<select value={dogEditor.groomer} onChange={e=>setDogEditor({...dogEditor,groomer:e.target.value})}>
+                <option value="">Choose groomer</option><option>Either</option><option>Jen</option><option>Haley</option>
+              </select></label>
+              <label style={{gridColumn:'1 / -1'}}>Area<select value={dogEditor.area_mode==='new'?'__new__':dogEditor.area} onChange={e=>{
+                const value=e.target.value
+                if(value==='__new__') setDogEditor({...dogEditor,area_mode:'new',area:'',new_area:''})
+                else setDogEditor({...dogEditor,area_mode:'existing',area:value,new_area:''})
+              }}>
+                <option value="">Choose area</option>
+                {areaOptions.map(area=><option key={area} value={area}>{area}</option>)}
+                {dogEditor.area && !areaOptions.includes(canonicalAreaLabel(dogEditor.area)) && <option value={dogEditor.area}>{dogEditor.area}</option>}
+                <option value="__new__">+ Add new area</option>
+              </select></label>
+              {dogEditor.area_mode==='new' && <label style={{gridColumn:'1 / -1'}}>New area name<input value={dogEditor.new_area || ''} placeholder="Example: Tomball" onChange={e=>setDogEditor({...dogEditor,new_area:e.target.value})}/></label>}
               <label style={{gridColumn:'1 / -1'}}>Address<input value={dogEditor.address} onChange={e=>setDogEditor({...dogEditor,address:e.target.value})}/></label>
               <label>City<input value={dogEditor.city} onChange={e=>setDogEditor({...dogEditor,city:e.target.value})}/></label>
               <label>ZIP<input value={dogEditor.zip} onChange={e=>setDogEditor({...dogEditor,zip:e.target.value})}/></label>
@@ -1591,7 +1605,16 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
               <label>Groom time (min)<input type="number" inputMode="numeric" value={dogEditor.groom_minutes} onChange={e=>setDogEditor({...dogEditor,groom_minutes:e.target.value})}/></label>
               <label>Bath time (min)<input type="number" inputMode="numeric" value={dogEditor.bath_minutes} onChange={e=>setDogEditor({...dogEditor,bath_minutes:e.target.value})}/></label>
               <label>Partial Groom time (min)<input type="number" inputMode="numeric" value={dogEditor.partial_groom_minutes} onChange={e=>setDogEditor({...dogEditor,partial_groom_minutes:e.target.value})}/></label>
-              <label>Frequency (weeks)<input type="number" inputMode="numeric" value={dogEditor.frequency_weeks} onChange={e=>setDogEditor({...dogEditor,frequency_weeks:e.target.value})}/></label>
+              <label>Frequency (weeks)<select value={dogEditor.frequency_mode==='custom'?'__custom__':String(dogEditor.frequency_weeks || '')} onChange={e=>{
+                const value=e.target.value
+                if(value==='__custom__') setDogEditor({...dogEditor,frequency_mode:'custom',frequency_weeks:commonFrequencyOptions.includes(String(dogEditor.frequency_weeks || ''))?'':dogEditor.frequency_weeks})
+                else setDogEditor({...dogEditor,frequency_mode:'preset',frequency_weeks:value})
+              }}>
+                <option value="">Choose frequency</option>
+                {commonFrequencyOptions.map(value=><option key={value} value={value}>{value} weeks</option>)}
+                <option value="__custom__">Other</option>
+              </select></label>
+              {dogEditor.frequency_mode==='custom' && <label>Custom weeks<input type="number" min="1" inputMode="numeric" value={dogEditor.frequency_weeks} onChange={e=>setDogEditor({...dogEditor,frequency_weeks:e.target.value})}/></label>}
               <label>Last groom<input type="date" value={dogEditor.last_groom} onChange={e=>setDogEditor({...dogEditor,last_groom:e.target.value})}/></label>
               <label>Last bath<input type="date" value={dogEditor.last_bath} onChange={e=>setDogEditor({...dogEditor,last_bath:e.target.value})}/></label>
             </div>
@@ -2004,10 +2027,10 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
             ? await supabase.rpc('update_grooming_appointment_services',{...params,p_dogs:formatAppointmentDogServices(serviceRows),p_price:missingServicePrice?null:serviceTotal,p_minutes:missingServiceMinutes?null:serviceMinutesTotal})
           : mode==='edit'
             ? await supabase.rpc('update_grooming_appointment_details',{...params,p_time:editTime,p_groomer:editGroomer,p_fixed:editFixed,p_note:note.trim() || null})
+          : mode==='reschedule'
+            ? await supabase.rpc('reschedule_grooming_appointment_safe',{...params,p_target_date:targetDate,p_target_time:targetTime,p_target_groomer:targetGroomer,p_note:note.trim() || null})
             : await supabase.rpc('change_grooming_appointment',{...params,p_action:mode,
-              p_target_date:mode==='reschedule'?targetDate:null,
-              p_target_time:mode==='reschedule'?targetTime:null,
-              p_target_groomer:mode==='reschedule'?targetGroomer:null,p_note:note.trim()})
+              p_target_date:null,p_target_time:null,p_target_groomer:null,p_note:note.trim()})
       if (saveError) {
         if (saveError.code==='PGRST202' || saveError.code==='42883') throw new Error('This action has not been enabled yet. Please finish its one-time setup first.')
         throw saveError
