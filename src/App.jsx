@@ -92,11 +92,15 @@ function confirmationMessage({owner,dogs,date,time}) {
   const dateKey = String(date || '').slice(0,10)
   let dateLabel = dateKey
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
-    dateLabel = new Date(`${dateKey}T12:00:00`).toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})
+    const d = new Date(`${dateKey}T12:00:00`)
+    const weekday = d.toLocaleDateString('en-US',{weekday:'long'})
+    const month = d.toLocaleDateString('en-US',{month:'short'})
+    const day = d.getDate()
+    dateLabel = `${weekday} ${month}. ${day}`
   }
   const windowLabel = arrivalWindowLabel(time)
   const petText = dogs ? ` for ${dogs}` : ''
-  return `Hi ${first}! Just confirming your grooming appointment${petText} on ${dateLabel}${windowLabel ? `. Your arrival window is ${windowLabel}` : ''}. Please reply to confirm. Thank you!`
+  return `Hi ${first}! Just confirming your grooming appointment${petText} on ${dateLabel}.${windowLabel ? ` Would between ${windowLabel} work for you?` : ''}`
 }
 
 function openSms(phone, body='') {
