@@ -3,7 +3,7 @@ import { supabase } from './supabase.js'
 import {
   CalendarDays, ChevronLeft, ChevronRight, Clock3, Dog, Ellipsis, Home,
   MapPin, Plus, Route, Search, Settings, Sparkles, Users, WalletCards, X,
-  CheckCircle2, MessageCircle, WandSparkles
+  CheckCircle2, MessageCircle, WandSparkles, LogOut
 } from 'lucide-react'
 
 const demoDays = [
@@ -3482,6 +3482,7 @@ function More({dogs,revision,onAsk,onRebook}) {
           <button><Settings size={19}/><span>Scheduling settings</span><ChevronRight size={17}/></button>
           <button><Route size={19}/><span>Route settings</span><ChevronRight size={17}/></button>
           <button type="button" onClick={()=>onAsk?.('Show me this week\'s business summary')}><WalletCards size={19}/><span>Ask Planner about the week</span><ChevronRight size={17}/></button>
+          <button type="button" onClick={async()=>{ await supabase?.auth?.signOut?.() }}><LogOut size={19}/><span>Sign out</span><ChevronRight size={17}/></button>
         </div>
       </>}
     </section>
