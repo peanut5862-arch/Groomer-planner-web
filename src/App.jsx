@@ -2441,9 +2441,9 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
                 Leave Last Groom / Last Bath blank. When you complete their first appointment, Grooming Planner will automatically save that service as their real history.
               </div>}
               {newClientOpen && dogEditor.prior_service==='no' && <div style={{gridColumn:'1 / -1',border:'1px solid #e7e4de',borderRadius:14,padding:12,display:'grid',gap:10}}>
-                <label style={{display:'flex',gap:9,alignItems:'center',fontSize:13,fontWeight:800}}>
-                  <input type="checkbox" checked={Boolean(dogEditor.first_appointment_booked)} onChange={e=>setDogEditor({...dogEditor,first_appointment_booked:e.target.checked})}/>
-                  First appointment is already booked
+                <label style={{display:'flex',gap:10,alignItems:'center',fontSize:13,fontWeight:800,width:'100%',minWidth:0,lineHeight:1.35}}>
+                  <input type="checkbox" checked={Boolean(dogEditor.first_appointment_booked)} onChange={e=>setDogEditor({...dogEditor,first_appointment_booked:e.target.checked})} style={{width:22,height:22,minWidth:22,flex:'0 0 22px',margin:0,padding:0}}/>
+                  <span style={{minWidth:0,whiteSpace:'normal',overflowWrap:'anywhere'}}>First appointment is already booked</span>
                 </label>
                 {dogEditor.first_appointment_booked && <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
                   <label style={{gridColumn:'1 / -1'}}>First appointment date<input type="date" value={dogEditor.first_appointment_date || ''} onChange={e=>setDogEditor({...dogEditor,first_appointment_date:e.target.value})}/></label>
@@ -2454,9 +2454,9 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
                   }}><option>Jen</option><option>Haley</option></select></label>
                   <label>Time<input type="time" value={dogEditor.first_appointment_time || defaultFirstStopTime(dogEditor.first_appointment_groomer)} onChange={e=>setDogEditor({...dogEditor,first_appointment_time:e.target.value})}/></label>
                   <label style={{gridColumn:'1 / -1'}}>First service<select value={dogEditor.first_appointment_service || 'Groom'} onChange={e=>setDogEditor({...dogEditor,first_appointment_service:e.target.value})}>{appointmentServiceOptions.map(service=><option key={service}>{service}</option>)}</select></label>
-                  <label style={{gridColumn:'1 / -1',display:'flex',gap:9,alignItems:'center',fontSize:13,fontWeight:700}}>
-                    <input type="checkbox" checked={Boolean(dogEditor.first_appointment_fixed)} onChange={e=>setDogEditor({...dogEditor,first_appointment_fixed:e.target.checked})}/>
-                    Fixed time (otherwise the normal ±30 minute arrival window applies)
+                  <label style={{gridColumn:'1 / -1',display:'flex',gap:10,alignItems:'flex-start',fontSize:13,fontWeight:700,width:'100%',minWidth:0,lineHeight:1.35}}>
+                    <input type="checkbox" checked={Boolean(dogEditor.first_appointment_fixed)} onChange={e=>setDogEditor({...dogEditor,first_appointment_fixed:e.target.checked})} style={{width:22,height:22,minWidth:22,flex:'0 0 22px',margin:0,padding:0}}/>
+                    <span style={{minWidth:0,whiteSpace:'normal',overflowWrap:'anywhere'}}>Fixed time (otherwise the normal ±30 minute arrival window applies)</span>
                   </label>
                 </div>}
               </div>}
