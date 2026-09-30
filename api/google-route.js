@@ -14,8 +14,22 @@ function cleanStop(stop, index) {
   return {
     id:String(stop?.id || `stop-${index}`),
     owner:String(stop?.owner || `Stop ${index + 1}`).trim(),
-    address:String(stop?.address || '').trim()
+    address:String(stop?.address || '').trim(),
+    time:String(stop?.time || '').trim(),
+    window:String(stop?.window || '').trim()
   }
+}
+
+function mapsUrl(homeAddress, clientStops) {
+  const params = new URLSearchParams({
+    api:'1',
+    origin:homeAddress,
+    destination:homeAddress,
+    travelmode:'driving',
+    dir_action:'navigate'
+  })
+  if (clientStops.length) params.set('waypoints', clientStops.map(stop=>stop.address).join('|'))
+  return `https://www.google.com/maps/dir/?${params.toString()}`
 }
 
 export default async function handler(req, res) {
@@ -27,14 +41,30 @@ export default async function handler(req, res) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY
   if (!apiKey) return send(res, 500, {error:'GOOGLE_MAPS_API_KEY is not configured in Vercel.'})
 
-  const stops = (Array.isArray(req.body?.stops) ? req.body.stops : []).map(cleanStop)
-  if (stops.length < 2) return send(res, 400, {error:'At least two client addresses are required.'})
-  if (stops.length > 12) return send(res, 400, {error:'Please calculate no more than 12 stops at once.'})
-  if (stops.some(stop=>!stop.address)) return send(res, 400, {error:'Every stop needs a street address.'})
+  const groomer = String(req.body?.groomer || '').trim()
+  if (!['Jen','Haley'].includes(groomer)) {
+    return send(res, 400, {error:'Choose Jen or Haley so the correct home base can be used.'})
+  }
+
+  const homeAddress = groomer === 'Jen'
+    ? String(process.env.JEN_HOME_ADDRESS || '').trim()
+    : String(process.env.HALEY_HOME_ADDRESS || '').trim()
+  if (!homeAddress) {
+    return send(res, 500, {error:`${groomer === 'Jen' ? 'JEN_HOME_ADDRESS' : 'HALEY_HOME_ADDRESS'} is not configured in Vercel.`})
+  }
+
+  const clientStops = (Array.isArray(req.body?.stops) ? req.body.stops : []).map(cleanStop)
+  if (clientStops.length < 1) return send(res, 400, {error:'At least one client address is required.'})
+  if (clientStops.length > 10) return send(res, 400, {error:'Please calculate no more than 10 client stops at once.'})
+  if (clientStops.some(stop=>!stop.address)) return send(res, 400, {error:'Every client stop needs a street address.'})
+
+  const homeStart = {id:'home-start', owner:`${groomer} home`, address:homeAddress}
+  const homeEnd = {id:'home-end', owner:`${groomer} home`, address:homeAddress}
+  const routeStops = [homeStart, ...clientStops, homeEnd]
 
   try {
-    const legs = await Promise.all(stops.slice(1).map(async (destination, index) => {
-      const origin = stops[index]
+    const legs = await Promise.all(routeStops.slice(1).map(async (destination, index) => {
+      const origin = routeStops[index]
       const googleResponse = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
         method:'POST',
         headers:{
@@ -80,10 +110,12 @@ export default async function handler(req, res) {
     return send(res, 200, {
       source:'Google Routes API',
       trafficAware:true,
+      groomer,
       fetchedAt:new Date().toISOString(),
       totalMinutes:legs.reduce((sum,leg)=>sum + Number(leg.minutes || 0),0),
       totalMiles:legs.reduce((sum,leg)=>sum + Number(leg.miles || 0),0),
-      legs
+      legs,
+      mapsUrl:mapsUrl(homeAddress, clientStops)
     })
   } catch (error) {
     return send(res, 502, {error:error?.message || 'Google route calculation failed.'})
