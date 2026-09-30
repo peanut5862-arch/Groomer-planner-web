@@ -1171,9 +1171,6 @@ function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
   const [saving,setSaving] = useState(false)
   const [message,setMessage] = useState('')
   const [manualOverride,setManualOverride] = useState(false)
-  const [showLateOptions,setShowLateOptions] = useState(false)
-  const [etaLoading,setEtaLoading] = useState(false)
-  const [lastContact,setLastContact] = useState(()=>readAppointmentContact(appt))
 
   const keyOf = row => String(row?.household_id || row?.['Household ID'] || '').trim()
     ? `h:${String(row?.household_id || row?.['Household ID']).trim()}`
@@ -3506,6 +3503,8 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation}) {
   const [scheduleCheck,setScheduleCheck] = useState({loading:false,severity:'ok',messages:[]})
   const [manualOverride,setManualOverride] = useState(false)
   const [showLateOptions,setShowLateOptions] = useState(false)
+  const [etaLoading,setEtaLoading] = useState(false)
+  const [lastContact,setLastContact] = useState(()=>readAppointmentContact(appt))
   const savingRef = React.useRef(false)
   const closeRef = React.useRef(null)
   const dialogRef = React.useRef(null)
