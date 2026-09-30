@@ -3,7 +3,7 @@ import { supabase } from './supabase.js'
 import {
   CalendarDays, ChevronLeft, ChevronRight, Clock3, Dog, Ellipsis, Home,
   MapPin, Plus, Route, Search, Settings, Sparkles, Users, WalletCards, X,
-  CheckCircle2, MessageCircle, WandSparkles, LogOut
+  CheckCircle2, MessageCircle, WandSparkles, LogOut, Share2
 } from 'lucide-react'
 
 const demoDays = [
@@ -264,6 +264,28 @@ function openCall(phone) {
   window.location.href = `tel:${clean}`
 }
 
+function googleMapsAddressUrl(address) {
+  const clean = String(address || '').trim()
+  return clean ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(clean)}` : ''
+}
+
+async function shareAppointmentAddress({owner,address}) {
+  const cleanAddress = String(address || '').trim()
+  if (!cleanAddress) throw new Error('No saved street address for this client.')
+  const name = String(owner || 'Client').trim() || 'Client'
+  const mapsUrl = googleMapsAddressUrl(cleanAddress)
+  const text = `${name} appointment address:\n${cleanAddress}\n${mapsUrl}`
+  if (navigator.share) {
+    await navigator.share({title:`${name} appointment address`,text})
+    return 'shared'
+  }
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return 'copied'
+  }
+  throw new Error('Sharing is not available on this device.')
+}
+
 function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,confirmationSaving,viewerMode=false}) {
   const [showTextMenu,setShowTextMenu] = useState(false)
   const [showLate,setShowLate] = useState(false)
@@ -285,6 +307,15 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,
     if (!clientAddress) { setCommunicationError('No saved street address for this client.'); return }
     try { await navigator.clipboard.writeText(clientAddress); setCommunicationError('Address copied.') }
     catch { setCommunicationError('Could not copy the address automatically.') }
+  }
+  const sendClientAddress = async () => {
+    try {
+      const result = await shareAppointmentAddress({owner:appt.owner,address:clientAddress})
+      if (result === 'copied') setCommunicationError('Address and Google Maps link copied. Paste it into a message to the groomer.')
+      else setCommunicationError('')
+    } catch (error) {
+      if (error?.name !== 'AbortError') setCommunicationError(error?.message || 'Could not share the appointment address.')
+    }
   }
   useEffect(()=>{ setLastContact(readAppointmentContact(appt)); setCommunicationError('') },[appt?.id,appt?.date,appt?.time])
   const sendAppointmentText = (body,type) => {
@@ -350,6 +381,9 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,
               <button type="button" className="appt-text-btn" onClick={()=>{setShowTextMenu(value=>!value);setShowLate(false)}}>
                 <MessageCircle size={13}/> Text ▾
               </button>
+              <button type="button" className="appt-text-btn" disabled={!clientAddress} onClick={sendClientAddress}>
+                <Share2 size={13}/> Send address
+              </button>
               {showTextMenu && <div className="quick-text-menu" aria-label="Client text options">
                 <button type="button" onClick={()=>{
                   if (clientConfirmationStatus(row)==='Unconfirmed' && onConfirmation) onConfirmation(appt,'Needs reply')
@@ -365,6 +399,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,
                 <button type="button" onClick={()=>sendAppointmentText(paymentReminderMessage({owner:appt.owner,total:appt.price}),'Payment')}>Payment total</button>
                 <button type="button" onClick={()=>openSms(appt.phone,'')}>Custom text</button>
                 <button type="button" onClick={()=>openCall(appt.phone)}>Call</button>
+                <button type="button" disabled={!clientAddress} onClick={sendClientAddress}><Share2 size={13}/> Send address</button>
                 <button type="button" disabled={!clientAddress} onClick={copyClientAddress}>Copy address</button>
                 {onOpen && onConfirmation && <button type="button" onClick={()=>{onConfirmation(appt,"Can't make it");setShowTextMenu(false);onOpen('reschedule')}}>Can't make it…</button>}
                 {onOpen && <button type="button" onClick={()=>{setShowTextMenu(false);onOpen('reschedule')}}>Reschedule…</button>}
@@ -3599,6 +3634,15 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
     try { await navigator.clipboard.writeText(clientAddress); setError('Address copied.') }
     catch { setError('Could not copy the address automatically.') }
   }
+  const sendClientAddress = async () => {
+    try {
+      const result = await shareAppointmentAddress({owner:appt.owner,address:clientAddress})
+      if (result === 'copied') setError('Address and Google Maps link copied. Paste it into a message to the groomer.')
+      else setError('')
+    } catch (error) {
+      if (error?.name !== 'AbortError') setError(error?.message || 'Could not share the appointment address.')
+    }
+  }
 
 
   const completeNow = async () => {
@@ -3856,6 +3900,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
           <div className="communication-actions">
             <button type="button" disabled={!phone} onClick={()=>{setShowTextMenu(value=>!value);setShowLateOptions(false)}}><MessageCircle size={14}/> Text customer ▾</button>
             <button type="button" disabled={!phone} onClick={()=>openCall(phone)}>Call</button>
+            <button type="button" disabled={!clientAddress} onClick={sendClientAddress}><Share2 size={14}/> Send address</button>
             <button type="button" onClick={async()=>{
               try { await navigator.clipboard.writeText(message); setError('Confirmation text copied.') }
               catch { setError('Could not copy automatically. Use Text customer instead.') }
@@ -3876,6 +3921,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
             <button type="button" disabled={!phone} onClick={()=>recordAndText(paymentReminderMessage({owner:appt.owner,total:appt.price}),'Payment')}>Payment total</button>
             <button type="button" disabled={!phone} onClick={()=>openSms(phone,'')}>Custom text</button>
             <button type="button" disabled={!phone} onClick={()=>openCall(phone)}>Call</button>
+            <button type="button" disabled={!clientAddress} onClick={sendClientAddress}><Share2 size={13}/> Send address</button>
             <button type="button" disabled={!clientAddress} onClick={copyClientAddress}>Copy address</button>
             {!completed && !moved && !missed && onConfirmation && <button type="button" onClick={()=>{onConfirmation(appt,"Can't make it");setShowTextMenu(false);setMode('reschedule')}}>Can't make it…</button>}
             {!completed && !moved && !missed && <button type="button" onClick={()=>{setShowTextMenu(false);setMode('reschedule')}}>Reschedule…</button>}
