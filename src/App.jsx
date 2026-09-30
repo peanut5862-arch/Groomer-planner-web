@@ -4747,6 +4747,25 @@ function GroomerPortal({session,groomer}) {
   const today=businessDateKey()
   const activeWeek=tab==='Today'?mondayForDate(today):weekStart
 
+  const ymd = (date) => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2,'0')
+    const day = String(date.getDate()).padStart(2,'0')
+    return `${year}-${month}-${day}`
+  }
+
+  const parseLocalDate = (value) => {
+    const [year,month,day] = String(value || '').split('-').map(Number)
+    if (!year || !month || !day) return null
+    return new Date(year,month - 1,day,12,0,0,0)
+  }
+
+  const addDays = (date, amount) => {
+    const next = new Date(date)
+    next.setDate(next.getDate() + amount)
+    return next
+  }
+
   const displayDate = (date) =>
     date.toLocaleDateString(undefined,{month:'short',day:'numeric'})
 
