@@ -37,7 +37,8 @@ const fillCandidates = [
 ]
 
 function Stat({label,value,subtle}) {
-  return <div className={`stat ${subtle?'subtle':''}`}><span>{label}</span><strong>{value}</strong></div>
+  const tone = /total|revenue|money/i.test(String(label || '')) ? ' money' : /completed/i.test(String(label || '')) ? ' completed' : ''
+  return <div className={`stat ${subtle?'subtle':''}${tone}`}><span>{label}</span><strong>{value}</strong></div>
 }
 
 function ApptCard({appt,onOpen,onComplete,onUndo,completing}) {
@@ -49,8 +50,10 @@ function ApptCard({appt,onOpen,onComplete,onUndo,completing}) {
   const canComplete = Boolean(onComplete) && !completed && !inactive && /^\d{4}-\d{2}-\d{2}$/.test(date)
   const hasUndoSnapshot = Boolean(row['Completion Snapshot'] && typeof row['Completion Snapshot'] === 'object')
   const canUndo = Boolean(onUndo) && completed && !inactive && hasUndoSnapshot
+  const cardGroomer = String(appt?.groomer || row.Groomer || '').trim().toLowerCase()
+  const cardClass = ['appt-card',cardGroomer==='jen'?'groomer-jen':'',cardGroomer==='haley'?'groomer-haley':'',completed?'completed-card':''].filter(Boolean).join(' ')
   return (
-    <div className="appt-card" style={{cursor:onOpen?'pointer':'default'}} onClick={onOpen} role={onOpen?'button':undefined} tabIndex={onOpen?0:undefined}
+    <div className={cardClass} style={{cursor:onOpen?'pointer':'default'}} onClick={onOpen} role={onOpen?'button':undefined} tabIndex={onOpen?0:undefined}
       onKeyDown={onOpen ? event=>{ if(event.key==='Enter' || event.key===' '){event.preventDefault();onOpen()} } : undefined}>
       <div className="time-pill">{displayClockTime(appt.time)}</div>
       <div className="appt-main">
@@ -493,7 +496,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey})
   if (!sorted.length) return null
 
   return (
-    <div style={{margin:'8px 0 12px',padding:'11px 12px',border:'1px solid #e3e5e9',borderRadius:14,background:'#fafbfc'}}>
+    <div className="route-card" style={{margin:'8px 0 12px',padding:'11px 12px',border:'1px solid #cedbea',borderRadius:14,background:'#f1f6fb'}}>
       <div style={{display:'flex',gap:8,alignItems:'center',justifyContent:'space-between',flexWrap:'wrap'}}>
         <div>
           <div style={{fontSize:12,fontWeight:800,color:'#17223f',display:'flex',alignItems:'center',gap:6}}><Route size={15}/>Google route</div>
@@ -751,7 +754,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,onFillOpening,com
         {['All','Jen','Haley'].map(x=>(
           <button
             key={x}
-            className={groomer===x?'active':''}
+            className={`${groomer===x?'active ':''}${x==='Jen'?'seg-jen':x==='Haley'?'seg-haley':'seg-all'}`}
             onClick={()=>setGroomer(x)}
           >
             {x}
@@ -2884,6 +2887,34 @@ function rescheduleValidation(date,time,groomer,today) {
   return ''
 }
 
+
+function activeScheduleRow(row) {
+  const appointmentStatus = String(row?.['Appointment Status'] || '').trim().toLowerCase()
+  const completion = String(row?.['Completion Status'] || '').trim().toLowerCase()
+  const status = String(row?.Status || '').trim().toLowerCase()
+  if (!String(row?.Owner || '').trim()) return false
+  if (completion === 'completed') return false
+  if (['cancelled','canceled','moved to another week','missed','no show','no-show','noshow'].includes(appointmentStatus)) return false
+  if (['cancelled','canceled','rescheduled','completed','missed','no show','no-show','noshow'].includes(status)) return false
+  return true
+}
+
+function scheduleRowDuration(row, fallback=60) {
+  const raw = Number(String(row?.Minutes ?? row?.['Minutes'] ?? '').replace(/[^0-9.]/g,''))
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback
+}
+
+function sameSourceAppointment(candidate, source) {
+  return String(candidate?.['Household ID'] || '').trim() === String(source?.['Household ID'] || '').trim()
+    && String(candidate?.Owner || '').trim().toLowerCase() === String(source?.Owner || '').trim().toLowerCase()
+    && String(candidate?.Date || '').slice(0,10) === String(source?.Date || '').slice(0,10)
+    && appointmentTimeInput(candidate?.['Start Time'] || candidate?.['Locked Time']) === appointmentTimeInput(source?.['Start Time'] || source?.['Locked Time'])
+}
+
+function scheduleRiskBadge(severity) {
+  return severity === 'danger' ? 'Conflict' : severity === 'warning' ? 'Tight route' : 'Looks good'
+}
+
 function CompletionSheet({appt,dogs,onClose,onSaved}) {
   const row = appt.sourceRow
   const today = businessDateKey()
@@ -2899,6 +2930,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
   const [serviceRows,setServiceRows] = useState(()=>parseAppointmentDogServices(row.Dogs))
   const [saving,setSaving] = useState(false)
   const [error,setError] = useState('')
+  const [scheduleCheck,setScheduleCheck] = useState({loading:false,severity:'ok',messages:[]})
   const savingRef = React.useRef(false)
   const closeRef = React.useRef(null)
   const dialogRef = React.useRef(null)
@@ -2970,6 +3002,107 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
     return ()=>{document.removeEventListener('keydown',keydown);previous?.focus?.()}
   },[])
 
+  useEffect(()=>{
+    if (!supabase || completed || moved || missed || !['edit','reschedule'].includes(mode)) {
+      setScheduleCheck({loading:false,severity:'ok',messages:[]})
+      return
+    }
+    const date = mode==='reschedule' ? targetDate : originalDate
+    const time = mode==='reschedule' ? targetTime : editTime
+    const groomer = mode==='reschedule' ? targetGroomer : editGroomer
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time) || !['Jen','Haley'].includes(groomer)) return
+    let cancelledCheck = false
+    const timer = setTimeout(async()=>{
+      setScheduleCheck({loading:true,severity:'ok',messages:[]})
+      try {
+        const weekStart = mondayForDate(date)
+        const {data,error:loadError} = await supabase.from('weekly_drafts').select('plan_json').eq('week_start',weekStart).limit(1)
+        if (loadError) throw loadError
+        if (cancelledCheck) return
+        const rawRows = Array.isArray(data?.[0]?.plan_json) ? data[0].plan_json : []
+        const existing = rawRows.filter(item=>activeScheduleRow(item)
+          && String(item.Date || '').slice(0,10)===date
+          && String(item.Groomer || '').trim()===groomer
+          && !(weekStart===appt.weekStart && sameSourceAppointment(item,row)))
+        const candidate = {...row,Date:date,Groomer:groomer,'Start Time':time,'Locked Time':editFixed?time:''}
+        const candidateId = 'candidate-edit'
+        const candidateStart = clockMinutesForDisplay(time)
+        const candidateDuration = mode==='edit' ? scheduleRowDuration(row, serviceMinutesTotal || 60) : scheduleRowDuration(row, serviceMinutesTotal || 60)
+        const messages = []
+        let severity = 'ok'
+
+        const duplicate = existing.find(item=>String(item['Household ID'] || '').trim() && String(item['Household ID'] || '').trim()===String(row['Household ID'] || '').trim())
+        if (duplicate) {
+          messages.push(`${appt.owner} already has another active appointment on ${date}.`)
+          severity = 'danger'
+        }
+
+        for (const item of existing) {
+          const otherStart = clockMinutesForDisplay(item['Start Time'] || item['Locked Time'])
+          if (!Number.isFinite(otherStart) || !Number.isFinite(candidateStart)) continue
+          const otherDuration = scheduleRowDuration(item,60)
+          if (candidateStart < otherStart + otherDuration && candidateStart + candidateDuration > otherStart) {
+            messages.push(`Overlaps ${String(item.Owner || 'another client').trim()} based on the saved service times.`)
+            severity = 'danger'
+          }
+        }
+
+        const lookup = clientAddressLookup(dogs)
+        const routeRows = [...existing,candidate].map((item,index)=>({
+          id:item===candidate?candidateId:`existing-${index}`,
+          owner:String(item.Owner || '').trim(),
+          time:String(item['Start Time'] || item['Locked Time'] || '').trim(),
+          row:item,
+          address:appointmentAddress({sourceRow:item,owner:String(item.Owner || '').trim()},lookup)
+        })).filter(item=>item.owner && Number.isFinite(clockMinutesForDisplay(item.time))).sort((a,b)=>clockMinutesForDisplay(a.time)-clockMinutesForDisplay(b.time))
+        const candidateIndex = routeRows.findIndex(item=>item.id===candidateId)
+        if (candidateIndex>=0 && routeRows.every(item=>item.address)) {
+          const signature = routeRows.map(stop=>`${stop.id}:${stop.address}:${stop.time}`).join('|')
+          const cacheKey = `edit-route-check-v1:${date}:${groomer}:${signature}`
+          let routePayload = null
+          try {
+            const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null')
+            if (cached?.payload && Number(cached.savedAt) > Date.now()-15*60*1000) routePayload = cached.payload
+          } catch {}
+          if (!routePayload) {
+            const response = await fetch('/api/google-route',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({groomer,stops:routeRows.map(({row,...stop})=>stop)})})
+            const payload = await response.json().catch(()=>({}))
+            if (response.ok) {
+              routePayload = payload
+              try { localStorage.setItem(cacheKey,JSON.stringify({savedAt:Date.now(),payload})) } catch {}
+            }
+          }
+          if (routePayload?.legs) {
+            const checkPair = (fromIndex,toIndex) => {
+              if (fromIndex < 0 || toIndex < 0 || fromIndex >= routeRows.length || toIndex >= routeRows.length) return
+              const from = routeRows[fromIndex], to = routeRows[toIndex]
+              const leg = routePayload.legs.find(item=>item.fromId===from.id && item.toId===to.id)
+              if (!leg) return
+              const fromStart = clockMinutesForDisplay(from.time)
+              const toStart = clockMinutesForDisplay(to.time)
+              const fromDuration = from.id===candidateId ? candidateDuration : scheduleRowDuration(from.row,60)
+              const estimatedArrival = fromStart + fromDuration + Number(leg.minutes || 0)
+              const minutesLate = estimatedArrival - toStart
+              if (minutesLate > 30) {
+                messages.push(`Google route warning: ${to.owner} could be about ${Math.ceil(minutesLate)} min after the scheduled time — outside the ±30 min window.`)
+                severity = 'danger'
+              } else if (minutesLate > 0 && severity !== 'danger') {
+                messages.push(`Tight route: Google estimates arrival to ${to.owner} about ${Math.ceil(minutesLate)} min after the scheduled time, but still inside the ±30 min window.`)
+                severity = 'warning'
+              }
+            }
+            checkPair(candidateIndex-1,candidateIndex)
+            checkPair(candidateIndex,candidateIndex+1)
+          }
+        }
+        if (!cancelledCheck) setScheduleCheck({loading:false,severity,messages})
+      } catch(err) {
+        if (!cancelledCheck) setScheduleCheck({loading:false,severity:'warning',messages:['Could not run the schedule conflict check right now. You can still save manually.']})
+      }
+    },400)
+    return ()=>{cancelledCheck=true;clearTimeout(timer)}
+  },[mode,targetDate,targetTime,targetGroomer,editTime,editGroomer,editFixed,originalDate,appt.weekStart])
+
   const submit = async event => {
     event.preventDefault()
     if (savingRef.current || completed || moved || missed) return
@@ -3037,7 +3170,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
       </div>
       {completed || moved || missed ? <div className="prototype-note">{completed?'This appointment is already completed.':moved?'Open the appointment in its new week to change it.':'This appointment is already marked as a no-show.'}</div> : <>
         <div className="segmented" aria-label="Appointment action" style={{marginBottom:16}}>
-          {[['edit','Edit'],['services','Services'],['reschedule','Reschedule'],['cancel','Cancel'],['missed','No-show']].map(([value,label])=><button
+          {[['edit','Time / groomer'],['services','Services'],['reschedule','Move day'],['cancel','Cancel'],['missed','No-show']].map(([value,label])=><button
             type="button" key={value} disabled={saving || (cancelled && value==='cancel')} aria-pressed={mode===value}
             className={mode===value?'active':''} onClick={()=>{setMode(value);setError('')}}>{label}</button>)}
         </div>
@@ -3055,6 +3188,11 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
               <label style={{gridColumn:'1 / -1'}}>Appointment note
                 <input value={note} maxLength={1000} disabled={saving} onChange={event=>setNote(event.target.value)} placeholder="Client request, access note, timing note…"/>
               </label>
+            </div>
+            <div className={`schedule-check ${scheduleCheck.severity}`}>
+              <div className="schedule-check-title">{scheduleCheck.loading ? 'Checking schedule…' : scheduleRiskBadge(scheduleCheck.severity)}</div>
+              {!scheduleCheck.loading && scheduleCheck.messages.length===0 && <div>No overlap or route-window conflict found for this change.</div>}
+              {!scheduleCheck.loading && scheduleCheck.messages.map((message,index)=><div key={index}>• {message}</div>)}
             </div>
           </>}
           {mode==='services' && <>
@@ -3076,7 +3214,12 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
                 <option value="">Choose groomer</option>{groomers.map(name=><option key={name}>{name}</option>)}
               </select></label>
             </div>
-            <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>The selected arrival time becomes fixed. Saved service lengths and travel buffers are checked for conflicts. Review the affected draft routes in your existing planner after saving.</p>
+            <div className={`schedule-check ${scheduleCheck.severity}`}>
+              <div className="schedule-check-title">{scheduleCheck.loading ? 'Checking destination day…' : scheduleRiskBadge(scheduleCheck.severity)}</div>
+              {!scheduleCheck.loading && scheduleCheck.messages.length===0 && <div>No overlap or Google route-window conflict found on the destination day.</div>}
+              {!scheduleCheck.loading && scheduleCheck.messages.map((message,index)=><div key={index}>• {message}</div>)}
+            </div>
+            <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>The selected arrival time becomes fixed. Customer times are never changed automatically; warnings use saved service lengths, Google drive time, and your ±30-minute arrival window.</p>
           </>}
           {mode==='cancel' && <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>Cancel this appointment for {appt.owner}? It stays in Week history, and the affected route becomes a draft for review.</p>}
           {mode==='missed' && <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>Mark this past appointment as a no-show? It stays in history and does not advance the dog’s last-service date.</p>}
@@ -3655,6 +3798,53 @@ function LoginScreen({ onSignedIn }) {
   )
 }
 
+
+const plannerThemeCss = `
+  :root{
+    --gp-navy:#17223f;
+    --gp-page:#f7f4ef;
+    --gp-card:#ffffff;
+    --gp-line:#e6e1d9;
+    --gp-jen:#dfe7f8;
+    --gp-jen-line:#8fa5d6;
+    --gp-haley:#e2f0e7;
+    --gp-haley-line:#85ae95;
+    --gp-route:#eef5fb;
+    --gp-money:#fbf1dc;
+    --gp-money-line:#e8c98d;
+    --gp-success:#edf7ef;
+    --gp-danger:#fff0ef;
+    --gp-warning:#fff7e8;
+  }
+  body{background:var(--gp-page)!important;}
+  .app-shell{background:var(--gp-page)!important;}
+  .topbar,.bottom-nav{background:rgba(255,255,255,.97)!important;}
+  .day-block{background:#fbfaf8;border:1px solid #eee9e2;border-radius:18px;padding:14px 12px;margin:16px -12px 0;}
+  .appt-card{background:var(--gp-card)!important;border-color:#e5e2dc!important;box-shadow:0 5px 14px rgba(23,34,63,.035);position:relative;overflow:hidden;}
+  .appt-card.groomer-jen{border-left:5px solid var(--gp-jen-line)!important;}
+  .appt-card.groomer-haley{border-left:5px solid var(--gp-haley-line)!important;}
+  .appt-card.completed-card{background:var(--gp-success)!important;}
+  .route-card{box-shadow:0 5px 14px rgba(83,117,155,.06);}
+  .stat{background:#fff!important;border-color:#e5e2dc!important;}
+  .stat.money{background:var(--gp-money)!important;border-color:var(--gp-money-line)!important;}
+  .stat.completed{background:var(--gp-success)!important;border-color:#b9d8c1!important;}
+  .segmented button.active.seg-jen{background:var(--gp-jen)!important;color:var(--gp-navy)!important;box-shadow:inset 0 0 0 1px var(--gp-jen-line);}
+  .segmented button.active.seg-haley{background:var(--gp-haley)!important;color:var(--gp-navy)!important;box-shadow:inset 0 0 0 1px var(--gp-haley-line);}
+  .segmented button.active.seg-all{background:#fff!important;color:var(--gp-navy)!important;}
+  .schedule-check{margin-top:12px;padding:11px 12px;border-radius:12px;font-size:12px;line-height:1.5;border:1px solid #d8e3da;background:#f3f8f4;color:#3d5b45;}
+  .schedule-check.warning{background:var(--gp-warning);border-color:#e6c981;color:#76551b;}
+  .schedule-check.danger{background:var(--gp-danger);border-color:#e6aaa5;color:#8b342f;}
+  .schedule-check-title{font-weight:900;margin-bottom:3px;}
+  .sheet .segmented{background:#f1eee9!important;padding:4px!important;gap:3px!important;overflow-x:auto;}
+  .sheet .segmented button{white-space:nowrap;min-width:max-content;padding-left:12px!important;padding-right:12px!important;}
+  .sheet .segmented button.active{background:#fff!important;color:var(--gp-navy)!important;box-shadow:0 1px 4px rgba(23,34,63,.08);}
+  @media (max-width:560px){
+    .day-block{margin-left:-4px;margin-right:-4px;padding-left:8px;padding-right:8px;}
+    .stats-row{gap:8px!important;}
+    .stat{min-width:0!important;}
+  }
+`
+
 export default function App() {
   const [session, setSession] = useState(null)
   const [authReady, setAuthReady] = useState(false)
@@ -3816,6 +4006,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <style>{plannerThemeCss}</style>
       <header className="topbar">
         <div className="brand-mark">GP</div>
         <div><strong>Grooming Planner</strong><span>Mobile business dashboard</span></div>
