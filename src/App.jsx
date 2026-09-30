@@ -903,10 +903,26 @@ function FillOpeningSheet({open,dateKey,preferredGroomer,dayAppointments,dogs,on
     return acc
   },{Jen:0,Haley:0})
 
-  const candidates = grouped.map(client=>{
+  const latestServiceDate = rows => {
+    const dates = (rows || []).flatMap(row => [
+      String(row?.last_groom || row?.['Last Groom'] || '').slice(0,10),
+      String(row?.last_bath || row?.['Last Bath'] || '').slice(0,10)
+    ]).filter(value=>/^\d{4}-\d{2}-\d{2}$/.test(value))
+    return dates.sort().at(-1) || ''
+  }
+
+  const targetDay = new Date(`${dateKey}T12:00:00Z`)
+  const scoredCandidates = grouped.map(client=>{
     if (booked[client.key] || booked[`o:${normalized(client.owner)}`]) return null
-    const due = clientDueInfo(client.rows)
+    const due = clientDueInfo(client.rows,dateKey)
     if (!due.dueDate || !['Overdue','Due today','Due this week','Due soon','Upcoming'].includes(due.status)) return null
+
+    const lastService = latestServiceDate(client.rows)
+    if (lastService) {
+      const last = new Date(`${lastService}T12:00:00Z`)
+      const daysSinceService = Math.floor((targetDay - last) / 86400000)
+      if (daysSinceService >= 0 && daysSinceService < 14) return null
+    }
 
     const assigned = [...new Set(client.rows.map(groomerOf).filter(name=>name==='Jen' || name==='Haley'))]
     const exclusive = assigned.length === 1 ? assigned[0] : ''
@@ -940,11 +956,20 @@ function FillOpeningSheet({open,dateKey,preferredGroomer,dayAppointments,dogs,on
     const routePoints = exactArea ? 35 : dayAreas.length ? 0 : 8
     const openingPoints = suggestedTime ? 30 : -20
     const groomerPoints = (dayAppointments || []).some(appt=>appt.groomer===targetGroomer) ? 8 : 0
+    const fallback = due.status === 'Upcoming'
+    if (fallback && (due.days == null || due.days > 28)) return null
     return {
-      ...client,due,area,targetGroomer,minutes,price:Math.round(defaults.price || 0),suggestedTime,exactArea,
+      ...client,due,area,targetGroomer,minutes,price:Math.round(defaults.price || 0),suggestedTime,exactArea,lastService,fallback,
       score:duePoints+overdueBonus+routePoints+openingPoints+groomerPoints
     }
-  }).filter(Boolean).sort((a,b)=>b.score-a.score || (a.due.dueDate || '').localeCompare(b.due.dueDate || '') || a.owner.localeCompare(b.owner)).slice(0,6)
+  }).filter(Boolean)
+
+  const sortCandidates = items => items.sort((a,b)=>b.score-a.score || (a.due.dueDate || '').localeCompare(b.due.dueDate || '') || a.owner.localeCompare(b.owner))
+  const primaryCandidates = sortCandidates(scoredCandidates.filter(candidate=>!candidate.fallback))
+  const fallbackCandidates = sortCandidates(scoredCandidates.filter(candidate=>candidate.fallback))
+  const candidates = primaryCandidates.length >= 6
+    ? primaryCandidates.slice(0,6)
+    : [...primaryCandidates, ...fallbackCandidates.slice(0,6-primaryCandidates.length)]
 
   const dateLabel = new Date(`${dateKey}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric'})
 
@@ -956,7 +981,7 @@ function FillOpeningSheet({open,dateKey,preferredGroomer,dayAppointments,dogs,on
           <button className="icon-btn" type="button" onClick={onClose}><X size={18}/></button>
         </div>
         <div className="prototype-note" style={{marginTop:0,textAlign:'left'}}>
-          Ranked using due date, area match, groomer rules, saved service time, and whether the client fits an open spot that day. Clients who already have an active appointment are excluded.
+          Ranked using due date, area match, groomer rules, saved service time, and whether the client fits an open spot that day. Clients already booked or serviced within the last 2 weeks are excluded. Slightly early clients only appear as fallback options.
         </div>
         {loading && <div className="prototype-note">Checking your schedule…</div>}
         {error && <div className="login-message">{error}</div>}
@@ -975,7 +1000,7 @@ function FillOpeningSheet({open,dateKey,preferredGroomer,dayAppointments,dogs,on
                 <div className="candidate-rank">{index+1}</div>
                 <div className="candidate-main">
                   <strong>{candidate.owner} · {candidate.rows.map(dogOf).join(' + ')}</strong>
-                  <span>{candidate.due.detail} · {candidate.area || 'Area not set'} · {candidate.minutes} min</span>
+                  <span>{candidate.due.detail}{candidate.fallback ? ' · Early fallback' : ''} · {candidate.area || 'Area not set'} · {candidate.minutes} min</span>
                   <span>{candidate.targetGroomer}{candidate.suggestedTime ? ` · Suggested ${displayClockTime(candidate.suggestedTime)}` : ' · Choose a time manually'}{candidate.exactArea ? ' · Same area' : ''}</span>
                 </div>
                 <div className="candidate-price">${candidate.price}</div>
@@ -1193,8 +1218,8 @@ function dogDueInfo(row, todayKey = businessDateKey()) {
   return {dueDate,status:'Upcoming',detail:`Due in ${days} days`,rank:3,days,nextLabel}
 }
 
-function clientDueInfo(rows) {
-  const infos = (rows || []).map(row => ({row, ...dogDueInfo(row)}))
+function clientDueInfo(rows, todayKey = businessDateKey()) {
+  const infos = (rows || []).map(row => ({row, ...dogDueInfo(row,todayKey)}))
   const known = infos.filter(info => info.dueDate)
   if (!known.length) return {status:'Not enough data',detail:'No due date yet',dueDate:'',rank:5,infos}
   known.sort((a,b) => a.rank - b.rank || a.dueDate.localeCompare(b.dueDate))
