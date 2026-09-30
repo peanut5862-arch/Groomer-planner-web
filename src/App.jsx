@@ -57,6 +57,61 @@ function needsClientConfirmation(row) {
   return clientConfirmationStatus(row) !== 'Confirmed'
 }
 
+
+function normalizedPhone(value) {
+  return String(value || '').replace(/[^0-9+]/g,'').trim()
+}
+
+function phoneForScheduleRow(dogs,row) {
+  const household = String(row?.['Household ID'] || '').trim().toLowerCase()
+  const owner = String(row?.Owner || '').trim().toLowerCase()
+  const match = (dogs || []).find(dog => {
+    const dogHousehold = String(dog?.household_id || dog?.['Household ID'] || '').trim().toLowerCase()
+    const dogOwner = String(dog?.owner || dog?.Owner || '').trim().toLowerCase()
+    return (household && dogHousehold === household) || (!household && owner && dogOwner === owner)
+  })
+  return String(match?.phone || match?.Phone || '').trim()
+}
+
+function arrivalWindowLabel(time) {
+  const minutes = clockMinutesForDisplay(String(time || ''))
+  if (!Number.isFinite(minutes)) return ''
+  const fmt = total => {
+    const wrapped = ((Math.round(total) % 1440) + 1440) % 1440
+    const hour24 = Math.floor(wrapped / 60)
+    const mins = wrapped % 60
+    const period = hour24 >= 12 ? 'PM' : 'AM'
+    const hour12 = hour24 % 12 || 12
+    return `${hour12}:${String(mins).padStart(2,'0')} ${period}`
+  }
+  return `${fmt(minutes - 30)}–${fmt(minutes + 30)}`
+}
+
+function confirmationMessage({owner,dogs,date,time}) {
+  const first = String(owner || '').trim().split(/\s+/)[0] || 'there'
+  const dateKey = String(date || '').slice(0,10)
+  let dateLabel = dateKey
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    dateLabel = new Date(`${dateKey}T12:00:00`).toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})
+  }
+  const windowLabel = arrivalWindowLabel(time)
+  const petText = dogs ? ` for ${dogs}` : ''
+  return `Hi ${first}! Just confirming your grooming appointment${petText} on ${dateLabel}${windowLabel ? `. Your arrival window is ${windowLabel}` : ''}. Please reply to confirm. Thank you!`
+}
+
+function openSms(phone, body='') {
+  const clean = normalizedPhone(phone)
+  if (!clean) return
+  const suffix = body ? `&body=${encodeURIComponent(body)}` : ''
+  window.location.href = `sms:${clean}${suffix}`
+}
+
+function openCall(phone) {
+  const clean = normalizedPhone(phone)
+  if (!clean) return
+  window.location.href = `tel:${clean}`
+}
+
 function ApptCard({appt,onOpen,onComplete,onUndo,onConfirmation,completing,confirmationSaving}) {
   const row = appt?.sourceRow || {}
   const today = businessDateKey()
@@ -108,6 +163,13 @@ function ApptCard({appt,onOpen,onComplete,onUndo,onConfirmation,completing,confi
               <option>Can't make it</option>
             </select>
           </div>
+        )}
+        {!inactive && !completed && appt.phone && (
+          <button type="button" className="appt-text-btn"
+            onPointerDown={event=>event.stopPropagation()} onTouchStart={event=>event.stopPropagation()}
+            onClick={event=>{event.preventDefault();event.stopPropagation();openSms(appt.phone,confirmationMessage({owner:appt.owner,dogs:appt.dogs,date:appt.date,time:appt.time}))}}>
+            <MessageCircle size={13}/> Text
+          </button>
         )}
         {!inactive && canComplete && (
           <button
@@ -173,7 +235,7 @@ function mondayForDate(dateKey) {
   return date.toISOString().slice(0,10)
 }
 
-function todayAppointments(rows, dateKey, groomer) {
+function todayAppointments(rows, dateKey, groomer, dogs) {
   return (Array.isArray(rows) ? rows : [])
     .filter(row => row && String(row.Owner || '').trim()
       && String(row.Date || '').slice(0,10) === dateKey
@@ -193,6 +255,9 @@ function todayAppointments(rows, dateKey, groomer) {
         weekStart:mondayForDate(String(row.Date).slice(0,10)),
         owner:String(row.Owner).trim(),
         dogs:String(row.Dogs || '').trim(),
+        phone:phoneForScheduleRow(dogs,row),
+        date:String(row.Date || '').slice(0,10),
+        groomer:String(row.Groomer || '').trim(),
         area:String(row['Area Cluster'] || row.Area || '').trim(),
         time:String(row['Start Time'] || locked || '').trim(),
         price,
@@ -252,7 +317,7 @@ function Today({onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,complet
   const current = result?.dateKey === dateKey
   const ready = !loading && !error && current
   const record = current ? result.record : null
-  const appointments = todayAppointments(record?.plan_json,dateKey,groomer)
+  const appointments = todayAppointments(record?.plan_json,dateKey,groomer,dogs)
   const total = appointments.reduce((sum,appt) => sum + (Number.isFinite(appt.price) ? appt.price : 0),0)
   const missingPrices = appointments.some(appt => !Number.isFinite(appt.price))
   const completed = appointments.filter(appt => appt.completed).length
@@ -741,6 +806,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,on
         endTime: String(row['End Time'] || '').trim(),
         owner: String(row.Owner || '').trim(),
         dogs: String(row.Dogs || '').trim(),
+        phone: phoneForScheduleRow(dogs,row),
         area: String(row['Area Cluster'] || row.Area || '').trim(),
         price: Number(row.Price || 0),
         drive: Number(driveRaw),
@@ -1864,7 +1930,7 @@ function canonicalAreaLabel(value) {
   }).join(' ')
 }
 
-function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openClient, onOpenClientHandled }) {
+function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openClient, onOpenClientHandled, onRebook }) {
   const [query, setQuery] = useState('')
   const [clientFilter, setClientFilter] = useState('all')
   const [areaFilter, setAreaFilter] = useState('all')
@@ -2735,6 +2801,15 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
               )}
             </div>
 
+            <div className="client-quick-actions">
+              <button type="button" disabled={!selectedClient.phone} onClick={()=>{
+                if (selectedClient.scheduleInfo) openSms(selectedClient.phone,confirmationMessage({owner:selectedClient.owner,dogs:selectedClient.scheduleInfo.dogs || selectedClient.dogs.join(' + '),date:selectedClient.scheduleInfo.date,time:selectedClient.scheduleInfo.time}))
+                else openSms(selectedClient.phone)
+              }}><MessageCircle size={15}/>{selectedClient.scheduleInfo ? 'Text confirmation' : 'Text client'}</button>
+              <button type="button" disabled={!selectedClient.phone} onClick={()=>openCall(selectedClient.phone)}>Call</button>
+              <button type="button" onClick={()=>{onRebook?.(selectedClient);setSelectedClient(null)}}><CalendarDays size={15}/> Book appointment</button>
+            </div>
+
             <div className="form-grid">
               <label>
                 Phone
@@ -3506,6 +3581,21 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
         {row['Rescheduled To'] && <div>Moved to: {String(row['Rescheduled To']).slice(0,10)}</div>}
         {row['Status Note'] && <div>{row['Status Note']}</div>}
       </div>
+      {(() => {
+        const phone = phoneForScheduleRow(dogs,row)
+        const message = confirmationMessage({owner:appt.owner,dogs:appt.dogs,date:originalDate,time:appt.time})
+        return <div className="communication-card">
+          <div><strong>Client communication</strong><span>{arrivalWindowLabel(appt.time) ? `Arrival window ${arrivalWindowLabel(appt.time)}` : 'Arrival window not set'}</span></div>
+          <div className="communication-actions">
+            <button type="button" disabled={!phone} onClick={()=>openSms(phone,message)}><MessageCircle size={14}/> Text confirmation</button>
+            <button type="button" disabled={!phone} onClick={()=>openCall(phone)}>Call</button>
+            <button type="button" onClick={async()=>{
+              try { await navigator.clipboard.writeText(message); setError('Confirmation text copied.') }
+              catch { setError('Could not copy automatically. Use Text confirmation instead.') }
+            }}>Copy text</button>
+          </div>
+        </div>
+      })()}
       {completed || moved || missed ? <div className="prototype-note">{completed?'This appointment is already completed.':moved?'Open the appointment in its new week to change it.':'This appointment is already marked as a no-show.'}</div> : <>
         <div className="segmented" aria-label="Appointment action" style={{marginBottom:16}}>
           {[['edit','Time / groomer'],['services','Services'],['reschedule','Move day'],['cancel','Cancel'],['missed','No-show']].map(([value,label])=><button
@@ -4238,6 +4328,15 @@ const plannerThemeCss = `
   .confirmation-filter button{border:1px solid #dfe2e7;background:#fff;color:#5d6572;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:800;}
   .confirmation-filter button.active{background:#17223f;color:#fff;border-color:#17223f;}
   .confirmation-filter button.attention.active{background:#fff7e8;color:#76551b;border-color:#e6c981;}
+  .appt-text-btn{display:inline-flex;align-items:center;gap:5px;margin-top:9px;margin-left:7px;padding:6px 9px;border:1px solid #d7dde6;border-radius:999px;background:#fff;color:#31415f;font-size:12px;font-weight:850;position:relative;z-index:6;}
+  .client-quick-actions{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px;}
+  .client-quick-actions button,.communication-actions button{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid #dce1e8;background:#fff;color:#26345e;border-radius:11px;padding:9px 11px;font-size:12px;font-weight:850;}
+  .client-quick-actions button:disabled,.communication-actions button:disabled{opacity:.45;}
+  .communication-card{display:grid;gap:10px;margin:0 0 16px;padding:12px 13px;border:1px solid #d7e4ef;border-radius:14px;background:#f3f8fc;}
+  .communication-card>div:first-child{display:grid;gap:2px;}
+  .communication-card strong{font-size:13px;color:#172038;}
+  .communication-card span{font-size:11px;color:#657084;}
+  .communication-actions{display:flex;gap:7px;flex-wrap:wrap;}
   @media (max-width:560px){
     .day-block{margin-left:-4px;margin-right:-4px;padding-left:8px;padding-right:8px;}
     .stats-row{gap:8px!important;}
@@ -4262,6 +4361,18 @@ export default function App() {
   const [addAppointment,setAddAppointment]=useState({open:false,date:businessDateKey(),preset:null})
   const [fillOpening,setFillOpening]=useState({open:false,date:businessDateKey(),groomer:'All',appointments:[]})
   const ask=(initial='')=>setAssistant({open:true,initial})
+  const openRebookForClient = client => {
+    const assigned=[...new Set((client?.rows || []).map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))]
+    const groomer=assigned.length===1?assigned[0]:'Jen'
+    let date=new Date(`${businessDateKey()}T12:00:00Z`)
+    for(let i=0;i<8;i+=1){
+      const weekday=date.getUTCDay()
+      const allowed=groomer==='Jen'?[2,3,4].includes(weekday):[1,2,3,4,5].includes(weekday)
+      if(allowed) break
+      date.setUTCDate(date.getUTCDate()+1)
+    }
+    setAddAppointment({open:true,date:date.toISOString().slice(0,10),preset:{clientKey:client?.key || client?.household || client?.owner,groomer,time:defaultFirstStopTime(groomer),note:'Booked from Client profile'}})
+  }
   const setClientConfirmation = async (appt,status) => {
     if (!appt || confirmingId) return
     const allowed = ['Unconfirmed','Confirmed','Needs reply',"Can't make it"]
@@ -4425,20 +4536,9 @@ export default function App() {
   } else if (tab === 'Month') {
     body = <Month onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Clients') {
-    body = <Clients dogs={dogs} loading={dataLoading} error={dataError} onOpen={setEditing} revision={scheduleRevision} openClient={clientJump} onOpenClientHandled={()=>setClientJump(null)} onDataChanged={message=>{ setSaveMessage(message); setScheduleRevision(value=>value+1) }}/>
+    body = <Clients dogs={dogs} loading={dataLoading} error={dataError} onOpen={setEditing} revision={scheduleRevision} openClient={clientJump} onOpenClientHandled={()=>setClientJump(null)} onRebook={openRebookForClient} onDataChanged={message=>{ setSaveMessage(message); setScheduleRevision(value=>value+1) }}/>
   } else {
-    body = <More dogs={dogs} revision={scheduleRevision} onAsk={ask} onRebook={client=>{
-      const assigned=[...new Set((client.rows || []).map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))]
-      const groomer=assigned.length===1?assigned[0]:'Jen'
-      let date=new Date(`${businessDateKey()}T12:00:00Z`)
-      for(let i=0;i<8;i+=1){
-        const weekday=date.getUTCDay()
-        const allowed=groomer==='Jen'?[2,3,4].includes(weekday):[1,2,3,4,5].includes(weekday)
-        if(allowed) break
-        date.setUTCDate(date.getUTCDate()+1)
-      }
-      setAddAppointment({open:true,date:date.toISOString().slice(0,10),preset:{clientKey:client.key,groomer,time:defaultFirstStopTime(groomer),note:'Rebooked from Business dashboard'}})
-    }}/>
+    body = <More dogs={dogs} revision={scheduleRevision} onAsk={ask} onRebook={openRebookForClient}/>
   }
 
   const nav=[['Today',Home],['Week',CalendarDays],['Month',Clock3],['Clients',Users],['More',Ellipsis]]
