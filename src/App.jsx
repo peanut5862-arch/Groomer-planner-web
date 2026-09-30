@@ -382,6 +382,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel}) {
   const [loading,setLoading] = useState(false)
   const [error,setError] = useState('')
   const [result,setResult] = useState(null)
+  const [updatedAt,setUpdatedAt] = useState(null)
 
   const sorted = (Array.isArray(appointments) ? appointments : [])
     .filter(appt=>!appt?.inactive)
@@ -404,12 +405,10 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel}) {
   const canCheck = !mixedGroomers && validGroomer && stops.length >= 1 && missing.length === 0 && !loading
   const signature = stops.map(stop=>`${stop.id}:${stop.address}:${stop.time}`).join('|') + `:${routeGroomer}`
 
-  useEffect(()=>{
-    setResult(null)
-    setError('')
-  },[signature])
+  const cacheKey = `grooming-route-v2:${signature}`
+  const cacheMs = 15 * 60 * 1000
 
-  const checkTraffic = async () => {
+  const checkTraffic = async ({force=false}={}) => {
     if (mixedGroomers) {
       setError('Choose Jen or Haley above so the app calculates one van route at a time.')
       return
@@ -426,9 +425,21 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel}) {
       setError(`Add a street address for ${missing.map(stop=>stop.owner).join(', ')} before checking traffic.`)
       return
     }
+
+    if (!force) {
+      try {
+        const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null')
+        if (cached?.payload && Number(cached?.savedAt) > Date.now() - cacheMs) {
+          setResult(cached.payload)
+          setUpdatedAt(Number(cached.savedAt))
+          setError('')
+          return
+        }
+      } catch {}
+    }
+
     setLoading(true)
     setError('')
-    setResult(null)
     try {
       const response = await fetch('/api/google-route',{
         method:'POST',
@@ -437,13 +448,27 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel}) {
       })
       const payload = await response.json().catch(()=>({}))
       if (!response.ok) throw new Error(payload?.error || `Route check failed (${response.status}).`)
+      const savedAt = Date.now()
       setResult(payload)
+      setUpdatedAt(savedAt)
+      try { localStorage.setItem(cacheKey,JSON.stringify({savedAt,payload})) } catch {}
     } catch (err) {
       setError(err?.message || 'Could not check Google traffic right now.')
     } finally {
       setLoading(false)
     }
   }
+
+  useEffect(()=>{
+    setResult(null)
+    setUpdatedAt(null)
+    setError('')
+    if (!mixedGroomers && validGroomer && stops.length >= 1 && missing.length === 0) {
+      checkTraffic()
+    }
+    // Route signature captures the stops/times/groomer. Other values are derived from it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[signature])
 
   if (!sorted.length) return null
 
@@ -454,9 +479,11 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel}) {
           <div style={{fontSize:12,fontWeight:800,color:'#17223f',display:'flex',alignItems:'center',gap:6}}><Route size={15}/>Google route</div>
           <div style={{fontSize:11,color:'#7b828e',marginTop:2}}>{dateLabel} · {routeGroomer ? `${routeGroomer} home → clients → ${routeGroomer} home` : 'traffic-aware driving'}</div>
         </div>
-        <button className="day-ai" type="button" onClick={checkTraffic} disabled={!canCheck} style={{opacity:canCheck?1:0.6}}>
-          <Route size={14}/>{loading?'Checking…':'Check traffic'}
-        </button>
+        {!mixedGroomers && validGroomer && missing.length === 0 && (
+          <button className="day-ai" type="button" onClick={()=>checkTraffic({force:true})} disabled={!canCheck} style={{opacity:canCheck?1:0.6}}>
+            <Route size={14}/>{loading?'Updating…':'Refresh traffic'}
+          </button>
+        )}
       </div>
 
       {mixedGroomers && <div style={{fontSize:11,color:'#7b828e',marginTop:8}}>Choose Jen or Haley above to calculate one route at a time.</div>}
@@ -469,7 +496,9 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel}) {
           <div style={{fontSize:12,fontWeight:800,color:'#17223f'}}>
             {Math.round(Number(result.totalMinutes || 0))} min driving · {Number(result.totalMiles || 0).toFixed(1)} mi round trip
           </div>
-          <div style={{fontSize:10,color:'#8a8f99',marginTop:2}}>Live traffic estimate from Google Routes · customer times stay unchanged</div>
+          <div style={{fontSize:10,color:'#8a8f99',marginTop:2}}>
+            Google traffic estimate · customer times stay unchanged{updatedAt ? ` · updated ${Math.max(0,Math.round((Date.now()-updatedAt)/60000))} min ago` : ''}
+          </div>
           <div style={{display:'grid',gap:5,marginTop:8}}>
             {(result.legs || []).map((leg,index)=>(
               <div key={`${leg.fromId}-${leg.toId}-${index}`} style={{fontSize:11,color:'#555f70',display:'flex',justifyContent:'space-between',gap:8}}>
@@ -699,7 +728,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,onFillOpening,com
               </div>
 
               <div className="day-actions" style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
-                <button className="day-ai" type="button" onClick={()=>onAddAppointment?.(dateKey)}>
+                <button className="day-ai" type="button" onClick={()=>onAddAppointment?.(dateKey,groomer)}>
                   <Plus size={14}/>Add appointment
                 </button>
                 <button
@@ -780,12 +809,16 @@ function serviceDefaultsForDog(row, service) {
   }
 }
 
+function defaultFirstStopTime(groomer) {
+  return groomer === 'Jen' ? '09:00' : '08:30'
+}
+
 function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
   const [date,setDate] = useState(dateKey || businessDateKey())
   const [clientKey,setClientKey] = useState('')
   const [selectedDogs,setSelectedDogs] = useState({})
   const [groomer,setGroomer] = useState('Jen')
-  const [time,setTime] = useState('08:30')
+  const [time,setTime] = useState('09:00')
   const [fixed,setFixed] = useState(false)
   const [note,setNote] = useState('')
   const [saving,setSaving] = useState(false)
@@ -815,8 +848,9 @@ function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
     setDate(dateKey || businessDateKey())
     setClientKey(preset?.clientKey || '')
     setSelectedDogs({})
-    setGroomer(['Jen','Haley'].includes(preset?.groomer) ? preset.groomer : 'Jen')
-    setTime(/^([01]\d|2[0-3]):[0-5]\d$/.test(String(preset?.time || '')) ? preset.time : '08:30')
+    const initialGroomer = ['Jen','Haley'].includes(preset?.groomer) ? preset.groomer : 'Jen'
+    setGroomer(initialGroomer)
+    setTime(/^([01]\d|2[0-3]):[0-5]\d$/.test(String(preset?.time || '')) ? preset.time : defaultFirstStopTime(initialGroomer))
     setFixed(Boolean(preset?.fixed))
     setNote(preset?.note || '')
     setMessage('')
@@ -834,7 +868,11 @@ function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
     setSelectedDogs(initial)
     const preferred = client.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).find(Boolean)
     if (['Jen','Haley'].includes(preset?.groomer)) setGroomer(preset.groomer)
-    else if (preferred === 'Jen' || preferred === 'Haley') setGroomer(preferred)
+    else if (preferred === 'Jen' || preferred === 'Haley') {
+      const previousDefault = defaultFirstStopTime(groomer)
+      setGroomer(preferred)
+      if (time === previousDefault) setTime(defaultFirstStopTime(preferred))
+    }
   },[clientKey,preset?.groomer])
 
   if (!open) return null
@@ -935,7 +973,12 @@ function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
 
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
             <label className="field-label">Groomer
-              <select value={groomer} onChange={event=>setGroomer(event.target.value)}>
+              <select value={groomer} onChange={event=>{
+                const next = event.target.value
+                const previousDefault = defaultFirstStopTime(groomer)
+                setGroomer(next)
+                if (time === previousDefault) setTime(defaultFirstStopTime(next))
+              }}>
                 <option>Jen</option><option>Haley</option>
               </select>
             </label>
@@ -981,7 +1024,7 @@ function appointmentDurationMinutes(appt) {
 }
 
 function openingForDuration(appointments, duration, groomer) {
-  const startOfDay = 8 * 60
+  const startOfDay = groomer === 'Jen' ? 9 * 60 : 8 * 60 + 30
   const endOfDay = 17 * 60 + 30
   const buffer = 15
   const occupied = (appointments || [])
@@ -1178,7 +1221,7 @@ function FillOpeningSheet({open,dateKey,preferredGroomer,dayAppointments,dogs,on
                 date:dateKey,
                 clientKey:candidate.key,
                 groomer:candidate.targetGroomer,
-                time:candidate.suggestedTime || '08:30',
+                time:candidate.suggestedTime || defaultFirstStopTime(candidate.targetGroomer),
                 fixed:false,
                 note:'Added from Fill Opening'
               })}>
@@ -2819,7 +2862,7 @@ export default function App() {
   if (tab === 'Today') {
     body = <Today dogs={dogs} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onAddAppointment={date=>setAddAppointment({open:true,date,preset:null})} completingId={completingId} revision={scheduleRevision}/>
   } else if (tab === 'Week') {
-    body = <Week dogs={dogs} onAsk={ask} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onAddAppointment={date=>setAddAppointment({open:true,date,preset:null})} onFillOpening={payload=>setFillOpening({open:true,date:payload.date,groomer:payload.groomer,appointments:payload.appointments || []})} completingId={completingId} revision={scheduleRevision}/>
+    body = <Week dogs={dogs} onAsk={ask} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onAddAppointment={(date,selectedGroomer)=>setAddAppointment({open:true,date,preset:['Jen','Haley'].includes(selectedGroomer)?{groomer:selectedGroomer}:null})} onFillOpening={payload=>setFillOpening({open:true,date:payload.date,groomer:payload.groomer,appointments:payload.appointments || []})} completingId={completingId} revision={scheduleRevision}/>
   } else if (tab === 'Month') {
     body = <Month onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Clients') {
