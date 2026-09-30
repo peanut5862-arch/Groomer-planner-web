@@ -149,6 +149,28 @@ function needAccessMessage({owner}) {
   return `Hi ${first}! I'm here but I'm having trouble getting in. Can you send me the gate/access info?`
 }
 
+function finishedReadyMessage({owner,dogs}) {
+  const first = String(owner || '').trim().split(/\s+/)[0] || 'there'
+  const petNames = naturalPetNames(dogs)
+  const count = String(dogs || '').replace(/\s*\([^)]*\)/g,'').replace(/\s*\+\s*/g, ',').split(',').map(x=>x.trim()).filter(Boolean).length
+  if (!petNames) return `Hi ${first}! Your pup is all finished and ready 😊`
+  return `Hi ${first}! ${petNames} ${count > 1 ? 'are' : 'is'} all finished and ready 😊`
+}
+
+function paymentReminderMessage({owner,total}) {
+  const first = String(owner || '').trim().split(/\s+/)[0] || 'there'
+  const n = Number(total)
+  const amount = Number.isFinite(n)
+    ? n.toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:0,maximumFractionDigits:2})
+    : '$0'
+  return `Hi ${first}! today's grooming total is ${amount}. Thank you!`
+}
+
+function backInAreaMessage({date}) {
+  const dateLabel = messageDateLabel(date)
+  return `No problem! We will be back in the area ${dateLabel}.`
+}
+
 function rescheduleMessage({owner,date,time}) {
   const first = String(owner || '').trim().split(/\s+/)[0] || 'there'
   const dateLabel = messageDateLabel(date)
@@ -258,6 +280,12 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,
   const canUndo = Boolean(onUndo) && completed && !inactive && hasUndoSnapshot
   const cardGroomer = String(appt?.groomer || row.Groomer || '').trim().toLowerCase()
   const cardClass = ['appt-card',cardGroomer==='jen'?'groomer-jen':'',cardGroomer==='haley'?'groomer-haley':'',completed?'completed-card':''].filter(Boolean).join(' ')
+  const clientAddress = appointmentAddress(appt,clientAddressLookup(dogs || []))
+  const copyClientAddress = async () => {
+    if (!clientAddress) { setCommunicationError('No saved street address for this client.'); return }
+    try { await navigator.clipboard.writeText(clientAddress); setCommunicationError('Address copied.') }
+    catch { setCommunicationError('Could not copy the address automatically.') }
+  }
   useEffect(()=>{ setLastContact(readAppointmentContact(appt)); setCommunicationError('') },[appt?.id,appt?.date,appt?.time])
   const sendAppointmentText = (body,type) => {
     setLastContact(saveAppointmentContact(appt,type))
@@ -327,12 +355,19 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,
                   if (clientConfirmationStatus(row)==='Unconfirmed' && onConfirmation) onConfirmation(appt,'Needs reply')
                   sendAppointmentText(confirmationMessage({owner:appt.owner,dogs:appt.dogs,date:appt.date,time:appt.time}),'Confirmation')
                 }}>Confirm</button>
+                {clientConfirmationStatus(row)!=='Confirmed' && onConfirmation && <button type="button" onClick={()=>{onConfirmation(appt,'Confirmed');setShowTextMenu(false)}}>Mark confirmed ✓</button>}
                 <button type="button" onClick={()=>sendAppointmentText(reminderMessage({owner:appt.owner,dogs:appt.dogs,date:appt.date,time:appt.time}),'Reminder')}>Reminder</button>
                 {date===today && <button type="button" disabled={etaLoading} onClick={sendOnMyWay}>{etaLoading?'Getting ETA…':'On my way'}</button>}
                 <button type="button" onClick={()=>setShowLate(value=>!value)}>Running late</button>
                 {date===today && <button type="button" onClick={()=>sendAppointmentText(imHereMessage({owner:appt.owner}),"I'm here")}>I'm here</button>}
                 {date===today && <button type="button" onClick={()=>sendAppointmentText(needAccessMessage({owner:appt.owner}),'Need access')}>Need access</button>}
-                {onOpen && <button type="button" onClick={()=>{setShowTextMenu(false);onOpen()}}>Reschedule…</button>}
+                <button type="button" onClick={()=>sendAppointmentText(finishedReadyMessage({owner:appt.owner,dogs:appt.dogs}),'Finished / ready')}>Finished / ready</button>
+                <button type="button" onClick={()=>sendAppointmentText(paymentReminderMessage({owner:appt.owner,total:appt.price}),'Payment')}>Payment total</button>
+                <button type="button" onClick={()=>openSms(appt.phone,'')}>Custom text</button>
+                <button type="button" onClick={()=>openCall(appt.phone)}>Call</button>
+                <button type="button" disabled={!clientAddress} onClick={copyClientAddress}>Copy address</button>
+                {onOpen && onConfirmation && <button type="button" onClick={()=>{onConfirmation(appt,"Can't make it");setShowTextMenu(false);onOpen('reschedule')}}>Can't make it…</button>}
+                {onOpen && <button type="button" onClick={()=>{setShowTextMenu(false);onOpen('reschedule')}}>Reschedule…</button>}
               </div>}
               {showLate && <div className="late-options" aria-label="Running late options">
                 {[10,15,20,30].map(minutes=><button key={minutes} type="button" onClick={()=>{setShowLate(false);sendAppointmentText(runningLateMessage({owner:appt.owner,minutes}),'Running late')}}>{minutes} min</button>)}
@@ -536,7 +571,7 @@ function Today({onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,complet
           <GoogleRoutePanel appointments={appointments} dogs={dogs} selectedGroomer={groomer} dateLabel={dateLabel} dateKey={dateKey}/>
           <div className="section-title"><h3>Appointments</h3></div>
           {appointments.length ? (
-            <div className="appt-list">{appointments.map(appt=><ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={()=>onOpen(appt)} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id}/>)}</div>
+            <div className="appt-list">{appointments.map(appt=><ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={(mode)=>onOpen({...appt,_initialMode:mode || 'edit'})} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id}/>)}</div>
           ) : (
             <div className="prototype-note">No appointments scheduled today{groomer === 'All' ? '' : ` for ${groomer}`}.</div>
           )}
@@ -995,9 +1030,16 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,on
       ? activeWeekAppointments
       : activeWeekAppointments.filter(a => a.groomer === groomer)
   const confirmationNeededCount = groomerAppointments.filter(appt=>!appt.completed && needsClientConfirmation(appt.sourceRow)).length
+  const todayForReminder = parseLocalDate(businessDateKey()) || new Date()
+  const tomorrowKey = ymd(addDays(todayForReminder,1))
+  const tomorrowReminderCount = groomerAppointments.filter(appt=>
+    !appt.completed && appt.date===tomorrowKey && ['Unconfirmed','Needs reply'].includes(clientConfirmationStatus(appt.sourceRow))
+  ).length
   const visibleAppointments = confirmationFilter === 'Needs confirmation'
     ? groomerAppointments.filter(appt=>!appt.completed && needsClientConfirmation(appt.sourceRow))
-    : groomerAppointments
+    : confirmationFilter === 'Tomorrow reminders'
+      ? groomerAppointments.filter(appt=>!appt.completed && appt.date===tomorrowKey && ['Unconfirmed','Needs reply'].includes(clientConfirmationStatus(appt.sourceRow)))
+      : groomerAppointments
 
   const statusLabel = weekRecord?.status === 'confirmed' ? 'Confirmed week' : 'Draft week'
   const weekEnd = addDays(weekStart,4)
@@ -1051,6 +1093,9 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,on
             <button type="button" className={confirmationFilter==='All'?'active':''} onClick={()=>setConfirmationFilter('All')}>All appointments</button>
             <button type="button" className={confirmationFilter==='Needs confirmation'?'active attention':''} onClick={()=>setConfirmationFilter('Needs confirmation')}>
               Needs confirmation{confirmationNeededCount ? ` (${confirmationNeededCount})` : ''}
+            </button>
+            <button type="button" className={confirmationFilter==='Tomorrow reminders'?'active attention':''} onClick={()=>setConfirmationFilter('Tomorrow reminders')}>
+              Tomorrow reminders{tomorrowReminderCount ? ` (${tomorrowReminderCount})` : ''}
             </button>
           </div>
           {weeklyMissingPrices && <div className="prototype-note">Some appointments have no price saved; the week total includes known prices only.</div>}
@@ -1109,7 +1154,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,on
                     .slice()
                     .sort(compareAppointmentTimes)
                     .map(appt=>(
-                      <ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={()=>onOpen(appt)} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id}/>
+                      <ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={(mode)=>onOpen({...appt,_initialMode:mode || 'edit'})} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id}/>
                     ))}
                 </div>
               </>
@@ -1965,7 +2010,7 @@ function Month({onOpen,revision,dogs}) {
         </div>
         <div className="section-title"><h3>{new Date(`${selected}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric'})}</h3></div>
         {selectedWeek && <div className="eyebrow" style={{marginBottom:12}}>{selectedWeek.status==='confirmed'?'Confirmed week':'Draft week'}</div>}
-        <div className="appt-list">{selectedAppointments.map(appt=><ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={()=>onOpen(appt)}/>)}</div>
+        <div className="appt-list">{selectedAppointments.map(appt=><ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={(mode)=>onOpen({...appt,_initialMode:mode || 'edit'})}/>)}</div>
         {!selectedAppointments.length && <div className="prototype-note">{selectedWeek
           ? `No appointments scheduled${groomer==='All'?'':` for ${groomer}`} on this date.`
           : 'No saved schedule for this week yet.'}</div>}
@@ -3506,7 +3551,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation}) {
   const row = appt.sourceRow
   const today = businessDateKey()
   const originalDate = String(row.Date || today).slice(0,10)
-  const [mode,setMode] = useState('edit')
+  const [mode,setMode] = useState(appt?._initialMode || 'edit')
   const [targetDate,setTargetDate] = useState(originalDate<today?today:originalDate)
   const [targetTime,setTargetTime] = useState(()=>appointmentTimeInput(row['Start Time'] || row['Locked Time'] || row['Original Start Time']))
   const [targetGroomer,setTargetGroomer] = useState(String(row.Groomer || '').trim())
@@ -3554,6 +3599,12 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation}) {
   const editOverrideReasons = schedulingOverrideReasons(originalDate,editGroomer,assignedGroomers)
   const rescheduleOverrideReasons = schedulingOverrideReasons(targetDate,targetGroomer,assignedGroomers)
   const close = () => { if (!savingRef.current) onClose() }
+  const clientAddress = appointmentAddress(appt,clientAddressLookup(dogs || []))
+  const copyClientAddress = async () => {
+    if (!clientAddress) { setError('No saved street address for this client.'); return }
+    try { await navigator.clipboard.writeText(clientAddress); setError('Address copied.') }
+    catch { setError('Could not copy the address automatically.') }
+  }
 
 
   const completeNow = async () => {
@@ -3799,11 +3850,19 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation}) {
               if (clientConfirmationStatus(row)==='Unconfirmed' && onConfirmation) onConfirmation(appt,'Needs reply')
               recordAndText(message,'Confirmation')
             }}>Confirm</button>
+            {clientConfirmationStatus(row)!=='Confirmed' && onConfirmation && <button type="button" onClick={()=>{onConfirmation(appt,'Confirmed');setShowTextMenu(false)}}>Mark confirmed ✓</button>}
             <button type="button" disabled={!phone} onClick={()=>recordAndText(reminderMessage({owner:appt.owner,dogs:appt.dogs,date:originalDate,time:appt.time}),'Reminder')}>Reminder</button>
             {originalDate===businessDateKey() && <button type="button" disabled={!phone || etaLoading} onClick={sendSheetOnMyWay}>{etaLoading?'Getting ETA…':'On my way'}</button>}
             <button type="button" disabled={!phone} onClick={()=>setShowLateOptions(value=>!value)}>Running late</button>
             {originalDate===businessDateKey() && <button type="button" disabled={!phone} onClick={()=>recordAndText(imHereMessage({owner:appt.owner}),"I'm here")}>I'm here</button>}
             {originalDate===businessDateKey() && <button type="button" disabled={!phone} onClick={()=>recordAndText(needAccessMessage({owner:appt.owner}),'Need access')}>Need access</button>}
+            <button type="button" disabled={!phone} onClick={()=>recordAndText(finishedReadyMessage({owner:appt.owner,dogs:appt.dogs}),'Finished / ready')}>Finished / ready</button>
+            <button type="button" disabled={!phone} onClick={()=>recordAndText(paymentReminderMessage({owner:appt.owner,total:appt.price}),'Payment')}>Payment total</button>
+            <button type="button" disabled={!phone} onClick={()=>openSms(phone,'')}>Custom text</button>
+            <button type="button" disabled={!phone} onClick={()=>openCall(phone)}>Call</button>
+            <button type="button" disabled={!clientAddress} onClick={copyClientAddress}>Copy address</button>
+            {!completed && !moved && !missed && onConfirmation && <button type="button" onClick={()=>{onConfirmation(appt,"Can't make it");setShowTextMenu(false);setMode('reschedule')}}>Can't make it…</button>}
+            {!completed && !moved && !missed && <button type="button" onClick={()=>{setShowTextMenu(false);setMode('reschedule')}}>Reschedule…</button>}
           </div>}
           {showLateOptions && <div className="late-options sheet-late-options">{[10,15,20,30].map(minutes=><button key={minutes} type="button" disabled={!phone} onClick={()=>{setShowLateOptions(false);recordAndText(runningLateMessage({owner:appt.owner,minutes}),'Running late')}}>{minutes} min</button>)}</div>}
         </div>
@@ -3862,12 +3921,23 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation}) {
                 <option value="">Choose groomer</option>{groomers.map(name=><option key={name}>{name}</option>)}
               </select></label>
             </div>
-            <div className="communication-actions" style={{margin:'10px 0 12px'}}>
-              <button type="button" disabled={!phoneForScheduleRow(dogs,row)} onClick={()=>{
-                const phone = phoneForScheduleRow(dogs,row)
-                setLastContact(saveAppointmentContact(appt,'Reschedule'))
-                openSms(phone,rescheduleMessage({owner:appt.owner,date:targetDate,time:targetTime}))
-              }}><MessageCircle size={14}/> Text reschedule</button>
+            <div className="communication-card" style={{margin:'10px 0 12px'}}>
+              <div><strong>Reschedule message preview</strong><span>{rescheduleMessage({owner:appt.owner,date:targetDate,time:targetTime})}</span></div>
+              <div className="communication-actions">
+                <button type="button" disabled={!phoneForScheduleRow(dogs,row)} onClick={()=>{
+                  const phone = phoneForScheduleRow(dogs,row)
+                  setLastContact(saveAppointmentContact(appt,'Reschedule'))
+                  openSms(phone,rescheduleMessage({owner:appt.owner,date:targetDate,time:targetTime}))
+                }}><MessageCircle size={14}/> Text reschedule</button>
+              </div>
+              <div style={{paddingTop:4,borderTop:'1px solid #dfe6ee'}}><strong>Back-in-area reply</strong><span>{backInAreaMessage({date:targetDate})}</span></div>
+              <div className="communication-actions">
+                <button type="button" disabled={!phoneForScheduleRow(dogs,row)} onClick={()=>{
+                  const phone = phoneForScheduleRow(dogs,row)
+                  setLastContact(saveAppointmentContact(appt,'Back in area'))
+                  openSms(phone,backInAreaMessage({date:targetDate}))
+                }}><MessageCircle size={14}/> Text area-day reply</button>
+              </div>
             </div>
             <div className={`schedule-check ${scheduleCheck.severity}`}>
               <div className="schedule-check-title">{scheduleCheck.loading ? 'Checking destination day…' : scheduleRiskBadge(scheduleCheck.severity)}</div>
