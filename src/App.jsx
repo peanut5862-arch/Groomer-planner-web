@@ -1775,7 +1775,7 @@ function canonicalAreaLabel(value) {
   }).join(' ')
 }
 
-function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
+function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openClient, onOpenClientHandled }) {
   const [query, setQuery] = useState('')
   const [clientFilter, setClientFilter] = useState('all')
   const [areaFilter, setAreaFilter] = useState('all')
@@ -1977,6 +1977,19 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
     .sort((a,b) => a.dueInfo.rank - b.dueInfo.rank ||
       (a.dueInfo.dueDate || '9999-99-99').localeCompare(b.dueInfo.dueDate || '9999-99-99') ||
       a.owner.localeCompare(b.owner))
+
+  useEffect(() => {
+    if (!openClient) return
+    const wantedHousehold = normalizedKey(openClient.household)
+    const wantedOwner = normalizedKey(openClient.owner)
+    const found = preparedClients.find(client =>
+      (wantedHousehold && normalizedKey(client.household) === wantedHousehold) ||
+      (wantedOwner && normalizedKey(client.owner) === wantedOwner)
+    )
+    if (!found) return
+    setSelectedClient(found)
+    onOpenClientHandled?.()
+  }, [openClient?.key, openClient?.household, openClient?.owner, dogs, scheduledLookup])
 
   useEffect(() => {
     if (!selectedClient) {
@@ -3170,7 +3183,7 @@ function plannerDayLabel(dateKey) {
   return new Date(`${dateKey}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric'})
 }
 
-function AssistantSheet({open,initial,onClose,dogs,onChoose}) {
+function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient}) {
   const [text,setText]=useState(initial||'')
   const [loading,setLoading]=useState(false)
   const [error,setError]=useState('')
@@ -3395,16 +3408,20 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose}) {
   }
 
   const choose = candidate => {
-    if (!answer?.targetDate) return
+    if (answer?.targetDate) {
+      onClose?.()
+      onChoose?.({
+        date:answer.targetDate,
+        clientKey:candidate.key,
+        groomer:candidate.targetGroomer,
+        time:candidate.suggestedTime || defaultFirstStopTime(candidate.targetGroomer),
+        fixed:false,
+        note:'Added from Ask Planner'
+      })
+      return
+    }
     onClose?.()
-    onChoose?.({
-      date:answer.targetDate,
-      clientKey:candidate.key,
-      groomer:candidate.targetGroomer,
-      time:candidate.suggestedTime || defaultFirstStopTime(candidate.targetGroomer),
-      fixed:false,
-      note:'Added from Ask Planner'
-    })
+    onClient?.({key:candidate.key,household:candidate.household || '',owner:candidate.owner})
   }
 
   const quick = [
@@ -3448,7 +3465,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose}) {
                       ? `${candidate.routeInfo.label} · adds about ${Math.round(candidate.routeInfo.addedMinutes)} min${candidate.routeInfo.addedMiles>=0.1?` · ${candidate.routeInfo.addedMiles.toFixed(1)} mi`:''}`
                       : ''
                   return (
-                    <button className="candidate" key={candidate.key} type="button" onClick={()=>choose(candidate)} style={{textAlign:'left',width:'100%',cursor:answer.targetDate?'pointer':'default'}}>
+                    <button className="candidate" key={candidate.key} type="button" onClick={()=>choose(candidate)} style={{textAlign:'left',width:'100%',cursor:'pointer'}}>
                       <div className="candidate-rank">{index+1}</div>
                       <div className="candidate-main">
                         <strong>{candidate.owner} · {dogsLabel}</strong>
@@ -3464,7 +3481,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose}) {
               </div>
             )}
             {answer.candidates.length>0 && answer.targetDate && <div className="prototype-note" style={{marginTop:10}}>Tap a client to open Add Appointment with the day, client, groomer, and suggested time filled in. You can review everything before saving.</div>}
-            {answer.candidates.length>0 && !answer.targetDate && <div className="prototype-note" style={{marginTop:10}}>This is a client list, not a schedule change. Ask with a day, like “Who should I add Thursday?”, to get appointment-ready suggestions.</div>}
+            {answer.candidates.length>0 && !answer.targetDate && <div className="prototype-note" style={{marginTop:10}}>Tap any client to open their details. Ask with a day, like “Who should I add Thursday?”, to get appointment-ready suggestions.</div>}
           </div>
         )}
         <div className="prototype-note" style={{marginTop:12,textAlign:'left'}}>Ask Planner reads your current clients and schedule. For day-specific questions it also uses your saved groomer rules, appointment lengths, and Google route data.</div>
@@ -3560,6 +3577,7 @@ export default function App() {
   const [saveMessage,setSaveMessage]=useState('')
   const [completingId,setCompletingId]=useState('')
   const [assistant,setAssistant]=useState({open:false,initial:''})
+  const [clientJump,setClientJump]=useState(null)
   const [addAppointment,setAddAppointment]=useState({open:false,date:businessDateKey(),preset:null})
   const [fillOpening,setFillOpening]=useState({open:false,date:businessDateKey(),groomer:'All',appointments:[]})
   const ask=(initial='')=>setAssistant({open:true,initial})
@@ -3699,7 +3717,7 @@ export default function App() {
   } else if (tab === 'Month') {
     body = <Month onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Clients') {
-    body = <Clients dogs={dogs} loading={dataLoading} error={dataError} onOpen={setEditing} revision={scheduleRevision} onDataChanged={message=>{ setSaveMessage(message); setScheduleRevision(value=>value+1) }}/>
+    body = <Clients dogs={dogs} loading={dataLoading} error={dataError} onOpen={setEditing} revision={scheduleRevision} openClient={clientJump} onOpenClientHandled={()=>setClientJump(null)} onDataChanged={message=>{ setSaveMessage(message); setScheduleRevision(value=>value+1) }}/>
   } else {
     body = <More/>
   }
@@ -3746,7 +3764,7 @@ export default function App() {
         setSaveMessage(message)
         setScheduleRevision(value=>value+1)
       }}/>
-      <AssistantSheet open={assistant.open} initial={assistant.initial} dogs={dogs} onClose={()=>setAssistant({open:false,initial:''})} onChoose={preset=>{ setAssistant({open:false,initial:''}); setAddAppointment({open:true,date:preset.date,preset}) }}/>
+      <AssistantSheet open={assistant.open} initial={assistant.initial} dogs={dogs} onClose={()=>setAssistant({open:false,initial:''})} onChoose={preset=>{ setAssistant({open:false,initial:''}); setAddAppointment({open:true,date:preset.date,preset}) }} onClient={client=>{ setAssistant({open:false,initial:''}); setClientJump(client); setTab('Clients') }}/>
     </div>
   )
 }
