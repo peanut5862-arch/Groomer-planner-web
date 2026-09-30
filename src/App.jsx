@@ -286,13 +286,24 @@ async function shareAppointmentAddress({owner,address}) {
   throw new Error('Sharing is not available on this device.')
 }
 
-function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,confirmationSaving,viewerMode=false}) {
+function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,completing,confirmationSaving,paymentSaving,viewerMode=false}) {
   const [showTextMenu,setShowTextMenu] = useState(false)
   const [showLate,setShowLate] = useState(false)
   const [etaLoading,setEtaLoading] = useState(false)
   const [communicationError,setCommunicationError] = useState('')
   const [lastContact,setLastContact] = useState(()=>readAppointmentContact(appt))
   const row = appt?.sourceRow || {}
+  const savedPaymentStatus = String(row['Payment Status'] || '').trim()
+  const savedPaymentMethod = String(row['Payment Method'] || '').trim()
+  const savedTipRaw = Number(String(row.Tip ?? '').replace(/[$,]/g,'').trim())
+  const savedTip = Number.isFinite(savedTipRaw) ? savedTipRaw : 0
+  const savedAmountRaw = Number(String(row['Amount Paid'] ?? '').replace(/[$,]/g,'').trim())
+  const savedAmount = Number.isFinite(savedAmountRaw) ? savedAmountRaw : null
+  const paymentPaid = savedPaymentStatus.toLowerCase() === 'paid'
+  const [showPayment,setShowPayment] = useState(false)
+  const [paymentMethod,setPaymentMethod] = useState(savedPaymentMethod)
+  const [tipInput,setTipInput] = useState(savedTip ? String(savedTip) : '')
+  const [paymentError,setPaymentError] = useState('')
   const today = businessDateKey()
   const date = String(row.Date || appt?.date || '').slice(0,10)
   const completed = appt?.completed || String(row['Completion Status'] || '').trim().toLowerCase()==='completed'
@@ -318,6 +329,11 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,
     }
   }
   useEffect(()=>{ setLastContact(readAppointmentContact(appt)); setCommunicationError('') },[appt?.id,appt?.date,appt?.time])
+  useEffect(()=>{
+    setPaymentMethod(savedPaymentMethod)
+    setTipInput(savedTip ? String(savedTip) : '')
+    setPaymentError('')
+  },[appt?.id,savedPaymentMethod,savedTip])
   const sendAppointmentText = (body,type) => {
     setLastContact(saveAppointmentContact(appt,type))
     setCommunicationError('')
@@ -412,6 +428,89 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,
             {lastContact && <div className="last-contact">{contactLabel(lastContact)}</div>}
             {communicationError && <div className="communication-error">{communicationError}</div>}
           </>
+        )}
+        {!viewerMode && !inactive && onPayment && (
+          <div
+            className="appointment-payment"
+            onPointerDown={event=>event.stopPropagation()}
+            onTouchStart={event=>event.stopPropagation()}
+            onClick={event=>event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className={`appt-payment-btn ${paymentPaid?'paid':savedPaymentStatus.toLowerCase()==='unpaid'?'unpaid':''}`}
+              onClick={()=>{setShowPayment(value=>!value);setPaymentError('')}}
+            >
+              <WalletCards size={14}/>
+              {paymentPaid
+                ? `${savedPaymentMethod || 'Paid'}${savedTip > 0 ? ` · +$${savedTip % 1 === 0 ? savedTip.toFixed(0) : savedTip.toFixed(2)} tip` : ''}`
+                : savedPaymentStatus.toLowerCase()==='unpaid' ? 'Unpaid' : 'Payment'}
+            </button>
+
+            {showPayment && (
+              <div className="payment-panel">
+                <div className="payment-panel-title">Record payment</div>
+                <div className="payment-service-total">
+                  Service total: <strong>{Number.isFinite(appt.price) ? `$${appt.price.toFixed(2)}` : 'No price saved'}</strong>
+                  {paymentPaid && savedAmount !== null && <span> · Collected ${`$${savedAmount.toFixed(2)}`}</span>}
+                </div>
+
+                <label>
+                  Payment method
+                  <select value={paymentMethod} onChange={event=>setPaymentMethod(event.target.value)}>
+                    <option value="">Choose method…</option>
+                    <option>Cash</option>
+                    <option>Check</option>
+                    <option>Venmo</option>
+                    <option>PayPal</option>
+                    <option>Cash App</option>
+                    <option>Zelle</option>
+                    <option>Apple Pay</option>
+                  </select>
+                </label>
+
+                <label>
+                  Tip
+                  <div className="tip-input-wrap"><span>$</span><input inputMode="decimal" type="number" min="0" step="0.01" placeholder="0" value={tipInput} onChange={event=>setTipInput(event.target.value)}/></div>
+                </label>
+
+                {Number.isFinite(appt.price) && (
+                  <div className="payment-preview">
+                    Total collected if paid: <strong>${(appt.price + Math.max(0,Number(tipInput || 0) || 0)).toFixed(2)}</strong>
+                  </div>
+                )}
+
+                {paymentError && <div className="communication-error">{paymentError}</div>}
+
+                <div className="payment-actions">
+                  <button
+                    type="button"
+                    className="save"
+                    disabled={paymentSaving || !paymentMethod}
+                    onClick={async()=>{
+                      if(!paymentMethod){setPaymentError('Choose a payment method first.');return}
+                      const tip=Math.max(0,Number(tipInput || 0) || 0)
+                      const ok=await onPayment(appt,'Paid',paymentMethod,tip)
+                      if(ok){setShowPayment(false);setPaymentError('')}
+                    }}
+                  >
+                    {paymentSaving?'Saving…':'Save paid'}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={paymentSaving}
+                    onClick={async()=>{
+                      const ok=await onPayment(appt,'Unpaid','',0)
+                      if(ok){setShowPayment(false);setPaymentError('')}
+                    }}
+                  >
+                    Mark unpaid
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         )}
         {!viewerMode && !inactive && canComplete && (
           <button
@@ -513,7 +612,7 @@ function todayAppointments(rows, dateKey, groomer, dogs) {
     .sort(compareAppointmentTimes)
 }
 
-function Today({onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,completingId,confirmingId,revision,dogs,viewerMode=false}) {
+function Today({onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppointment,completingId,confirmingId,paymentSavingId,revision,dogs,viewerMode=false}) {
   const [groomer,setGroomer] = useState('All')
   const [dateKey,setDateKey] = useState(() => businessDateKey())
   const [result,setResult] = useState(null)
@@ -607,7 +706,7 @@ function Today({onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,complet
           <GoogleRoutePanel appointments={appointments} dogs={dogs} selectedGroomer={groomer} dateLabel={dateLabel} dateKey={dateKey} viewerMode={viewerMode}/>
           <div className="section-title"><h3>Appointments</h3></div>
           {appointments.length ? (
-            <div className="appt-list">{appointments.map(appt=><ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={(mode)=>onOpen({...appt,_initialMode:mode || 'edit'})} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id} viewerMode={viewerMode}/>)}</div>
+            <div className="appt-list">{appointments.map(appt=><ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={(mode)=>onOpen({...appt,_initialMode:mode || 'edit'})} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} onPayment={onPayment} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id} paymentSaving={paymentSavingId===appt.id} viewerMode={viewerMode}/>)}</div>
           ) : (
             <div className="prototype-note">No appointments scheduled today{groomer === 'All' ? '' : ` for ${groomer}`}.</div>
           )}
@@ -926,7 +1025,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
   )
 }
 
-function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,onFillOpening,completingId,confirmingId,revision,dogs,viewerMode=false}) {
+function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppointment,onFillOpening,completingId,confirmingId,paymentSavingId,revision,dogs,viewerMode=false}) {
   const [groomer,setGroomer]=useState('All')
   const [weekStart,setWeekStart]=useState(() => {
     const now = new Date()
@@ -1190,7 +1289,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,on
                     .slice()
                     .sort(compareAppointmentTimes)
                     .map(appt=>(
-                      <ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={(mode)=>onOpen({...appt,_initialMode:mode || 'edit'})} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id} viewerMode={viewerMode}/>
+                      <ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={(mode)=>onOpen({...appt,_initialMode:mode || 'edit'})} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} onPayment={onPayment} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id} paymentSaving={paymentSavingId===appt.id} viewerMode={viewerMode}/>
                     ))}
                 </div>
               </>
@@ -5001,6 +5100,22 @@ const plannerThemeCss = `
   .rebook-text-row button{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid #dce1e8;background:#fff;color:#26345e;border-radius:11px;padding:9px 11px;font-size:12px;font-weight:850;}
   .rebook-text-row button:disabled{opacity:.45;}
   .communication-preview{font-size:11px;line-height:1.45;color:#657084;background:#fff;border:1px solid #e0e6ed;border-radius:11px;padding:9px 10px;}
+  .appointment-payment{margin-top:9px;position:relative;z-index:7;}
+  .appt-payment-btn{display:inline-flex;align-items:center;gap:6px;border:1px solid #d8dde5;background:#fff;color:#31415f;border-radius:999px;padding:7px 10px;font-size:12px;font-weight:850;}
+  .appt-payment-btn.paid{background:#edf7ef;border-color:#bddcc5;color:#267447;}
+  .appt-payment-btn.unpaid{background:#fff7e8;border-color:#e6c981;color:#76551b;}
+  .payment-panel{margin-top:8px;padding:12px;border:1px solid #dfe4eb;border-radius:14px;background:#f8fafc;display:grid;gap:10px;max-width:360px;}
+  .payment-panel-title{font-size:13px;font-weight:900;color:#17223f;}
+  .payment-service-total,.payment-preview{font-size:11px;line-height:1.4;color:#657084;}
+  .payment-panel label{display:grid;gap:5px;font-size:11px;font-weight:850;color:#3f495b;}
+  .payment-panel select,.payment-panel input{width:100%;box-sizing:border-box;border:1px solid #d7dde6;border-radius:10px;background:#fff;color:#172038;padding:9px 10px;font:inherit;font-size:12px;outline:none;}
+  .tip-input-wrap{position:relative;display:flex;align-items:center;}
+  .tip-input-wrap>span{position:absolute;left:10px;color:#687080;font-size:12px;font-weight:800;pointer-events:none;}
+  .tip-input-wrap input{padding-left:23px;}
+  .payment-actions{display:flex;gap:8px;flex-wrap:wrap;}
+  .payment-actions button{border-radius:10px;padding:8px 11px;font-size:12px;font-weight:850;}
+  .payment-actions button.secondary{border:1px solid #d7dde6;background:#fff;color:#31415f;}
+  .payment-actions button:disabled{opacity:.5;}
   .viewer-banner{margin:0 0 14px;padding:10px 12px;border:1px solid #d8dfea;border-radius:13px;background:#f3f6fb;color:#34415f;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;font-weight:750;}
   .viewer-banner strong{color:#17223f;}
   .viewer-badge{display:inline-flex;align-items:center;padding:4px 7px;border-radius:999px;background:#e8eef8;color:#30466d;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;}
@@ -5026,6 +5141,7 @@ export default function App() {
   const [saveMessage,setSaveMessage]=useState('')
   const [completingId,setCompletingId]=useState('')
   const [confirmingId,setConfirmingId]=useState('')
+  const [paymentSavingId,setPaymentSavingId]=useState('')
   const [assistant,setAssistant]=useState({open:false,initial:''})
   const [clientJump,setClientJump]=useState(null)
   const [addAppointment,setAddAppointment]=useState({open:false,date:businessDateKey(),preset:null})
@@ -5072,6 +5188,42 @@ export default function App() {
       setConfirmingId('')
     }
   }
+  const savePaymentFromSchedule = async (appt,status,method,tip) => {
+    if (!appt || paymentSavingId) return false
+    setPaymentSavingId(appt.id)
+    setSaveMessage('')
+    try {
+      if (!supabase) throw new Error('Your schedule connection is not configured.')
+      const {data,error} = await supabase.rpc('save_grooming_payment',{
+        p_week_start:appt.weekStart,
+        p_expected_row:appt.sourceRow || {},
+        p_payment_status:status,
+        p_payment_method:status==='Paid' ? method : null,
+        p_tip:status==='Paid' ? Math.max(0,Number(tip || 0) || 0) : 0
+      })
+      if (error) {
+        if (error.code==='PGRST202' || error.code==='42883') throw new Error('Payment tracking needs its one-time Supabase setup first.')
+        throw error
+      }
+      if (data?.status !== 'saved') throw new Error('The payment could not be confirmed. Refresh and try again.')
+      if (status === 'Paid') {
+        const tipValue=Number(data?.tip || 0)
+        const amount=Number(data?.amount_paid)
+        const amountLabel=Number.isFinite(amount) ? ` · $${amount.toFixed(2)} collected` : ''
+        setSaveMessage(`${appt.owner}: ${method}${tipValue>0?` · $${tipValue.toFixed(2)} tip`:''}${amountLabel}.`)
+      } else {
+        setSaveMessage(`${appt.owner} marked unpaid.`)
+      }
+      setScheduleRevision(value=>value+1)
+      return true
+    } catch (err) {
+      setSaveMessage(err?.message || 'Could not save payment information.')
+      return false
+    } finally {
+      setPaymentSavingId('')
+    }
+  }
+
   const completeFromSchedule = async (appt) => {
     if (!appt || completingId) return
     const row = appt.sourceRow || {}
@@ -5228,9 +5380,9 @@ export default function App() {
 
   let body
   if (tab === 'Today') {
-    body = <Today dogs={dogs} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onAddAppointment={viewerMode?viewerNotice:date=>setAddAppointment({open:true,date,preset:null})} completingId={completingId} confirmingId={confirmingId} revision={scheduleRevision} viewerMode={viewerMode}/>
+    body = <Today dogs={dogs} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onPayment={viewerMode?viewerNotice:savePaymentFromSchedule} onAddAppointment={viewerMode?viewerNotice:date=>setAddAppointment({open:true,date,preset:null})} completingId={completingId} confirmingId={confirmingId} paymentSavingId={paymentSavingId} revision={scheduleRevision} viewerMode={viewerMode}/>
   } else if (tab === 'Week') {
-    body = <Week dogs={dogs} onAsk={ask} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onAddAppointment={viewerMode?viewerNotice:(date,selectedGroomer)=>setAddAppointment({open:true,date,preset:['Jen','Haley'].includes(selectedGroomer)?{groomer:selectedGroomer}:null})} onFillOpening={viewerMode?viewerNotice:payload=>setFillOpening({open:true,date:payload.date,groomer:payload.groomer,appointments:payload.appointments || []})} completingId={completingId} confirmingId={confirmingId} revision={scheduleRevision} viewerMode={viewerMode}/>
+    body = <Week dogs={dogs} onAsk={ask} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onPayment={viewerMode?viewerNotice:savePaymentFromSchedule} onAddAppointment={viewerMode?viewerNotice:(date,selectedGroomer)=>setAddAppointment({open:true,date,preset:['Jen','Haley'].includes(selectedGroomer)?{groomer:selectedGroomer}:null})} onFillOpening={viewerMode?viewerNotice:payload=>setFillOpening({open:true,date:payload.date,groomer:payload.groomer,appointments:payload.appointments || []})} completingId={completingId} confirmingId={confirmingId} paymentSavingId={paymentSavingId} revision={scheduleRevision} viewerMode={viewerMode}/>
   } else if (tab === 'Month') {
     body = <Month dogs={dogs} onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Clients') {
