@@ -87,20 +87,59 @@ function arrivalWindowLabel(time) {
   return `${fmt(minutes - 30)}–${fmt(minutes + 30)}`
 }
 
+function messageDateLabel(date) {
+  const dateKey = String(date || '').slice(0,10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return dateKey
+  const d = new Date(`${dateKey}T12:00:00`)
+  const weekday = d.toLocaleDateString('en-US',{weekday:'long'})
+  const month = d.toLocaleDateString('en-US',{month:'short'})
+  const day = d.getDate()
+  return `${weekday} ${month}. ${day}`
+}
+
+function naturalPetNames(dogs) {
+  const cleaned = String(dogs || '')
+    .replace(/\s*\([^)]*\)/g,'')
+    .replace(/\s*\+\s*/g, ',')
+    .split(',')
+    .map(name=>name.trim())
+    .filter(Boolean)
+  const names = [...new Set(cleaned)]
+  if (!names.length) return ''
+  if (names.length === 1) return names[0]
+  if (names.length === 2) return `${names[0]} and ${names[1]}`
+  return `${names.slice(0,-1).join(', ')}, and ${names[names.length-1]}`
+}
+
 function confirmationMessage({owner,dogs,date,time}) {
   const first = String(owner || '').trim().split(/\s+/)[0] || 'there'
-  const dateKey = String(date || '').slice(0,10)
-  let dateLabel = dateKey
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
-    const d = new Date(`${dateKey}T12:00:00`)
-    const weekday = d.toLocaleDateString('en-US',{weekday:'long'})
-    const month = d.toLocaleDateString('en-US',{month:'short'})
-    const day = d.getDate()
-    dateLabel = `${weekday} ${month}. ${day}`
-  }
+  const dateLabel = messageDateLabel(date)
   const windowLabel = arrivalWindowLabel(time)
-  const petText = dogs ? ` for ${dogs}` : ''
+  const petNames = naturalPetNames(dogs)
+  const petText = petNames ? ` for ${petNames}` : ''
   return `Hi ${first}! Just confirming your grooming appointment${petText} on ${dateLabel}.${windowLabel ? ` Would between ${windowLabel} work for you?` : ''}`
+}
+
+function reminderMessage({owner,dogs,date,time}) {
+  const first = String(owner || '').trim().split(/\s+/)[0] || 'there'
+  const dateLabel = messageDateLabel(date)
+  const windowLabel = arrivalWindowLabel(time)
+  const petNames = naturalPetNames(dogs)
+  const petText = petNames ? ` for ${petNames}` : ''
+  return `Hi ${first}! Just following up about your grooming appointment${petText} on ${dateLabel}.${windowLabel ? ` Would between ${windowLabel} work for you?` : ''}`
+}
+
+function runningLateMessage({owner,dogs,minutes}) {
+  const first = String(owner || '').trim().split(/\s+/)[0] || 'there'
+  const petNames = naturalPetNames(dogs)
+  const petText = petNames ? ` for ${petNames}` : ''
+  return `Hi ${first}! Just a heads up, I'm running about ${minutes} minutes behind for your grooming appointment${petText}. I'll see you soon!`
+}
+
+function rebookingMessage({owner,date}) {
+  const first = String(owner || '').trim().split(/\s+/)[0] || 'there'
+  const dateLabel = messageDateLabel(date)
+  return `Hi ${first}! We are in your area on ${dateLabel}. Are you ready for grooming again?`
 }
 
 function openSms(phone, body='') {
@@ -117,6 +156,7 @@ function openCall(phone) {
 }
 
 function ApptCard({appt,onOpen,onComplete,onUndo,onConfirmation,completing,confirmationSaving}) {
+  const [showLate,setShowLate] = useState(false)
   const row = appt?.sourceRow || {}
   const today = businessDateKey()
   const date = String(row.Date || appt?.date || '').slice(0,10)
@@ -169,11 +209,20 @@ function ApptCard({appt,onOpen,onComplete,onUndo,onConfirmation,completing,confi
           </div>
         )}
         {!inactive && !completed && appt.phone && (
-          <button type="button" className="appt-text-btn"
-            onPointerDown={event=>event.stopPropagation()} onTouchStart={event=>event.stopPropagation()}
-            onClick={event=>{event.preventDefault();event.stopPropagation();openSms(appt.phone,confirmationMessage({owner:appt.owner,dogs:appt.dogs,date:appt.date,time:appt.time}))}}>
-            <MessageCircle size={13}/> Text
-          </button>
+          <div className="appt-communication-row" onPointerDown={event=>event.stopPropagation()} onTouchStart={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()}>
+            <button type="button" className="appt-text-btn"
+              onClick={()=>{
+                if (clientConfirmationStatus(row)==='Unconfirmed' && onConfirmation) onConfirmation(appt,'Needs reply')
+                openSms(appt.phone,confirmationMessage({owner:appt.owner,dogs:appt.dogs,date:appt.date,time:appt.time}))
+              }}>
+              <MessageCircle size={13}/> Text
+            </button>
+            {clientConfirmationStatus(row)==='Needs reply' && <button type="button" className="appt-text-btn reminder" onClick={()=>openSms(appt.phone,reminderMessage({owner:appt.owner,dogs:appt.dogs,date:appt.date,time:appt.time}))}>Reminder</button>}
+            <button type="button" className="appt-text-btn" onClick={()=>setShowLate(value=>!value)}>Running late</button>
+            {showLate && <div className="late-options" aria-label="Running late options">
+              {[10,15,20,30].map(minutes=><button key={minutes} type="button" onClick={()=>{setShowLate(false);openSms(appt.phone,runningLateMessage({owner:appt.owner,dogs:appt.dogs,minutes}))}}>{minutes} min</button>)}
+            </div>}
+          </div>
         )}
         {!inactive && canComplete && (
           <button
@@ -1021,6 +1070,7 @@ function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
   const [saving,setSaving] = useState(false)
   const [message,setMessage] = useState('')
   const [manualOverride,setManualOverride] = useState(false)
+  const [showLateOptions,setShowLateOptions] = useState(false)
 
   const keyOf = row => String(row?.household_id || row?.['Household ID'] || '').trim()
     ? `h:${String(row?.household_id || row?.['Household ID']).trim()}`
@@ -1952,6 +2002,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
   const [newClientOpen, setNewClientOpen] = useState(false)
   const [dogSaving, setDogSaving] = useState(false)
   const [dogMessage, setDogMessage] = useState('')
+  const [rebookTextDate, setRebookTextDate] = useState('')
 
   const valueOf = (row, ...keys) => {
     for (const key of keys) {
@@ -2162,6 +2213,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
     setAddingArea(false)
     setNewArea('')
     setAreaMessage('')
+    setRebookTextDate('')
   }, [selectedClient?.household, selectedClient?.owner])
 
   const saveClientArea = async rawArea => {
@@ -2814,6 +2866,15 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
               <button type="button" onClick={()=>{onRebook?.(selectedClient);setSelectedClient(null)}}><CalendarDays size={15}/> Book appointment</button>
             </div>
 
+            {!selectedClient.scheduleInfo && <div className="communication-card">
+              <div><strong>Rebooking text</strong><span>Choose the day you will be in {selectedClient.area || 'their area'}.</span></div>
+              <div className="rebook-text-row">
+                <input type="date" value={rebookTextDate} min={businessDateKey()} onChange={event=>setRebookTextDate(event.target.value)} aria-label="Date you will be in this client's area"/>
+                <button type="button" disabled={!selectedClient.phone || !rebookTextDate} onClick={()=>openSms(selectedClient.phone,rebookingMessage({owner:selectedClient.owner,date:rebookTextDate}))}><MessageCircle size={14}/> Text rebooking</button>
+              </div>
+              {rebookTextDate && <div className="communication-preview">{rebookingMessage({owner:selectedClient.owner,date:rebookTextDate})}</div>}
+            </div>}
+
             <div className="form-grid">
               <label>
                 Phone
@@ -3324,7 +3385,7 @@ function scheduleRiskBadge(severity) {
   return severity === 'danger' ? 'Conflict' : severity === 'warning' ? 'Tight route' : 'Looks good'
 }
 
-function CompletionSheet({appt,dogs,onClose,onSaved}) {
+function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation}) {
   const row = appt.sourceRow
   const today = businessDateKey()
   const originalDate = String(row.Date || today).slice(0,10)
@@ -3341,6 +3402,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
   const [error,setError] = useState('')
   const [scheduleCheck,setScheduleCheck] = useState({loading:false,severity:'ok',messages:[]})
   const [manualOverride,setManualOverride] = useState(false)
+  const [showLateOptions,setShowLateOptions] = useState(false)
   const savingRef = React.useRef(false)
   const closeRef = React.useRef(null)
   const dialogRef = React.useRef(null)
@@ -3591,13 +3653,19 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
         return <div className="communication-card">
           <div><strong>Client communication</strong><span>{arrivalWindowLabel(appt.time) ? `Arrival window ${arrivalWindowLabel(appt.time)}` : 'Arrival window not set'}</span></div>
           <div className="communication-actions">
-            <button type="button" disabled={!phone} onClick={()=>openSms(phone,message)}><MessageCircle size={14}/> Text confirmation</button>
+            <button type="button" disabled={!phone} onClick={()=>{
+              if (clientConfirmationStatus(row)==='Unconfirmed' && onConfirmation) onConfirmation(appt,'Needs reply')
+              openSms(phone,message)
+            }}><MessageCircle size={14}/> Text confirmation</button>
+            {clientConfirmationStatus(row)==='Needs reply' && <button type="button" disabled={!phone} onClick={()=>openSms(phone,reminderMessage({owner:appt.owner,dogs:appt.dogs,date:originalDate,time:appt.time}))}>Reminder</button>}
+            <button type="button" disabled={!phone} onClick={()=>setShowLateOptions(value=>!value)}>Running late</button>
             <button type="button" disabled={!phone} onClick={()=>openCall(phone)}>Call</button>
             <button type="button" onClick={async()=>{
               try { await navigator.clipboard.writeText(message); setError('Confirmation text copied.') }
               catch { setError('Could not copy automatically. Use Text confirmation instead.') }
             }}>Copy text</button>
           </div>
+          {showLateOptions && <div className="late-options sheet-late-options">{[10,15,20,30].map(minutes=><button key={minutes} type="button" disabled={!phone} onClick={()=>{setShowLateOptions(false);openSms(phone,runningLateMessage({owner:appt.owner,dogs:appt.dogs,minutes}))}}>{minutes} min</button>)}</div>}
         </div>
       })()}
       {completed || moved || missed ? <div className="prototype-note">{completed?'This appointment is already completed.':moved?'Open the appointment in its new week to change it.':'This appointment is already marked as a no-show.'}</div> : <>
@@ -4333,6 +4401,11 @@ const plannerThemeCss = `
   .confirmation-filter button.active{background:#17223f;color:#fff;border-color:#17223f;}
   .confirmation-filter button.attention.active{background:#fff7e8;color:#76551b;border-color:#e6c981;}
   .appt-text-btn{display:inline-flex;align-items:center;gap:5px;margin-top:9px;margin-left:7px;padding:6px 9px;border:1px solid #d7dde6;border-radius:999px;background:#fff;color:#31415f;font-size:12px;font-weight:850;position:relative;z-index:6;}
+  .appt-text-btn.reminder{background:#fff7e8;border-color:#e6c981;color:#76551b;}
+  .appt-communication-row{display:flex;gap:0;align-items:center;flex-wrap:wrap;position:relative;z-index:6;}
+  .late-options{display:flex;gap:6px;flex-wrap:wrap;width:100%;margin:7px 0 0 7px;}
+  .late-options button{border:1px solid #d7dde6;background:#fff;color:#31415f;border-radius:999px;padding:6px 9px;font-size:11px;font-weight:850;}
+  .sheet-late-options{margin:0;}
   .client-quick-actions{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px;}
   .client-quick-actions button,.communication-actions button{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid #dce1e8;background:#fff;color:#26345e;border-radius:11px;padding:9px 11px;font-size:12px;font-weight:850;}
   .client-quick-actions button:disabled,.communication-actions button:disabled{opacity:.45;}
@@ -4341,6 +4414,11 @@ const plannerThemeCss = `
   .communication-card strong{font-size:13px;color:#172038;}
   .communication-card span{font-size:11px;color:#657084;}
   .communication-actions{display:flex;gap:7px;flex-wrap:wrap;}
+  .rebook-text-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;}
+  .rebook-text-row input{min-width:0;border:1px solid #dce1e8;border-radius:11px;padding:9px 10px;background:#fff;color:#172038;font:inherit;font-size:12px;font-weight:750;}
+  .rebook-text-row button{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid #dce1e8;background:#fff;color:#26345e;border-radius:11px;padding:9px 11px;font-size:12px;font-weight:850;}
+  .rebook-text-row button:disabled{opacity:.45;}
+  .communication-preview{font-size:11px;line-height:1.45;color:#657084;background:#fff;border:1px solid #e0e6ed;border-radius:11px;padding:9px 10px;}
   @media (max-width:560px){
     .day-block{margin-left:-4px;margin-right:-4px;padding-left:8px;padding-right:8px;}
     .stats-row{gap:8px!important;}
@@ -4574,7 +4652,7 @@ export default function App() {
         ))}
       </nav>
 
-      {editing && <CompletionSheet appt={editing} dogs={dogs} onClose={()=>setEditing(null)} onSaved={message=>{
+      {editing && <CompletionSheet appt={editing} dogs={dogs} onConfirmation={setClientConfirmation} onClose={()=>setEditing(null)} onSaved={message=>{
         setEditing(null)
         setSaveMessage(message)
         setScheduleRevision(value=>value+1)
