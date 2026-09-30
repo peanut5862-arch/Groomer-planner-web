@@ -533,19 +533,21 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey})
             </div>
           )}
 
-          {result?.mapsUrl && (
-            <a href={result.mapsUrl} target="_blank" rel="noreferrer" style={{display:'inline-flex',alignItems:'center',gap:6,marginTop:9,fontSize:11,fontWeight:800,color:'#17223f',textDecoration:'none'}}>
-              <MapPin size={14}/>Open in Google Maps
-            </a>
-          )}
+          <div style={{marginTop:9,display:'flex',alignItems:'center',justifyContent:'space-between',gap:'8px 14px',flexWrap:'wrap'}}>
+            {result?.mapsUrl && (
+              <a href={result.mapsUrl} target="_blank" rel="noreferrer" style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:11,fontWeight:800,color:'#17223f',textDecoration:'none',whiteSpace:'nowrap'}}>
+                <MapPin size={14}/>Open in Google Maps
+              </a>
+            )}
 
-          <button
-            type="button"
-            onClick={()=>setExpanded(value=>!value)}
-            style={{marginTop:9,border:'none',background:'transparent',padding:0,fontSize:10.5,fontWeight:800,color:'#5d6678',cursor:'pointer'}}
-          >
-            {expanded ? 'Hide route details ▴' : 'View route details ▾'}
-          </button>
+            <button
+              type="button"
+              onClick={()=>setExpanded(value=>!value)}
+              style={{border:'none',background:'transparent',padding:0,fontSize:10.5,fontWeight:800,color:'#5d6678',cursor:'pointer',whiteSpace:'nowrap'}}
+            >
+              {expanded ? 'Hide route details ▴' : 'View route details ▾'}
+            </button>
+          </div>
 
           {expanded && (
             <div style={{marginTop:8,paddingTop:8,borderTop:'1px solid #eceef1'}}>
