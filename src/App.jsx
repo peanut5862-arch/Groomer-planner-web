@@ -2994,15 +2994,201 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
   )
 }
 
-function More() {
+function More({dogs,revision,onAsk,onRebook}) {
+  const today = businessDateKey()
+  const [weekStart,setWeekStart] = useState(()=>mondayForDate(businessDateKey()))
+  const [weekRecord,setWeekRecord] = useState(null)
+  const [futureWeeks,setFutureWeeks] = useState([])
+  const [loading,setLoading] = useState(true)
+  const [error,setError] = useState('')
+
+  const money = value => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(Number(value || 0))
+  const prettyDate = key => new Date(`${key}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',month:'short',day:'numeric'})
+  const shiftWeek = amount => {
+    const date = new Date(`${weekStart}T12:00:00Z`)
+    date.setUTCDate(date.getUTCDate()+amount*7)
+    setWeekStart(date.toISOString().slice(0,10))
+  }
+  const endKey = (()=>{
+    const date = new Date(`${weekStart}T12:00:00Z`)
+    date.setUTCDate(date.getUTCDate()+4)
+    return date.toISOString().slice(0,10)
+  })()
+
+  useEffect(()=>{
+    let cancelled=false
+    const load = async ()=>{
+      if(!supabase) return
+      setLoading(true)
+      setError('')
+      const currentWeek = mondayForDate(today)
+      const futureEndDate = new Date(`${today}T12:00:00Z`)
+      futureEndDate.setUTCDate(futureEndDate.getUTCDate()+84)
+      const futureEndWeek = mondayForDate(futureEndDate.toISOString().slice(0,10))
+      const [weekResult,futureResult] = await Promise.all([
+        supabase.from('weekly_drafts').select('week_start,plan_json,status,confirmed_at').eq('week_start',weekStart).limit(1),
+        supabase.from('weekly_drafts').select('week_start,plan_json,status').gte('week_start',currentWeek).lte('week_start',futureEndWeek).order('week_start',{ascending:true})
+      ])
+      if(cancelled) return
+      if(weekResult.error || futureResult.error){
+        setError(weekResult.error?.message || futureResult.error?.message || 'Could not load business dashboard.')
+        setWeekRecord(null)
+        setFutureWeeks([])
+      } else {
+        setWeekRecord(weekResult.data?.[0] || null)
+        setFutureWeeks(futureResult.data || [])
+      }
+      setLoading(false)
+    }
+    load()
+    return ()=>{cancelled=true}
+  },[weekStart,revision,today])
+
+  const rows = Array.isArray(weekRecord?.plan_json) ? weekRecord.plan_json : []
+  const lower = value => String(value || '').trim().toLowerCase()
+  const rowState = row => {
+    const appt = lower(row?.['Appointment Status'])
+    const status = lower(row?.Status)
+    const completion = lower(row?.['Completion Status'])
+    const cancelled = ['cancelled','canceled'].includes(appt) || ['cancelled','canceled'].includes(status)
+    const moved = appt==='moved to another week' || status==='rescheduled'
+    const noShow = ['missed','no show','no-show','noshow'].includes(appt) || ['missed','no show','no-show','noshow'].includes(status)
+    const completed = completion==='completed'
+    return {cancelled,moved,noShow,completed,booked:!cancelled && !moved && !noShow}
+  }
+  const priced = row => {
+    const value = Number(row?.Price)
+    return Number.isFinite(value) ? value : 0
+  }
+  const dogCountForRow = row => {
+    const text = String(row?.Dogs || '').trim()
+    if(!text) return 0
+    const simple = text.match(/^\s*(\d+)\s+dogs?\s*$/i)
+    if(simple) return Number(simple[1])
+    return text.split(',').map(part=>part.trim()).filter(Boolean).length || 1
+  }
+
+  const bookedRows = rows.filter(row=>String(row?.Owner || '').trim() && rowState(row).booked)
+  const completedRows = bookedRows.filter(row=>rowState(row).completed)
+  const openRows = bookedRows.filter(row=>!rowState(row).completed)
+  const scheduledRevenue = bookedRows.reduce((sum,row)=>sum+priced(row),0)
+  const completedRevenue = completedRows.reduce((sum,row)=>sum+priced(row),0)
+  const remainingRevenue = Math.max(0,scheduledRevenue-completedRevenue)
+  const dogCount = bookedRows.reduce((sum,row)=>sum+dogCountForRow(row),0)
+  const cancelledCount = rows.filter(row=>rowState(row).cancelled).length
+  const noShowCount = rows.filter(row=>rowState(row).noShow).length
+
+  const groomerTotals = ['Jen','Haley'].map(name=>{
+    const groomerRows = bookedRows.filter(row=>String(row?.Groomer || '').trim()===name)
+    const done = groomerRows.filter(row=>rowState(row).completed)
+    return {name,appointments:groomerRows.length,scheduled:groomerRows.reduce((sum,row)=>sum+priced(row),0),completed:done.reduce((sum,row)=>sum+priced(row),0)}
+  })
+
+  const confirmations = openRows.reduce((acc,row)=>{
+    const status = clientConfirmationStatus(row)
+    acc[status] = (acc[status] || 0) + 1
+    return acc
+  },{'Confirmed':0,'Unconfirmed':0,'Needs reply':0,"Can't make it":0})
+
+  const futureRows = futureWeeks.flatMap(week=>Array.isArray(week.plan_json)?week.plan_json:[]).filter(row=>plannerActiveRow(row,today))
+  const bookedKeys = new Set()
+  for(const row of futureRows){
+    const household=String(row?.['Household ID'] || row?.household_id || '').trim()
+    const owner=String(row?.Owner || '').trim().toLowerCase()
+    if(household) bookedKeys.add(`h:${household}`)
+    if(owner) bookedKeys.add(`o:${owner}`)
+  }
+  const rebooking = plannerClientGroups(dogs).map(client=>{
+    const ownerKey=`o:${client.owner.toLowerCase()}`
+    if(bookedKeys.has(client.key) || bookedKeys.has(ownerKey)) return null
+    const due=clientDueInfo(client.rows,today)
+    if(!['Overdue','Due today','Due this week','Due soon'].includes(due.status)) return null
+    const assigned=[...new Set(client.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))]
+    return {...client,due,groomer:assigned.length===1?assigned[0]:'Jen'}
+  }).filter(Boolean).sort((a,b)=>a.due.rank-b.due.rank || (a.due.dueDate || '').localeCompare(b.due.dueDate || '') || a.owner.localeCompare(b.owner))
+
+  const reportCard = {background:'#fff',border:'1px solid #e4e7ec',borderRadius:18,padding:16,boxShadow:'0 8px 24px rgba(23,32,56,.04)'}
+  const smallLabel = {fontSize:10,fontWeight:900,letterSpacing:'.08em',textTransform:'uppercase',color:'#7b828e'}
+  const metricValue = {fontSize:24,lineHeight:1.1,fontWeight:900,color:'#172038',marginTop:5}
+
   return (
     <section>
-      <div className="page-head"><div><div className="eyebrow">Business</div><h1>More</h1></div></div>
-      <div className="menu-list">
-        <button><Settings size={19}/><span>Scheduling settings</span><ChevronRight size={17}/></button>
-        <button><Route size={19}/><span>Route settings</span><ChevronRight size={17}/></button>
-        <button><WalletCards size={19}/><span>Revenue & reports</span><ChevronRight size={17}/></button>
+      <div className="page-head">
+        <div><div className="eyebrow">Business</div><h1>More</h1></div>
       </div>
+
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,marginBottom:14}}>
+        <div>
+          <div style={smallLabel}>Week summary</div>
+          <div style={{fontSize:18,fontWeight:900,color:'#172038',marginTop:3}}>{prettyDate(weekStart)} – {prettyDate(endKey)}</div>
+        </div>
+        <div className="month-arrows">
+          <button className="icon-btn" type="button" onClick={()=>shiftWeek(-1)}><ChevronLeft size={18}/></button>
+          <button className="icon-btn" type="button" onClick={()=>shiftWeek(1)}><ChevronRight size={18}/></button>
+        </div>
+      </div>
+
+      {loading && <div className="prototype-note">Loading business dashboard…</div>}
+      {error && <div className="login-message">{error}</div>}
+
+      {!loading && !error && <>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <div style={{...reportCard,background:'#fff9ec'}}><div style={smallLabel}>Scheduled revenue</div><div style={metricValue}>{money(scheduledRevenue)}</div><div style={{fontSize:11,color:'#7b828e',marginTop:5}}>{bookedRows.length} appointment{bookedRows.length===1?'':'s'}</div></div>
+          <div style={{...reportCard,background:'#effaf2'}}><div style={smallLabel}>Completed revenue</div><div style={metricValue}>{money(completedRevenue)}</div><div style={{fontSize:11,color:'#4c7259',marginTop:5}}>{completedRows.length} completed</div></div>
+          <div style={reportCard}><div style={smallLabel}>Remaining</div><div style={metricValue}>{money(remainingRevenue)}</div><div style={{fontSize:11,color:'#7b828e',marginTop:5}}>scheduled, not completed</div></div>
+          <div style={reportCard}><div style={smallLabel}>Dogs</div><div style={metricValue}>{dogCount}</div><div style={{fontSize:11,color:'#7b828e',marginTop:5}}>across {bookedRows.length} stops</div></div>
+        </div>
+
+        {!weekRecord && <div className="prototype-note" style={{marginTop:12}}>No saved schedule exists for this week yet.</div>}
+
+        <div style={{...reportCard,marginTop:14}}>
+          <div className="section-title" style={{margin:'0 0 12px'}}><h3>Groomer totals</h3></div>
+          <div style={{display:'grid',gap:10}}>
+            {groomerTotals.map(item=><div key={item.name} style={{display:'grid',gridTemplateColumns:'1fr auto',gap:10,alignItems:'center',padding:12,borderRadius:14,background:item.name==='Jen'?'#f1f3ff':'#eff8f0',border:`1px solid ${item.name==='Jen'?'#dfe3ff':'#d9ecdc'}`}}>
+              <div><strong style={{fontSize:14,color:'#172038'}}>{item.name}</strong><div style={{fontSize:11,color:'#7b828e',marginTop:3}}>{item.appointments} appointment{item.appointments===1?'':'s'}</div></div>
+              <div style={{textAlign:'right'}}><strong style={{fontSize:16,color:'#172038'}}>{money(item.scheduled)}</strong><div style={{fontSize:10,color:'#6b7280',marginTop:2}}>{money(item.completed)} completed</div></div>
+            </div>)}
+          </div>
+        </div>
+
+        <div style={{...reportCard,marginTop:14}}>
+          <div className="section-title" style={{margin:'0 0 12px'}}><h3>Client confirmations</h3></div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+            <div style={{padding:11,borderRadius:12,background:'#effaf2'}}><div style={smallLabel}>Confirmed</div><strong style={{fontSize:19,color:'#267447'}}>{confirmations['Confirmed']}</strong></div>
+            <div style={{padding:11,borderRadius:12,background:'#fff9ec'}}><div style={smallLabel}>Unconfirmed</div><strong style={{fontSize:19,color:'#8a651e'}}>{confirmations['Unconfirmed']}</strong></div>
+            <div style={{padding:11,borderRadius:12,background:'#f5f2ff'}}><div style={smallLabel}>Needs reply</div><strong style={{fontSize:19,color:'#5e4aa8'}}>{confirmations['Needs reply']}</strong></div>
+            <div style={{padding:11,borderRadius:12,background:'#fff0f0'}}><div style={smallLabel}>Can't make it</div><strong style={{fontSize:19,color:'#a83d3d'}}>{confirmations["Can't make it"]}</strong></div>
+          </div>
+          <button type="button" className="ghost" style={{width:'100%',marginTop:10}} onClick={()=>onAsk?.('Who still needs to confirm this week?')}>Ask Planner who still needs confirmation</button>
+        </div>
+
+        <div style={{...reportCard,marginTop:14}}>
+          <div className="section-title" style={{margin:'0 0 12px'}}><h3>Changes this week</h3></div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+            <div style={{padding:12,borderRadius:12,background:'#fff5f3'}}><div style={smallLabel}>Cancelled</div><strong style={{fontSize:20,color:'#983f36'}}>{cancelledCount}</strong></div>
+            <div style={{padding:12,borderRadius:12,background:'#fff5f3'}}><div style={smallLabel}>No-shows</div><strong style={{fontSize:20,color:'#983f36'}}>{noShowCount}</strong></div>
+          </div>
+        </div>
+
+        <div style={{...reportCard,marginTop:14}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:10,alignItems:'flex-start',marginBottom:10}}>
+            <div><div className="section-title" style={{margin:0}}><h3>Needs rebooking</h3></div><div style={{fontSize:11,color:'#7b828e',marginTop:3}}>Due or overdue with no active future appointment</div></div>
+            <div style={{fontSize:22,fontWeight:900,color:'#172038'}}>{rebooking.length}</div>
+          </div>
+          {rebooking.slice(0,5).map(client=><button key={client.key} type="button" onClick={()=>onRebook?.(client)} style={{width:'100%',display:'grid',gridTemplateColumns:'1fr auto',gap:10,alignItems:'center',textAlign:'left',padding:'11px 0',border:'0',borderTop:'1px solid #eceef1',background:'transparent',color:'#172038'}}>
+            <div><strong style={{fontSize:13}}>{client.owner}</strong><div style={{fontSize:11,color:client.due.status==='Overdue'?'#a83d3d':'#7b828e',marginTop:2}}>{client.due.detail}</div></div>
+            <span style={{fontSize:11,fontWeight:900,color:'#26345e'}}>Rebook ›</span>
+          </button>)}
+          {!rebooking.length && <div className="prototype-note">No due or overdue clients currently need rebooking.</div>}
+          {rebooking.length>5 && <button type="button" className="ghost" style={{width:'100%',marginTop:10}} onClick={()=>onAsk?.("Who hasn't been booked back yet?")}>View all with Ask Planner</button>}
+        </div>
+
+        <div className="menu-list" style={{marginTop:16}}>
+          <button><Settings size={19}/><span>Scheduling settings</span><ChevronRight size={17}/></button>
+          <button><Route size={19}/><span>Route settings</span><ChevronRight size={17}/></button>
+          <button type="button" onClick={()=>onAsk?.('Show me this week\'s business summary')}><WalletCards size={19}/><span>Ask Planner about the week</span><ChevronRight size={17}/></button>
+        </div>
+      </>}
     </section>
   )
 }
@@ -4241,7 +4427,18 @@ export default function App() {
   } else if (tab === 'Clients') {
     body = <Clients dogs={dogs} loading={dataLoading} error={dataError} onOpen={setEditing} revision={scheduleRevision} openClient={clientJump} onOpenClientHandled={()=>setClientJump(null)} onDataChanged={message=>{ setSaveMessage(message); setScheduleRevision(value=>value+1) }}/>
   } else {
-    body = <More/>
+    body = <More dogs={dogs} revision={scheduleRevision} onAsk={ask} onRebook={client=>{
+      const assigned=[...new Set((client.rows || []).map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))]
+      const groomer=assigned.length===1?assigned[0]:'Jen'
+      let date=new Date(`${businessDateKey()}T12:00:00Z`)
+      for(let i=0;i<8;i+=1){
+        const weekday=date.getUTCDay()
+        const allowed=groomer==='Jen'?[2,3,4].includes(weekday):[1,2,3,4,5].includes(weekday)
+        if(allowed) break
+        date.setUTCDate(date.getUTCDate()+1)
+      }
+      setAddAppointment({open:true,date:date.toISOString().slice(0,10),preset:{clientKey:client.key,groomer,time:defaultFirstStopTime(groomer),note:'Rebooked from Business dashboard'}})
+    }}/>
   }
 
   const nav=[['Today',Home],['Week',CalendarDays],['Month',Clock3],['Clients',Users],['More',Ellipsis]]
