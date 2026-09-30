@@ -131,12 +131,22 @@ function reminderMessage({owner,dogs,date,time}) {
 
 function runningLateMessage({owner,minutes}) {
   const first = String(owner || '').trim().split(/\s+/)[0] || 'there'
-  return `Hi ${first}! Just a heads up, I'm running about ${minutes} minutes behind for your grooming. I'll see you soon!`
+  return `Hi ${first}! Just a heads up, I'm running about ${minutes} minutes behind. I'll see you soon!`
 }
 
 function onMyWayMessage({owner,arrivalTime}) {
   const first = String(owner || '').trim().split(/\s+/)[0] || 'there'
   return `Hi ${first}! I'm on my way and should be there around ${arrivalTime}. See you soon!`
+}
+
+function imHereMessage({owner}) {
+  const first = String(owner || '').trim().split(/\s+/)[0] || 'there'
+  return `Hi ${first}! I'm here whenever you're ready 😊`
+}
+
+function needAccessMessage({owner}) {
+  const first = String(owner || '').trim().split(/\s+/)[0] || 'there'
+  return `Hi ${first}! I'm here but I'm having trouble getting in. Can you send me the gate/access info?`
 }
 
 function rescheduleMessage({owner,date,time}) {
@@ -184,7 +194,8 @@ function contactLabel(record) {
   const when = sameDay
     ? d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})
     : d.toLocaleDateString('en-US',{month:'short',day:'numeric'})
-  return `Last contacted ${when}`
+  const type = String(record?.type || 'Text').trim() || 'Text'
+  return `Last text: ${type} · ${when}`
 }
 
 function currentPosition() {
@@ -232,6 +243,7 @@ function openCall(phone) {
 }
 
 function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,confirmationSaving}) {
+  const [showTextMenu,setShowTextMenu] = useState(false)
   const [showLate,setShowLate] = useState(false)
   const [etaLoading,setEtaLoading] = useState(false)
   const [communicationError,setCommunicationError] = useState('')
@@ -307,16 +319,21 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,
         {!inactive && !completed && appt.phone && (
           <>
             <div className="appt-communication-row" onPointerDown={event=>event.stopPropagation()} onTouchStart={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()}>
-              <button type="button" className="appt-text-btn"
-                onClick={()=>{
+              <button type="button" className="appt-text-btn" onClick={()=>{setShowTextMenu(value=>!value);setShowLate(false)}}>
+                <MessageCircle size={13}/> Text ▾
+              </button>
+              {showTextMenu && <div className="quick-text-menu" aria-label="Client text options">
+                <button type="button" onClick={()=>{
                   if (clientConfirmationStatus(row)==='Unconfirmed' && onConfirmation) onConfirmation(appt,'Needs reply')
                   sendAppointmentText(confirmationMessage({owner:appt.owner,dogs:appt.dogs,date:appt.date,time:appt.time}),'Confirmation')
-                }}>
-                <MessageCircle size={13}/> Text
-              </button>
-              {clientConfirmationStatus(row)==='Needs reply' && <button type="button" className="appt-text-btn reminder" onClick={()=>sendAppointmentText(reminderMessage({owner:appt.owner,dogs:appt.dogs,date:appt.date,time:appt.time}),'Reminder')}>Reminder</button>}
-              {date===today && <button type="button" className="appt-text-btn" disabled={etaLoading} onClick={sendOnMyWay}>{etaLoading?'ETA…':'On my way'}</button>}
-              <button type="button" className="appt-text-btn" onClick={()=>setShowLate(value=>!value)}>Running late</button>
+                }}>Confirm</button>
+                <button type="button" onClick={()=>sendAppointmentText(reminderMessage({owner:appt.owner,dogs:appt.dogs,date:appt.date,time:appt.time}),'Reminder')}>Reminder</button>
+                {date===today && <button type="button" disabled={etaLoading} onClick={sendOnMyWay}>{etaLoading?'Getting ETA…':'On my way'}</button>}
+                <button type="button" onClick={()=>setShowLate(value=>!value)}>Running late</button>
+                {date===today && <button type="button" onClick={()=>sendAppointmentText(imHereMessage({owner:appt.owner}),"I'm here")}>I'm here</button>}
+                {date===today && <button type="button" onClick={()=>sendAppointmentText(needAccessMessage({owner:appt.owner}),'Need access')}>Need access</button>}
+                {onOpen && <button type="button" onClick={()=>{setShowTextMenu(false);onOpen()}}>Reschedule…</button>}
+              </div>}
               {showLate && <div className="late-options" aria-label="Running late options">
                 {[10,15,20,30].map(minutes=><button key={minutes} type="button" onClick={()=>{setShowLate(false);sendAppointmentText(runningLateMessage({owner:appt.owner,minutes}),'Running late')}}>{minutes} min</button>)}
               </div>}
@@ -3502,6 +3519,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation}) {
   const [error,setError] = useState('')
   const [scheduleCheck,setScheduleCheck] = useState({loading:false,severity:'ok',messages:[]})
   const [manualOverride,setManualOverride] = useState(false)
+  const [showTextMenu,setShowTextMenu] = useState(false)
   const [showLateOptions,setShowLateOptions] = useState(false)
   const [etaLoading,setEtaLoading] = useState(false)
   const [lastContact,setLastContact] = useState(()=>readAppointmentContact(appt))
@@ -3769,19 +3787,24 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation}) {
         return <div className="communication-card">
           <div><strong>Client communication</strong><span>{arrivalWindowLabel(appt.time) ? `Arrival window ${arrivalWindowLabel(appt.time)}` : 'Arrival window not set'}{lastContact ? ` · ${contactLabel(lastContact)}` : ''}</span></div>
           <div className="communication-actions">
-            <button type="button" disabled={!phone} onClick={()=>{
-              if (clientConfirmationStatus(row)==='Unconfirmed' && onConfirmation) onConfirmation(appt,'Needs reply')
-              recordAndText(message,'Confirmation')
-            }}><MessageCircle size={14}/> Text confirmation</button>
-            {clientConfirmationStatus(row)==='Needs reply' && <button type="button" disabled={!phone} onClick={()=>recordAndText(reminderMessage({owner:appt.owner,dogs:appt.dogs,date:originalDate,time:appt.time}),'Reminder')}>Reminder</button>}
-            {originalDate===businessDateKey() && <button type="button" disabled={!phone || etaLoading} onClick={sendSheetOnMyWay}>{etaLoading?'Getting ETA…':'On my way'}</button>}
-            <button type="button" disabled={!phone} onClick={()=>setShowLateOptions(value=>!value)}>Running late</button>
+            <button type="button" disabled={!phone} onClick={()=>{setShowTextMenu(value=>!value);setShowLateOptions(false)}}><MessageCircle size={14}/> Text customer ▾</button>
             <button type="button" disabled={!phone} onClick={()=>openCall(phone)}>Call</button>
             <button type="button" onClick={async()=>{
               try { await navigator.clipboard.writeText(message); setError('Confirmation text copied.') }
-              catch { setError('Could not copy automatically. Use Text confirmation instead.') }
-            }}>Copy text</button>
+              catch { setError('Could not copy automatically. Use Text customer instead.') }
+            }}>Copy confirmation</button>
           </div>
+          {showTextMenu && <div className="quick-text-menu sheet-text-menu" aria-label="Client text options">
+            <button type="button" disabled={!phone} onClick={()=>{
+              if (clientConfirmationStatus(row)==='Unconfirmed' && onConfirmation) onConfirmation(appt,'Needs reply')
+              recordAndText(message,'Confirmation')
+            }}>Confirm</button>
+            <button type="button" disabled={!phone} onClick={()=>recordAndText(reminderMessage({owner:appt.owner,dogs:appt.dogs,date:originalDate,time:appt.time}),'Reminder')}>Reminder</button>
+            {originalDate===businessDateKey() && <button type="button" disabled={!phone || etaLoading} onClick={sendSheetOnMyWay}>{etaLoading?'Getting ETA…':'On my way'}</button>}
+            <button type="button" disabled={!phone} onClick={()=>setShowLateOptions(value=>!value)}>Running late</button>
+            {originalDate===businessDateKey() && <button type="button" disabled={!phone} onClick={()=>recordAndText(imHereMessage({owner:appt.owner}),"I'm here")}>I'm here</button>}
+            {originalDate===businessDateKey() && <button type="button" disabled={!phone} onClick={()=>recordAndText(needAccessMessage({owner:appt.owner}),'Need access')}>Need access</button>}
+          </div>}
           {showLateOptions && <div className="late-options sheet-late-options">{[10,15,20,30].map(minutes=><button key={minutes} type="button" disabled={!phone} onClick={()=>{setShowLateOptions(false);recordAndText(runningLateMessage({owner:appt.owner,minutes}),'Running late')}}>{minutes} min</button>)}</div>}
         </div>
       })()}
@@ -4527,6 +4550,10 @@ const plannerThemeCss = `
   .appt-text-btn{display:inline-flex;align-items:center;gap:5px;margin-top:9px;margin-left:7px;padding:6px 9px;border:1px solid #d7dde6;border-radius:999px;background:#fff;color:#31415f;font-size:12px;font-weight:850;position:relative;z-index:6;}
   .appt-text-btn.reminder{background:#fff7e8;border-color:#e6c981;color:#76551b;}
   .appt-communication-row{display:flex;gap:0;align-items:center;flex-wrap:wrap;position:relative;z-index:6;}
+  .quick-text-menu{display:flex;gap:6px;flex-wrap:wrap;width:100%;margin:7px 0 0 7px;padding:8px;border:1px solid #dfe4eb;border-radius:12px;background:#f8fafc;}
+  .quick-text-menu button{border:1px solid #d7dde6;background:#fff;color:#31415f;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:850;}
+  .quick-text-menu button:disabled{opacity:.45;}
+  .sheet-text-menu{margin:0;}
   .late-options{display:flex;gap:6px;flex-wrap:wrap;width:100%;margin:7px 0 0 7px;}
   .late-options button{border:1px solid #d7dde6;background:#fff;color:#31415f;border-radius:999px;padding:6px 9px;font-size:11px;font-weight:850;}
   .sheet-late-options{margin:0;}
