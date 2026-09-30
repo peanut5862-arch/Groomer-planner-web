@@ -885,6 +885,17 @@ function defaultFirstStopTime(groomer) {
   return groomer === 'Jen' ? '09:00' : '08:30'
 }
 
+function schedulingOverrideReasons(date,groomer,assignedGroomers=[]) {
+  const reasons = []
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
+    const weekday = new Date(`${date}T12:00:00Z`).getUTCDay()
+    if (groomer === 'Jen' && ![2,3,4].includes(weekday)) reasons.push('Jen normally works Tuesday through Thursday.')
+  }
+  const assigned = [...new Set((assignedGroomers || []).filter(name=>name==='Jen' || name==='Haley'))]
+  if (assigned.length === 1 && groomer && groomer !== assigned[0]) reasons.push(`This household is normally assigned to ${assigned[0]}.`)
+  return reasons
+}
+
 function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
   const [date,setDate] = useState(dateKey || businessDateKey())
   const [clientKey,setClientKey] = useState('')
@@ -895,6 +906,7 @@ function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
   const [note,setNote] = useState('')
   const [saving,setSaving] = useState(false)
   const [message,setMessage] = useState('')
+  const [manualOverride,setManualOverride] = useState(false)
 
   const keyOf = row => String(row?.household_id || row?.['Household ID'] || '').trim()
     ? `h:${String(row?.household_id || row?.['Household ID']).trim()}`
@@ -926,7 +938,10 @@ function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
     setFixed(Boolean(preset?.fixed))
     setNote(preset?.note || '')
     setMessage('')
+    setManualOverride(false)
   },[open,dateKey,preset?.clientKey,preset?.groomer,preset?.time,preset?.fixed,preset?.note])
+
+  useEffect(()=>{ setManualOverride(false) },[date,groomer,clientKey])
 
   useEffect(()=>{
     if (!client) { setSelectedDogs({}); return }
@@ -959,6 +974,9 @@ function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
     return acc
   },{price:0,minutes:0})
 
+  const assignedGroomers = client ? [...new Set(client.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))] : []
+  const overrideReasons = schedulingOverrideReasons(date,groomer,assignedGroomers)
+
   const save = async () => {
     if (!supabase || saving) return
     if (!client) { setMessage('Choose a client.'); return }
@@ -967,9 +985,7 @@ function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) { setMessage('Choose a valid appointment time.'); return }
     const weekday = new Date(`${date}T12:00:00Z`).getUTCDay()
     if (![1,2,3,4,5].includes(weekday)) { setMessage('Choose Monday through Friday.'); return }
-    if (groomer === 'Jen' && ![2,3,4].includes(weekday)) { setMessage('Jen works Tuesday through Thursday.'); return }
-    const assigned = [...new Set(chosen.map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))]
-    if (assigned.length === 1 && groomer !== assigned[0]) { setMessage(`This client is assigned to ${assigned[0]}.`); return }
+    if (overrideReasons.length && !manualOverride) { setMessage('Turn on Manual override to schedule outside the normal groomer rules.'); return }
     setSaving(true)
     setMessage('')
     try {
@@ -1058,6 +1074,15 @@ function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
               <input type="time" value={time} onChange={event=>setTime(event.target.value)}/>
             </label>
           </div>
+
+          {overrideReasons.length > 0 && <div className="schedule-check warning" style={{margin:0}}>
+            <div className="schedule-check-title">Outside normal scheduling rules</div>
+            {overrideReasons.map((reason,index)=><div key={index}>• {reason}</div>)}
+            <label style={{display:'flex',gap:10,alignItems:'flex-start',marginTop:10,fontWeight:800}}>
+              <input type="checkbox" checked={manualOverride} onChange={event=>setManualOverride(event.target.checked)} style={{width:20,height:20,minWidth:20,margin:0}}/>
+              <span>Manual override — schedule this appointment anyway</span>
+            </label>
+          </div>}
 
           <label style={{display:'flex',gap:9,alignItems:'center',fontSize:13,fontWeight:700}}>
             <input type="checkbox" checked={fixed} onChange={event=>setFixed(event.target.checked)}/>
@@ -2077,7 +2102,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
     phone:client?.phone || '', groomer:client?.groomer || '', area:client?.area || '', area_mode:'existing', new_area:'',
     address:client?.address || '', city:client?.city || '', state:client?.state || 'TX', zip:client?.zip || '',
     service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'', groom_minutes:'', bath_minutes:'', partial_groom_minutes:'', frequency_weeks:'', frequency_mode:'preset', last_groom:'', last_bath:'',
-    prior_service:'no', first_appointment_booked:false, first_appointment_date:'', first_appointment_groomer:'Jen', first_appointment_time:'09:00', first_appointment_service:'Groom', first_appointment_fixed:false,
+    prior_service:'no', first_appointment_booked:false, first_appointment_date:'', first_appointment_groomer:'Jen', first_appointment_time:'09:00', first_appointment_service:'Groom', first_appointment_fixed:false, first_appointment_override:false,
     additional_dogs:[]
   })
 
@@ -2101,7 +2126,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
     last_groom:String(valueOf(row,'last_groom','Last Groom','last_groom_date','Last Groom Date') || '').slice(0,10),
     last_bath:String(valueOf(row,'last_bath','Last Bath','last_bath_date','Last Bath Date') || '').slice(0,10),
     prior_service:(valueOf(row,'last_groom','Last Groom','last_groom_date','Last Groom Date') || valueOf(row,'last_bath','Last Bath','last_bath_date','Last Bath Date')) ? 'yes' : 'no',
-    first_appointment_booked:false, first_appointment_date:'', first_appointment_groomer:'Jen', first_appointment_time:'09:00', first_appointment_service:'Groom', first_appointment_fixed:false, additional_dogs:[]
+    first_appointment_booked:false, first_appointment_date:'', first_appointment_groomer:'Jen', first_appointment_time:'09:00', first_appointment_service:'Groom', first_appointment_fixed:false, first_appointment_override:false, additional_dogs:[]
     })
     setSelectedClient(null)
   }
@@ -2140,8 +2165,8 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
       if (dogsToSave.some(dog => !appointmentServiceOptions.includes(dog.first_appointment_service || dog.service))) { setDogMessage('Choose a first appointment service for every dog.'); return }
       const weekday = new Date(`${form.first_appointment_date}T12:00:00Z`).getUTCDay()
       if (![1,2,3,4,5].includes(weekday)) { setDogMessage('First appointments must be Monday through Friday.'); return }
-      if (form.first_appointment_groomer === 'Jen' && ![2,3,4].includes(weekday)) { setDogMessage('Jen works Tuesday through Thursday.'); return }
-      if (['Jen','Haley'].includes(form.groomer) && form.first_appointment_groomer !== form.groomer) { setDogMessage(`This household is assigned to ${form.groomer}. Choose ${form.groomer} for the first appointment.`); return }
+      const firstVisitOverrideReasons = schedulingOverrideReasons(form.first_appointment_date,form.first_appointment_groomer,['Jen','Haley'].includes(form.groomer)?[form.groomer]:[])
+      if (firstVisitOverrideReasons.length && !form.first_appointment_override) { setDogMessage('Turn on Manual override to book this first visit outside the normal groomer rules.'); return }
     }
 
     setDogSaving(true); setDogMessage('')
@@ -2586,11 +2611,11 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                   <span style={{minWidth:0,whiteSpace:'normal',overflowWrap:'anywhere'}}>First appointment is already booked</span>
                 </label>
                 {dogEditor.first_appointment_booked && <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-                  <label style={{gridColumn:'1 / -1'}}>First appointment date<input type="date" value={dogEditor.first_appointment_date || ''} onChange={e=>setDogEditor({...dogEditor,first_appointment_date:e.target.value})}/></label>
+                  <label style={{gridColumn:'1 / -1'}}>First appointment date<input type="date" value={dogEditor.first_appointment_date || ''} onChange={e=>setDogEditor({...dogEditor,first_appointment_date:e.target.value,first_appointment_override:false})}/></label>
                   <label>Groomer<select value={dogEditor.first_appointment_groomer || 'Jen'} onChange={e=>{
                     const next=e.target.value
                     const previousDefault=defaultFirstStopTime(dogEditor.first_appointment_groomer)
-                    setDogEditor({...dogEditor,first_appointment_groomer:next,first_appointment_time:(!dogEditor.first_appointment_time || dogEditor.first_appointment_time===previousDefault)?defaultFirstStopTime(next):dogEditor.first_appointment_time})
+                    setDogEditor({...dogEditor,first_appointment_groomer:next,first_appointment_time:(!dogEditor.first_appointment_time || dogEditor.first_appointment_time===previousDefault)?defaultFirstStopTime(next):dogEditor.first_appointment_time,first_appointment_override:false})
                   }}><option>Jen</option><option>Haley</option></select></label>
                   <label>Time<input type="time" value={dogEditor.first_appointment_time || defaultFirstStopTime(dogEditor.first_appointment_groomer)} onChange={e=>setDogEditor({...dogEditor,first_appointment_time:e.target.value})}/></label>
                   <div style={{gridColumn:'1 / -1',display:'grid',gap:8}}>
@@ -2601,6 +2626,14 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                     <input type="checkbox" checked={Boolean(dogEditor.first_appointment_fixed)} onChange={e=>setDogEditor({...dogEditor,first_appointment_fixed:e.target.checked})} style={{width:22,height:22,minWidth:22,flex:'0 0 22px',margin:0,padding:0}}/>
                     <span style={{minWidth:0,whiteSpace:'normal',overflowWrap:'anywhere'}}>Fixed time (otherwise the normal ±30 minute arrival window applies)</span>
                   </label>
+                  {schedulingOverrideReasons(dogEditor.first_appointment_date,dogEditor.first_appointment_groomer,['Jen','Haley'].includes(dogEditor.groomer)?[dogEditor.groomer]:[]).length > 0 && <div className="schedule-check warning" style={{gridColumn:'1 / -1',margin:0}}>
+                    <div className="schedule-check-title">Outside normal scheduling rules</div>
+                    {schedulingOverrideReasons(dogEditor.first_appointment_date,dogEditor.first_appointment_groomer,['Jen','Haley'].includes(dogEditor.groomer)?[dogEditor.groomer]:[]).map((reason,index)=><div key={index}>• {reason}</div>)}
+                    <label style={{display:'flex',gap:10,alignItems:'flex-start',marginTop:10,fontWeight:800}}>
+                      <input type="checkbox" checked={Boolean(dogEditor.first_appointment_override)} onChange={e=>setDogEditor({...dogEditor,first_appointment_override:e.target.checked})} style={{width:20,height:20,minWidth:20,margin:0}}/>
+                      <span>Manual override — book this first appointment anyway</span>
+                    </label>
+                  </div>}
                 </div>}
               </div>}
             </div>
@@ -2949,7 +2982,6 @@ function rescheduleValidation(date,time,groomer,today) {
   if (!date || date<today) return 'Choose today or a future date.'
   const day = new Date(`${date}T12:00:00Z`).getUTCDay()
   if (![1,2,3,4,5].includes(day)) return 'Choose Monday through Friday.'
-  if (groomer==='Jen' && ![2,3,4].includes(day)) return 'Jen works Tuesday through Thursday.'
   if (!['Jen','Haley'].includes(groomer)) return 'Choose a groomer.'
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return 'Choose a valid arrival time.'
   return ''
@@ -2999,6 +3031,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
   const [saving,setSaving] = useState(false)
   const [error,setError] = useState('')
   const [scheduleCheck,setScheduleCheck] = useState({loading:false,severity:'ok',messages:[]})
+  const [manualOverride,setManualOverride] = useState(false)
   const savingRef = React.useRef(false)
   const closeRef = React.useRef(null)
   const dialogRef = React.useRef(null)
@@ -3025,7 +3058,10 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
   const missingServicePrice = serviceRows.some(item=>!Number.isFinite(servicePriceFor(item.name,item.service)))
   const missingServiceMinutes = serviceRows.some(item=>!Number.isFinite(serviceMinutesFor(item.name,item.service)))
   const restrictions = householdDogs.map(dog=>String(dog.groomer || dog.Groomer || '').trim()).filter(name=>['Jen','Haley'].includes(name))
-  const groomers = ['Jen','Haley'].filter(name=>restrictions.every(assigned=>assigned===name))
+  const assignedGroomers = [...new Set(restrictions)]
+  const groomers = ['Jen','Haley']
+  const editOverrideReasons = schedulingOverrideReasons(originalDate,editGroomer,assignedGroomers)
+  const rescheduleOverrideReasons = schedulingOverrideReasons(targetDate,targetGroomer,assignedGroomers)
   const close = () => { if (!savingRef.current) onClose() }
 
 
@@ -3069,6 +3105,8 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
     document.addEventListener('keydown',keydown)
     return ()=>{document.removeEventListener('keydown',keydown);previous?.focus?.()}
   },[])
+
+  useEffect(()=>{ setManualOverride(false) },[mode,editGroomer,targetGroomer,targetDate])
 
   useEffect(()=>{
     if (!supabase || completed || moved || missed || !['edit','reschedule'].includes(mode)) {
@@ -3176,12 +3214,14 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
     if (savingRef.current || completed || moved || missed) return
     if (mode==='edit') {
       if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(editTime)) { setError('Choose a valid arrival time.'); return }
-      if (!groomers.includes(editGroomer)) { setError('Choose the household’s assigned groomer.'); return }
+      if (!groomers.includes(editGroomer)) { setError('Choose Jen or Haley.'); return }
+      if (editOverrideReasons.length && !manualOverride) { setError('Turn on Manual override to save outside the normal groomer rules.'); return }
     }
     if (mode==='reschedule') {
       const message=rescheduleValidation(targetDate,targetTime,targetGroomer,businessDateKey())
       if(message){setError(message);return}
-      if(!groomers.includes(targetGroomer)){setError('Choose the household’s assigned groomer.');return}
+      if(!groomers.includes(targetGroomer)){setError('Choose Jen or Haley.');return}
+      if (rescheduleOverrideReasons.length && !manualOverride) { setError('Turn on Manual override to save outside the normal groomer rules.'); return }
     }
     if (mode==='services' && (!serviceRows.length || serviceRows.some(item=>!item.name || !appointmentServiceOptions.includes(item.service)))) {
       setError('Choose a service for every dog in this appointment.');return
@@ -3262,6 +3302,14 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
               {!scheduleCheck.loading && scheduleCheck.messages.length===0 && <div>No overlap or route-window conflict found for this change.</div>}
               {!scheduleCheck.loading && scheduleCheck.messages.map((message,index)=><div key={index}>• {message}</div>)}
             </div>
+            {editOverrideReasons.length > 0 && <div className="schedule-check warning">
+              <div className="schedule-check-title">Outside normal scheduling rules</div>
+              {editOverrideReasons.map((reason,index)=><div key={index}>• {reason}</div>)}
+              <label style={{display:'flex',gap:10,alignItems:'flex-start',marginTop:10,fontWeight:800}}>
+                <input type="checkbox" checked={manualOverride} onChange={event=>setManualOverride(event.target.checked)} style={{width:20,height:20,minWidth:20}}/>
+                <span>Manual override — save this appointment anyway</span>
+              </label>
+            </div>}
           </>}
           {mode==='services' && <>
             <div className="prototype-note" style={{textAlign:'left',marginBottom:12}}>Set what each dog is getting for this appointment only. This does not change the dog’s usual service on the client profile.</div>
@@ -3287,6 +3335,14 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
               {!scheduleCheck.loading && scheduleCheck.messages.length===0 && <div>No overlap or Google route-window conflict found on the destination day.</div>}
               {!scheduleCheck.loading && scheduleCheck.messages.map((message,index)=><div key={index}>• {message}</div>)}
             </div>
+            {rescheduleOverrideReasons.length > 0 && <div className="schedule-check warning">
+              <div className="schedule-check-title">Outside normal scheduling rules</div>
+              {rescheduleOverrideReasons.map((reason,index)=><div key={index}>• {reason}</div>)}
+              <label style={{display:'flex',gap:10,alignItems:'flex-start',marginTop:10,fontWeight:800}}>
+                <input type="checkbox" checked={manualOverride} onChange={event=>setManualOverride(event.target.checked)} style={{width:20,height:20,minWidth:20}}/>
+                <span>Manual override — move this appointment anyway</span>
+              </label>
+            </div>}
             <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>The selected arrival time becomes fixed. Customer times are never changed automatically; warnings use saved service lengths, Google drive time, and your ±30-minute arrival window.</p>
           </>}
           {mode==='cancel' && <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>Cancel this appointment for {appt.owner}? It stays in Week history, and the affected route becomes a draft for review.</p>}
