@@ -344,6 +344,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,
           <span className={`status-dot ${appt.statusClass || appt.status || 'confirmed'}`} />
         </div>
         <div className="dogs">{appt.dogs}</div>
+        {appt.services && appt.services !== appt.dogs && <div style={{fontSize:11,color:'#59616e',marginTop:4}}><strong>Services:</strong> {appt.services}</div>}
         <div className="meta">
           {appt.area && <span><MapPin size={14}/>{appt.area}</span>}
           {Number.isFinite(appt.drive) && appt.drive > 0 && (
@@ -3324,7 +3325,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
   )
 }
 
-function More({dogs,revision,onAsk,onRebook}) {
+function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false}) {
   const today = businessDateKey()
   const [weekStart,setWeekStart] = useState(()=>mondayForDate(businessDateKey()))
   const [weekRecord,setWeekRecord] = useState(null)
@@ -3512,6 +3513,8 @@ function More({dogs,revision,onAsk,onRebook}) {
           {!rebooking.length && <div className="prototype-note">No due or overdue clients currently need rebooking.</div>}
           {rebooking.length>5 && <button type="button" className="ghost" style={{width:'100%',marginTop:10}} onClick={()=>onAsk?.("Who hasn't been booked back yet?")}>View all with Ask Planner</button>}
         </div>
+
+        {showPushSetup && <OwnerPushNotifications session={session}/>}
 
         <div className="menu-list" style={{marginTop:16}}>
           <button><Settings size={19}/><span>Scheduling settings</span><ChevronRight size={17}/></button>
@@ -4560,6 +4563,250 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
 }
 
 
+
+
+function ensureGroomingWebAppMetadata() {
+  if (typeof document === 'undefined') return
+  let manifest = document.querySelector('link[rel="manifest"]')
+  if (!manifest) {
+    manifest = document.createElement('link')
+    manifest.rel = 'manifest'
+    document.head.appendChild(manifest)
+  }
+  manifest.href = '/manifest.webmanifest'
+
+  const ensureMeta = (name, content) => {
+    let meta = document.querySelector(`meta[name="${name}"]`)
+    if (!meta) {
+      meta = document.createElement('meta')
+      meta.name = name
+      document.head.appendChild(meta)
+    }
+    meta.content = content
+  }
+  ensureMeta('apple-mobile-web-app-capable','yes')
+  ensureMeta('apple-mobile-web-app-title','Grooming Planner')
+  ensureMeta('theme-color','#17223f')
+}
+
+function base64UrlToUint8Array(value) {
+  const padding = '='.repeat((4 - (value.length % 4)) % 4)
+  const base64 = (value + padding).replace(/-/g,'+').replace(/_/g,'/')
+  const raw = window.atob(base64)
+  return Uint8Array.from([...raw].map(char=>char.charCodeAt(0)))
+}
+
+function OwnerPushNotifications({session}) {
+  const [state,setState] = useState({loading:true,enabled:false,message:''})
+  const publicKey = String(import.meta.env.VITE_VAPID_PUBLIC_KEY || '').trim()
+  const supported = typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
+  const isIOS = typeof navigator !== 'undefined' && /iphone|ipad|ipod/i.test(navigator.userAgent)
+  const standalone = typeof window !== 'undefined' && (window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator?.standalone === true)
+
+  useEffect(()=>{
+    let cancelled=false
+    const check=async()=>{
+      if(!supported){ if(!cancelled)setState({loading:false,enabled:false,message:'Push notifications are not supported on this device.'}); return }
+      try{
+        const registration = await navigator.serviceWorker.getRegistration('/push-sw.js') || await navigator.serviceWorker.getRegistration()
+        const subscription = await registration?.pushManager?.getSubscription?.()
+        if(!cancelled) setState({loading:false,enabled:Boolean(subscription && Notification.permission==='granted'),message:''})
+      }catch{
+        if(!cancelled) setState({loading:false,enabled:false,message:''})
+      }
+    }
+    check()
+    return()=>{cancelled=true}
+  },[supported])
+
+  const enable=async()=>{
+    if(state.loading || state.enabled) return
+    if(!supported){setState({loading:false,enabled:false,message:'Push notifications are not supported on this device.'});return}
+    if(isIOS && !standalone){setState({loading:false,enabled:false,message:'On iPhone, add Grooming Planner to your Home Screen first, open it from the new icon, then tap Enable notifications.'});return}
+    if(!publicKey){setState({loading:false,enabled:false,message:'VITE_VAPID_PUBLIC_KEY is not configured in Vercel yet.'});return}
+    if(!session?.access_token){setState({loading:false,enabled:false,message:'Sign in again before enabling notifications.'});return}
+    setState({loading:true,enabled:false,message:''})
+    try{
+      const registration=await navigator.serviceWorker.register('/push-sw.js')
+      const permission=await Notification.requestPermission()
+      if(permission!=='granted') throw new Error('Notifications were not allowed on this phone.')
+      let subscription=await registration.pushManager.getSubscription()
+      if(!subscription){
+        subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:base64UrlToUint8Array(publicKey)})
+      }
+      const response=await fetch('/api/push-subscribe',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`},
+        body:JSON.stringify({subscription:subscription.toJSON()})
+      })
+      const payload=await response.json().catch(()=>({}))
+      if(!response.ok) throw new Error(payload?.error || 'Could not save this phone for notifications.')
+      setState({loading:false,enabled:true,message:'Finish notifications are enabled on this phone.'})
+    }catch(error){
+      setState({loading:false,enabled:false,message:error?.message || 'Could not enable notifications.'})
+    }
+  }
+
+  return (
+    <div style={{background:'#fff',border:'1px solid #e4e7ec',borderRadius:18,padding:16,marginTop:14,boxShadow:'0 8px 24px rgba(23,32,56,.04)'}}>
+      <div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'flex-start'}}>
+        <div>
+          <strong style={{display:'block',fontSize:14,color:'#172038'}}>Haley finish notifications</strong>
+          <span style={{display:'block',fontSize:11,color:'#7b828e',marginTop:4,lineHeight:1.45}}>Get a phone notification as soon as Haley taps Finished, even when you are not watching the planner.</span>
+        </div>
+        <span style={{fontSize:10,fontWeight:900,padding:'5px 8px',borderRadius:999,background:state.enabled?'#edf7ef':'#f2f3f5',color:state.enabled?'#267447':'#67707d',whiteSpace:'nowrap'}}>{state.enabled?'ON':'OFF'}</span>
+      </div>
+      <button type="button" className={state.enabled?'ghost':'save'} disabled={state.loading || state.enabled} onClick={enable} style={{width:'100%',marginTop:12}}>
+        {state.loading?'Checking…':state.enabled?'✓ Notifications enabled':'Enable finish notifications'}
+      </button>
+      {isIOS && !standalone && !state.enabled && <div className="prototype-note" style={{marginTop:10}}>iPhone: Safari → Share → Add to Home Screen. Then open Grooming Planner from the Home Screen icon and come back here.</div>}
+      {state.message && <div className={state.enabled?'prototype-note':'login-message'} style={{marginTop:10}}>{state.message}</div>}
+    </div>
+  )
+}
+
+function groomerAppointmentFromRow(row,weekStart) {
+  const status=String(row?.['Appointment Status'] || '').trim().toLowerCase()
+  const completed=String(row?.['Completion Status'] || '').trim().toLowerCase()==='completed'
+  const finished=completed || String(row?.['Groomer Finish Status'] || '').trim().toLowerCase()==='finished'
+  const rowIndex=Number(row?._row_index)
+  return {
+    id:`groomer-${weekStart}-${Number.isFinite(rowIndex)?rowIndex:'x'}-${String(row?.Date || '')}`,
+    rowIndex,
+    weekStart,
+    sourceRow:row,
+    date:String(row?.Date || '').slice(0,10),
+    groomer:String(row?.Groomer || '').trim(),
+    time:String(row?.['Start Time'] || '').trim(),
+    owner:String(row?.Owner || '').trim(),
+    dogs:String(row?.Dogs || '').trim(),
+    services:String(row?.Services || row?.Service || '').trim(),
+    area:String(row?.['Area Cluster'] || row?.Area || '').trim(),
+    note:String(row?.['Appointment Note'] || row?.Notes || row?.Note || row?.['Client Notes'] || row?.['Status Note'] || '').trim(),
+    inactive:['cancelled','canceled','moved to another week'].includes(status),
+    completed,
+    finished
+  }
+}
+
+function GroomerStopCard({appt,onFinish,finishing}) {
+  const address=appointmentAddress(appt,{})
+  const today=businessDateKey()
+  const canFinish=!appt.inactive && !appt.finished && appt.date===today
+  const mapsUrl=googleMapsAddressUrl(address)
+  return (
+    <div className={`appt-card groomer-haley ${appt.finished?'completed-card':''}`} style={{cursor:'default'}}>
+      <div className="time-pill">{displayClockTime(appt.time)}</div>
+      <div className="appt-main">
+        <div className="appt-topline"><strong>{appt.owner}</strong><span className={`status-dot ${appt.finished?'confirmed':'locked'}`}/></div>
+        <div className="dogs">{appt.dogs}</div>
+        <div className="meta">
+          {appt.area && <span><MapPin size={14}/>{appt.area}</span>}
+          {address && <span><MapPin size={14}/>{address}</span>}
+        </div>
+        {appt.note && <div style={{fontSize:11,color:'#59616e',marginTop:7,lineHeight:1.45}}><strong>Notes:</strong> {appt.note}</div>}
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>
+          {mapsUrl && <a href={mapsUrl} target="_blank" rel="noreferrer" className="day-ai" style={{textDecoration:'none',display:'inline-flex',alignItems:'center',gap:6}}><MapPin size={14}/>Open address</a>}
+          {canFinish && <button type="button" className="save" disabled={finishing} onClick={()=>onFinish(appt)}>{finishing?'Saving…':'✓ Finished'}</button>}
+          {appt.finished && <div style={{fontSize:12,fontWeight:900,color:'#267447',padding:'8px 0'}}>✓ Finished</div>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function GroomerPortal({session,groomer}) {
+  const [tab,setTab]=useState('Today')
+  const [weekStart,setWeekStart]=useState(()=>mondayForDate(businessDateKey()))
+  const [record,setRecord]=useState(null)
+  const [loading,setLoading]=useState(true)
+  const [error,setError]=useState('')
+  const [revision,setRevision]=useState(0)
+  const [finishingId,setFinishingId]=useState('')
+  const [notice,setNotice]=useState('')
+  const today=businessDateKey()
+  const activeWeek=tab==='Today'?mondayForDate(today):weekStart
+
+  useEffect(()=>{
+    if(tab==='More') return
+    let cancelled=false
+    setLoading(true);setError('')
+    supabase.rpc('get_groomer_week',{p_week_start:activeWeek}).then(({data,error:loadError})=>{
+      if(cancelled) return
+      if(loadError){setRecord(null);setError(loadError.message || 'Could not load your route.')}
+      else setRecord(data || {week_start:activeWeek,status:null,plan_json:[]})
+      setLoading(false)
+    })
+    return()=>{cancelled=true}
+  },[tab,activeWeek,revision])
+
+  const appointments=(Array.isArray(record?.plan_json)?record.plan_json:[])
+    .map(row=>groomerAppointmentFromRow(row,activeWeek))
+    .filter(appt=>appt.groomer===groomer && !appt.inactive)
+    .sort(compareAppointmentTimes)
+
+  const finishStop=async(appt)=>{
+    if(finishingId || !appt) return
+    setFinishingId(appt.id);setNotice('')
+    try{
+      const row=appt.sourceRow || {}
+      const {data,error:finishError}=await supabase.rpc('groomer_finish_stop',{
+        p_week_start:appt.weekStart,
+        p_row_index:appt.rowIndex,
+        p_expected_date:appt.date,
+        p_expected_time:String(row['Start Time'] || '')
+      })
+      if(finishError) throw finishError
+      if(['finished','already_finished'].includes(data?.status) && data?.event_id){
+        const response=await fetch('/api/send-groomer-finished',{
+          method:'POST',
+          headers:{'Content-Type':'application/json','Authorization':`Bearer ${session?.access_token || ''}`},
+          body:JSON.stringify({eventId:data.event_id})
+        })
+        const payload=await response.json().catch(()=>({}))
+        if(!response.ok) setNotice(`Finished was saved, but the owner push could not be sent: ${payload?.error || 'notification error'}`)
+        else if(payload?.alreadySent) setNotice(`${appt.owner} was already marked finished and the owner notification had already been sent.`)
+        else if(Number(payload?.sent || 0) < 1) setNotice(`${appt.owner} is marked finished, but no owner phone is registered for push notifications yet.`)
+        else setNotice(`${appt.owner} is marked finished. The owner notification was sent.`)
+      }else if(data?.status==='already_finished'){
+        setNotice(`${appt.owner} was already marked finished.`)
+      }else{
+        setNotice(`${appt.owner} was marked finished, but the notification event could not be confirmed.`)
+      }
+      setRevision(value=>value+1)
+    }catch(err){
+      setNotice(err?.message || 'Could not mark this stop finished.')
+    }finally{setFinishingId('')}
+  }
+
+  const shiftWeek=amount=>{
+    const d=new Date(`${weekStart}T12:00:00Z`);d.setUTCDate(d.getUTCDate()+amount*7);setWeekStart(d.toISOString().slice(0,10))
+  }
+  const nav=[['Today',Home],['Week',CalendarDays],['More',Ellipsis]]
+
+  let body=null
+  if(tab==='More'){
+    body=(<section><div className="page-head"><div><div className="eyebrow">{groomer}</div><h1>Groomer mode</h1></div></div><div className="prototype-note">This login only shows your assigned appointments, addresses, dogs/services, notes and route tools. Customer phone numbers and text/call tools are not available.</div><div className="menu-list" style={{marginTop:16}}><button type="button" onClick={async()=>{await supabase?.auth?.signOut?.()}}><LogOut size={19}/><span>Sign out</span><ChevronRight size={17}/></button></div></section>)
+  }else if(tab==='Today'){
+    const todayAppointments=appointments.filter(appt=>appt.date===today)
+    const label=new Date(`${today}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric',year:'numeric'})
+    body=(<section><div className="page-head"><div><div className="eyebrow">{label}</div><h1>Today</h1></div><button className="text-btn" onClick={()=>setRevision(value=>value+1)}>Refresh</button></div>{loading&&<div className="prototype-note">Loading your appointments…</div>}{error&&<div className="login-message">{error}</div>}{!loading&&!error&&<><div className="stats-row"><Stat label="Stops" value={todayAppointments.length}/><Stat label="Finished" value={`${todayAppointments.filter(a=>a.finished).length}/${todayAppointments.length}`}/></div><GoogleRoutePanel appointments={todayAppointments} dogs={[]} selectedGroomer={groomer} dateLabel={label} dateKey={today} viewerMode={false}/><div className="section-title"><h3>Your appointments</h3></div>{todayAppointments.length?<div className="appt-list">{todayAppointments.map(appt=><GroomerStopCard key={appt.id} appt={appt} onFinish={finishStop} finishing={finishingId===appt.id}/>)}</div>:<div className="prototype-note">No {groomer} appointments scheduled today.</div>}</>}</section>)
+  }else{
+    const weekEnd=addDays(parseLocalDate(activeWeek) || new Date(`${activeWeek}T12:00:00`),4)
+    const weekStartDate=parseLocalDate(activeWeek) || new Date(`${activeWeek}T12:00:00`)
+    body=(<section><div className="page-head"><div><div className="eyebrow">{displayDate(weekStartDate)} – {displayDate(weekEnd)}</div><h1>Week</h1></div><div className="month-arrows"><button className="icon-btn" onClick={()=>shiftWeek(-1)}><ChevronLeft size={18}/></button><button className="icon-btn" onClick={()=>shiftWeek(1)}><ChevronRight size={18}/></button></div></div>{loading&&<div className="prototype-note">Loading your week…</div>}{error&&<div className="login-message">{error}</div>}{!loading&&!error&&Array.from({length:5},(_,i)=>addDays(weekStartDate,i)).map(day=>{const dateKey=ymd(day);const dayAppts=appointments.filter(a=>a.date===dateKey);return <div className="day-block" key={dateKey}><div className="day-head"><div><strong>{displayDay(day)}</strong><span>{day.getDate()}</span></div></div>{dayAppts.length?<><div style={{fontSize:11,color:'#8a8f99',margin:'0 0 8px 2px'}}>{dayAppts.length} stop{dayAppts.length===1?'':'s'} · {dayAppts.filter(a=>a.finished).length} finished</div><GoogleRoutePanel appointments={dayAppts} dogs={[]} selectedGroomer={groomer} dateLabel={`${displayDay(day)} ${displayDate(day)}`} dateKey={dateKey} viewerMode={false}/><div className="appt-list">{dayAppts.map(appt=><GroomerStopCard key={appt.id} appt={appt} onFinish={finishStop} finishing={finishingId===appt.id}/>)}</div></>:<div className="prototype-note">No appointments</div>}</div>})}</section>)
+  }
+
+  return (
+    <div className="app-shell">
+      <style>{plannerThemeCss}</style>
+      <header className="topbar"><div className="brand-mark">GP</div><div><strong>Grooming Planner</strong><span>{groomer} · Groomer mode</span></div></header>
+      <main>{notice&&<div className="prototype-note" style={{marginBottom:14}}>{notice} <button className="text-btn" onClick={()=>setNotice('')}>Dismiss</button></div>}{body}</main>
+      <nav className="bottom-nav">{nav.map(([name,Icon])=><button key={name} className={tab===name?'active':''} onClick={()=>setTab(name)}><Icon size={20}/><span>{name}</span></button>)}</nav>
+    </div>
+  )
+}
+
 function LoginScreen({ onSignedIn }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -4739,6 +4986,8 @@ export default function App() {
   const [addAppointment,setAddAppointment]=useState({open:false,date:businessDateKey(),preset:null})
   const [fillOpening,setFillOpening]=useState({open:false,date:businessDateKey(),groomer:'All',appointments:[]})
   const ask=(initial='')=>setAssistant({open:true,initial})
+
+  useEffect(()=>{ ensureGroomingWebAppMetadata() },[])
   const openRebookForClient = client => {
     const assigned=[...new Set((client?.rows || []).map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))]
     const groomer=assigned.length===1?assigned[0]:'Jen'
@@ -4869,17 +5118,20 @@ export default function App() {
     setAccessReady(false)
     supabase.rpc('get_grooming_access').then(({data,error})=>{
       if(cancelled) return
-      setAccessMode(!error && data==='viewer' ? 'viewer' : 'editor')
+      const next = !error && typeof data === 'string' ? data : 'editor'
+      setAccessMode(next === 'viewer' || next.startsWith('groomer:') ? next : 'editor')
       setAccessReady(true)
     })
     return ()=>{cancelled=true}
   },[session])
 
   const viewerMode = accessMode === 'viewer'
+  const groomerMode = accessMode.startsWith('groomer:')
+  const groomerName = groomerMode ? (accessMode.split(':')[1] || 'Haley') : ''
   const viewerNotice = () => setSaveMessage('Viewer mode is read-only. No client or schedule changes were made.')
 
   useEffect(() => {
-    if (!session || !supabase) {
+    if (!session || !supabase || groomerMode) {
       setDogs([])
       return
     }
@@ -4911,7 +5163,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [session,scheduleRevision])
+  }, [session,scheduleRevision,groomerMode])
 
   if (!authReady || (session && !accessReady)) {
     return (
@@ -4925,6 +5177,10 @@ export default function App() {
     return <LoginScreen onSignedIn={setSession} />
   }
 
+  if (groomerMode) {
+    return <GroomerPortal session={session} groomer={groomerName}/>
+  }
+
   let body
   if (tab === 'Today') {
     body = <Today dogs={dogs} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onAddAppointment={viewerMode?viewerNotice:date=>setAddAppointment({open:true,date,preset:null})} completingId={completingId} confirmingId={confirmingId} revision={scheduleRevision} viewerMode={viewerMode}/>
@@ -4935,7 +5191,7 @@ export default function App() {
   } else if (tab === 'Clients') {
     body = <Clients dogs={dogs} loading={dataLoading} error={dataError} onOpen={setEditing} revision={scheduleRevision} openClient={clientJump} onOpenClientHandled={()=>setClientJump(null)} onRebook={viewerMode?viewerNotice:openRebookForClient} onDataChanged={message=>{ setSaveMessage(message); setScheduleRevision(value=>value+1) }} viewerMode={viewerMode}/>
   } else {
-    body = <More dogs={dogs} revision={scheduleRevision} onAsk={ask} onRebook={viewerMode?viewerNotice:openRebookForClient}/>
+    body = <More dogs={dogs} revision={scheduleRevision} onAsk={ask} onRebook={viewerMode?viewerNotice:openRebookForClient} session={session} showPushSetup={!viewerMode}/>
   }
 
   const nav=[['Today',Home],['Week',CalendarDays],['Month',Clock3],['Clients',Users],['More',Ellipsis]]
