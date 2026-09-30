@@ -3160,8 +3160,25 @@ function plannerQueryFilters(text,dogs) {
   const minuteMatch = lower.match(/(\d+)\s*(?:minute|min)s?\b/)
   const maxMinutes = hourMatch ? Math.round(Number(hourMatch[1])*60) : minuteMatch ? Number(minuteMatch[1]) : 0
   const overdueOnly = /\boverdue\b/.test(lower)
-  const unbookedOnly = /hasn['’]?t been booked|not booked back|booked back|unbooked/.test(lower)
+  const unbookedOnly = /hasn['’]?t been booked|not booked back|booked back|unbooked|rebook/.test(lower)
   const service = /partial\s*groom/.test(lower) ? 'Partial Groom' : /bath\s*only/.test(lower) ? 'Bath Only' : /\bbath\b/.test(lower) ? 'Bath' : /\bgroom\b/.test(lower) ? 'Groom' : ''
+  const priceLookup = /\bhow much\b|\bwhat does .+ cost\b|\bwhat(?:'s| is) (?:the )?price\b|\bprice (?:for|of)\b|\bcost (?:for|of)\b/.test(lower)
+  let lookupName = ''
+  if (priceLookup) {
+    const patterns = [
+      /how much (?:is|for|does)\s+(.+?)(?:\s+cost)?(?:\?|$)/,
+      /what does\s+(.+?)\s+cost(?:\?|$)/,
+      /what(?:'s| is) (?:the )?price (?:for|of)\s+(.+?)(?:\?|$)/,
+      /price (?:for|of)\s+(.+?)(?:\?|$)/,
+      /cost (?:for|of)\s+(.+?)(?:\?|$)/
+    ]
+    const hit = patterns.map(pattern=>lower.match(pattern)).find(Boolean)
+    lookupName = String(hit?.[1] || '')
+      .replace(/\b(?:for a|for an|for the|for)\s+(?:groom|bath only|bath|partial groom)\b.*$/,'')
+      .replace(/\b(?:groom|bath only|bath|partial groom)\b$/,'')
+      .replace(/\b(?:cost|price|please|today)\b$/,'')
+      .trim()
+  }
   const areas = [...new Set((dogs || []).map(row=>canonicalAreaLabel(row?.area || row?.Area || '')).filter(Boolean))]
     .sort((a,b)=>b.length-a.length)
   let area = areas.find(label=>lower.includes(label.toLowerCase())) || ''
@@ -3175,7 +3192,17 @@ function plannerQueryFilters(text,dogs) {
     if (hit) area = hit[1]
   }
   const routeIntent = /route|closest|fill|opening|add|fit/.test(lower)
-  return {lower,date,groomer,minPrice,maxMinutes,overdueOnly,unbookedOnly,service,area,routeIntent}
+  return {lower,date,groomer,minPrice,maxMinutes,overdueOnly,unbookedOnly,service,area,routeIntent,priceLookup,lookupName}
+}
+
+function plannerNextBookableDate(groomer,fromKey=businessDateKey()) {
+  const date = new Date(`${fromKey}T12:00:00Z`)
+  for (let i=0;i<14;i+=1) {
+    const day = date.getUTCDay()
+    if (groomer === 'Jen' ? [2,3,4].includes(day) : [1,2,3,4,5].includes(day)) return date.toISOString().slice(0,10)
+    date.setUTCDate(date.getUTCDate()+1)
+  }
+  return fromKey
 }
 
 function plannerDayLabel(dateKey) {
@@ -3211,6 +3238,43 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient}) {
       if (!supabase) throw new Error('Your schedule connection is not configured.')
       const today = businessDateKey()
       const filters = plannerQueryFilters(prompt,dogs)
+      const groups = plannerClientGroups(dogs)
+
+      if (filters.priceLookup) {
+        const needle = String(filters.lookupName || '').toLowerCase().trim()
+        const ranked = groups.map(client=>{
+          const owner = client.owner.toLowerCase()
+          const dogNames = client.rows.map(row=>String(row?.dog || row?.Dog || '').trim())
+          const dogNamesLower = dogNames.map(name=>name.toLowerCase())
+          let matchScore = 0
+          if (needle) {
+            if (owner === needle) matchScore = 100
+            else if (dogNamesLower.includes(needle)) matchScore = 95
+            else if (owner.includes(needle) || needle.includes(owner)) matchScore = 80
+            else if (dogNamesLower.some(name=>name.includes(needle) || needle.includes(name))) matchScore = 75
+            else return null
+          } else return null
+
+          const matchingDogRows = client.rows.filter(row=>{
+            const dogName = String(row?.dog || row?.Dog || '').trim().toLowerCase()
+            return dogName && (dogName===needle || dogName.includes(needle) || needle.includes(dogName))
+          })
+          const rowsForPrice = matchingDogRows.length ? matchingDogRows : client.rows
+          const breakdown = rowsForPrice.map(row=>{
+            const dog = String(row?.dog || row?.Dog || '').trim()
+            const service = filters.service || plannerUsualService(row)
+            const values = serviceDefaultsForDog(row,service)
+            return {dog,service,price:Number(values.price || 0),minutes:Number(values.minutes || 0)}
+          })
+          const price = breakdown.reduce((sum,item)=>sum+Number(item.price || 0),0)
+          const minutes = breakdown.reduce((sum,item)=>sum+Number(item.minutes || 0),0)
+          return {...client,matchScore,price:Math.round(price),minutes:Math.round(minutes),pricingBreakdown:breakdown}
+        }).filter(Boolean).sort((a,b)=>b.matchScore-a.matchScore || a.owner.localeCompare(b.owner)).slice(0,5)
+
+        setAnswer({mode:'price',title:ranked.length ? `Pricing for ${filters.lookupName}` : 'Client price',targetDate:'',filters,candidates:ranked,summary:''})
+        return
+      }
+
       let targetDate = filters.date
       if (!targetDate && filters.routeIntent) targetDate = today
 
@@ -3243,7 +3307,6 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient}) {
         return acc
       },{Jen:0,Haley:0})
       const dayAreas = [...new Set(dayAppointments.map(appt=>canonicalAreaLabel(appt.area)).filter(Boolean))]
-      const groups = plannerClientGroups(dogs)
       const targetDay = new Date(`${targetDate || today}T12:00:00Z`)
 
       let candidates = groups.map(client=>{
@@ -3408,15 +3471,17 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient}) {
   }
 
   const choose = candidate => {
-    if (answer?.targetDate) {
+    if (answer?.targetDate || answer?.filters?.unbookedOnly) {
+      const groomer = candidate.targetGroomer || 'Jen'
+      const date = answer?.targetDate || plannerNextBookableDate(groomer)
       onClose?.()
       onChoose?.({
-        date:answer.targetDate,
+        date,
         clientKey:candidate.key,
-        groomer:candidate.targetGroomer,
-        time:candidate.suggestedTime || defaultFirstStopTime(candidate.targetGroomer),
+        groomer,
+        time:candidate.suggestedTime || defaultFirstStopTime(groomer),
         fixed:false,
-        note:'Added from Ask Planner'
+        note:answer?.filters?.unbookedOnly ? 'Rebooked from Ask Planner' : 'Added from Ask Planner'
       })
       return
     }
@@ -3469,19 +3534,27 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient}) {
                       <div className="candidate-rank">{index+1}</div>
                       <div className="candidate-main">
                         <strong>{candidate.owner} · {dogsLabel}</strong>
-                        <span>{candidate.due.detail} · {candidate.area || 'Area not set'} · {candidate.minutes} min</span>
+                        {answer.mode==='price' ? (
+                          <>
+                            {(candidate.pricingBreakdown || []).map(item=><span key={`${candidate.key}-${item.dog}-${item.service}`}>{item.dog}: {item.service} · {item.price>0?`$${Math.round(item.price)}`:'price not saved'}{item.minutes>0?` · ${Math.round(item.minutes)} min`:''}</span>)}
+                          </>
+                        ) : (
+                          <span>{candidate.due.detail} · {candidate.area || 'Area not set'} · {candidate.minutes} min</span>
+                        )}
                         {answer.targetDate && <span>{candidate.targetGroomer}{candidate.suggestedTime?` · ${displayClockTime(candidate.suggestedTime)}`:' · choose time manually'}</span>}
                         {routeText && <span style={{fontWeight:candidate.routeInfo?.routeRisk?800:700,color:candidate.routeInfo?.routeRisk?'#9a5d19':undefined}}>{routeText}</span>}
                         {candidate.routeInfo?.routeRisk && candidate.routeInfo.risks?.[0] && <span style={{color:'#9a5d19'}}>⚠ {candidate.routeInfo.risks[0]}</span>}
                       </div>
-                      <div className="candidate-price">${candidate.price}</div>
+                      <div className="candidate-price">{answer.mode==='price' && candidate.price<=0?'—':`$${candidate.price}`}</div>
                     </button>
                   )
                 })}
               </div>
             )}
             {answer.candidates.length>0 && answer.targetDate && <div className="prototype-note" style={{marginTop:10}}>Tap a client to open Add Appointment with the day, client, groomer, and suggested time filled in. You can review everything before saving.</div>}
-            {answer.candidates.length>0 && !answer.targetDate && <div className="prototype-note" style={{marginTop:10}}>Tap any client to open their details. Ask with a day, like “Who should I add Thursday?”, to get appointment-ready suggestions.</div>}
+            {answer.candidates.length>0 && !answer.targetDate && answer.filters?.unbookedOnly && <div className="prototype-note" style={{marginTop:10}}>Tap a client to rebook them. Add Appointment will open with the client already selected; you can change the date, groomer, time, and services before saving.</div>}
+            {answer.candidates.length>0 && !answer.targetDate && answer.mode==='price' && <div className="prototype-note" style={{marginTop:10}}>Tap the client to open their full Client Details.</div>}
+            {answer.candidates.length>0 && !answer.targetDate && !answer.filters?.unbookedOnly && answer.mode!=='price' && <div className="prototype-note" style={{marginTop:10}}>Tap any client to open their details. Ask with a day, like “Who should I add Thursday?”, to get appointment-ready suggestions.</div>}
           </div>
         )}
         <div className="prototype-note" style={{marginTop:12,textAlign:'left'}}>Ask Planner reads your current clients and schedule. For day-specific questions it also uses your saved groomer rules, appointment lengths, and Google route data.</div>
