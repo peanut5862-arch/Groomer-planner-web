@@ -393,6 +393,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey})
   const [error,setError] = useState('')
   const [result,setResult] = useState(null)
   const [updatedAt,setUpdatedAt] = useState(null)
+  const [expanded,setExpanded] = useState(false)
 
   const sorted = (Array.isArray(appointments) ? appointments : [])
     .filter(appt=>!appt?.inactive)
@@ -481,6 +482,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey})
     setResult(null)
     setUpdatedAt(null)
     setError('')
+    setExpanded(false)
     if (!mixedGroomers && validGroomer && stops.length >= 1 && missing.length === 0) {
       checkTraffic()
     }
@@ -499,7 +501,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey})
         </div>
         {!mixedGroomers && validGroomer && missing.length === 0 && (
           <button className="day-ai" type="button" onClick={()=>checkTraffic({force:true})} disabled={!canCheck} style={{opacity:canCheck?1:0.6}}>
-            <Route size={14}/>{loading?'Updating…':'Refresh traffic'}
+            <Route size={14}/>{loading?'Updating…':'Refresh'}
           </button>
         )}
       </div>
@@ -511,55 +513,70 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey})
 
       {result && (
         <div style={{marginTop:9}}>
-          <div style={{fontSize:12,fontWeight:800,color:'#17223f'}}>
-            {Math.round(Number(result.totalMinutes || 0))} min driving · {Number(result.totalMiles || 0).toFixed(1)} mi round trip
+          <div style={{fontSize:13,fontWeight:800,color:'#17223f'}}>
+            {Math.round(Number(result.totalMinutes || 0))} min · {Number(result.totalMiles || 0).toFixed(1)} mi round trip
           </div>
-          <div style={{fontSize:10,color:'#8a8f99',marginTop:2}}>
-            Google traffic estimate · customer times stay unchanged{updatedAt ? ` · updated ${Math.max(0,Math.round((Date.now()-updatedAt)/60000))} min ago` : ''}
-          </div>
-          {suggestedDeparture && isToday && firstStop && (
-            <div style={{marginTop:8,padding:'8px 9px',border:'1px solid #e3e5e9',borderRadius:10,background:'#fff'}}>
-              <div style={{fontSize:11,fontWeight:800,color:'#17223f'}}>
+
+          {suggestedDeparture && firstStop && (
+            <div style={{marginTop:8,padding:'9px 10px',border:'1px solid #e3e5e9',borderRadius:10,background:'#fff'}}>
+              <div style={{fontSize:12,fontWeight:800,color:'#17223f'}}>
                 Leave {routeGroomer} home around {suggestedDeparture}
               </div>
-              <div style={{fontSize:10,color:'#6b7280',marginTop:2}}>
-                About {Math.ceil(firstDriveMinutes)} min to {firstStop.owner} · targets {displayClockTime(firstStop.time)} · window {firstStop.window || '—'}
+              <div style={{fontSize:10.5,color:'#6b7280',marginTop:2}}>
+                {Math.ceil(firstDriveMinutes)} min to {firstStop.owner} · first appointment {displayClockTime(firstStop.time)}
               </div>
+              {!isToday && (
+                <div style={{fontSize:10,color:'#8a8f99',marginTop:3}}>
+                  Planning estimate · refresh on the appointment day for live traffic.
+                </div>
+              )}
             </div>
           )}
-          {!isToday && firstStop && (
-            <div style={{fontSize:10,color:'#8a8f99',marginTop:6}}>
-              Home departure time appears on the day using live Google traffic.
-            </div>
+
+          {result?.mapsUrl && (
+            <a href={result.mapsUrl} target="_blank" rel="noreferrer" style={{display:'inline-flex',alignItems:'center',gap:6,marginTop:9,fontSize:11,fontWeight:800,color:'#17223f',textDecoration:'none'}}>
+              <MapPin size={14}/>Open in Google Maps
+            </a>
           )}
-          <div style={{display:'grid',gap:5,marginTop:8}}>
-            {(result.legs || []).map((leg,index)=>(
-              <div key={`${leg.fromId}-${leg.toId}-${index}`} style={{fontSize:11,color:'#555f70',display:'flex',justifyContent:'space-between',gap:8}}>
-                <span>{leg.fromOwner} → {leg.toOwner}</span>
-                <span style={{whiteSpace:'nowrap',fontWeight:700}}>{Math.round(Number(leg.minutes || 0))} min · {Number(leg.miles || 0).toFixed(1)} mi{Number(leg.trafficDelayMinutes || 0)>=1 ? ` · +${Math.round(Number(leg.trafficDelayMinutes))} traffic` : ''}</span>
+
+          <button
+            type="button"
+            onClick={()=>setExpanded(value=>!value)}
+            style={{marginTop:9,border:'none',background:'transparent',padding:0,fontSize:10.5,fontWeight:800,color:'#5d6678',cursor:'pointer'}}
+          >
+            {expanded ? 'Hide route details ▴' : 'View route details ▾'}
+          </button>
+
+          {expanded && (
+            <div style={{marginTop:8,paddingTop:8,borderTop:'1px solid #eceef1'}}>
+              <div style={{fontSize:10,color:'#8a8f99',marginBottom:7}}>
+                {updatedAt ? `Updated ${Math.max(0,Math.round((Date.now()-updatedAt)/60000))} min ago` : 'Google route estimate'} · customer times stay unchanged
               </div>
-            ))}
-          </div>
-          {stops.some(stop=>stop.window) && (
-            <div style={{marginTop:9,paddingTop:8,borderTop:'1px solid #eceef1'}}>
-              <div style={{fontSize:10,fontWeight:800,color:'#7b828e',marginBottom:4}}>CUSTOMER ARRIVAL WINDOWS</div>
-              <div style={{display:'grid',gap:3}}>
-                {stops.filter(stop=>stop.window).map(stop=>(
-                  <div key={`window-${stop.id}`} style={{fontSize:10,color:'#6b7280'}}>
-                    {stop.owner}: {displayClockTime(stop.time)} · window {stop.window}
+              <div style={{display:'grid',gap:5}}>
+                {(result.legs || []).map((leg,index)=>(
+                  <div key={`${leg.fromId}-${leg.toId}-${index}`} style={{fontSize:11,color:'#555f70',display:'flex',justifyContent:'space-between',gap:8}}>
+                    <span>{leg.fromOwner} → {leg.toOwner}</span>
+                    <span style={{whiteSpace:'nowrap',fontWeight:700}}>{Math.round(Number(leg.minutes || 0))} min · {Number(leg.miles || 0).toFixed(1)} mi{Number(leg.trafficDelayMinutes || 0)>=1 ? ` · +${Math.round(Number(leg.trafficDelayMinutes))} traffic` : ''}</span>
                   </div>
                 ))}
               </div>
+              {stops.some(stop=>stop.window) && (
+                <div style={{marginTop:9,paddingTop:8,borderTop:'1px solid #eceef1'}}>
+                  <div style={{fontSize:10,fontWeight:800,color:'#7b828e',marginBottom:4}}>ARRIVAL WINDOWS</div>
+                  <div style={{display:'grid',gap:3}}>
+                    {stops.filter(stop=>stop.window).map(stop=>(
+                      <div key={`window-${stop.id}`} style={{fontSize:10,color:'#6b7280'}}>
+                        {stop.owner}: {stop.window}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
 
-      {result?.mapsUrl && (
-        <a href={result.mapsUrl} target="_blank" rel="noreferrer" style={{display:'inline-flex',alignItems:'center',gap:6,marginTop:9,fontSize:11,fontWeight:800,color:'#17223f',textDecoration:'none'}}>
-          <MapPin size={14}/>Open round trip in Google Maps
-        </a>
-      )}
     </div>
   )
 }
