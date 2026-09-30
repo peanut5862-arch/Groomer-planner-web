@@ -41,6 +41,51 @@ export default async function handler(req, res) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY
   if (!apiKey) return send(res, 500, {error:'GOOGLE_MAPS_API_KEY is not configured in Vercel.'})
 
+  if (String(req.body?.mode || '').trim().toLowerCase() === 'eta') {
+    const latitude = Number(req.body?.origin?.latitude)
+    const longitude = Number(req.body?.origin?.longitude)
+    const address = String(req.body?.destination?.address || '').trim()
+    const owner = String(req.body?.destination?.owner || 'Client').trim()
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return send(res,400,{error:'A current location is required for live ETA.'})
+    if (!address) return send(res,400,{error:'The client needs a street address for live ETA.'})
+    try {
+      const googleResponse = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+        method:'POST',
+        headers:{
+          'Content-Type':'application/json',
+          'X-Goog-Api-Key':apiKey,
+          'X-Goog-FieldMask':'routes.duration,routes.staticDuration,routes.distanceMeters'
+        },
+        body:JSON.stringify({
+          origin:{location:{latLng:{latitude,longitude}}},
+          destination:{address},
+          travelMode:'DRIVE',
+          routingPreference:'TRAFFIC_AWARE',
+          computeAlternativeRoutes:false,
+          languageCode:'en-US',
+          units:'IMPERIAL'
+        })
+      })
+      const body = await googleResponse.json().catch(()=>({}))
+      if (!googleResponse.ok) throw new Error(body?.error?.message || `Google Routes returned ${googleResponse.status}.`)
+      const route = body?.routes?.[0]
+      if (!route) throw new Error(`Google could not find a driving route to ${owner}.`)
+      const seconds = secondsFromGoogleDuration(route.duration)
+      const staticSeconds = secondsFromGoogleDuration(route.staticDuration)
+      const distanceMeters = Number(route.distanceMeters || 0)
+      return send(res,200,{
+        source:'Google Routes API',
+        trafficAware:true,
+        fetchedAt:new Date().toISOString(),
+        etaMinutes:seconds/60,
+        miles:distanceMeters/1609.344,
+        trafficDelayMinutes:Math.max(0,(seconds-staticSeconds)/60)
+      })
+    } catch (error) {
+      return send(res,502,{error:error?.message || 'Google ETA calculation failed.'})
+    }
+  }
+
   const groomer = String(req.body?.groomer || '').trim()
   if (!['Jen','Haley'].includes(groomer)) {
     return send(res, 400, {error:'Choose Jen or Haley so the correct home base can be used.'})
