@@ -41,7 +41,23 @@ function Stat({label,value,subtle}) {
   return <div className={`stat ${subtle?'subtle':''}${tone}`}><span>{label}</span><strong>{value}</strong></div>
 }
 
-function ApptCard({appt,onOpen,onComplete,onUndo,completing}) {
+function clientConfirmationStatus(row) {
+  const raw = String(row?.['Client Confirmation'] || row?.['Confirmation Status'] || '').trim().toLowerCase()
+  if (raw === 'confirmed') return 'Confirmed'
+  if (raw === 'needs reply' || raw === 'needs response' || raw === 'pending reply') return 'Needs reply'
+  if (raw === "can't make it" || raw === 'cant make it' || raw === 'cannot make it') return "Can't make it"
+  return 'Unconfirmed'
+}
+
+function confirmationTone(status) {
+  return status === 'Confirmed' ? 'confirmed' : status === 'Needs reply' ? 'reply' : status === "Can't make it" ? 'cant' : 'unconfirmed'
+}
+
+function needsClientConfirmation(row) {
+  return clientConfirmationStatus(row) !== 'Confirmed'
+}
+
+function ApptCard({appt,onOpen,onComplete,onUndo,onConfirmation,completing,confirmationSaving}) {
   const row = appt?.sourceRow || {}
   const today = businessDateKey()
   const date = String(row.Date || appt?.date || '').slice(0,10)
@@ -74,6 +90,23 @@ function ApptCard({appt,onOpen,onComplete,onUndo,completing}) {
         {appt.note && (
           <div style={{fontSize:11,color:'#7b828e',marginTop:5}}>
             {appt.note}
+          </div>
+        )}
+        {!inactive && !completed && onConfirmation && (
+          <div className={`confirmation-control ${confirmationTone(clientConfirmationStatus(row))}`}
+            onPointerDown={event=>event.stopPropagation()} onTouchStart={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()}>
+            <MessageCircle size={14}/>
+            <select
+              aria-label={`Confirmation status for ${appt.owner}`}
+              value={clientConfirmationStatus(row)}
+              disabled={confirmationSaving}
+              onChange={event=>onConfirmation(appt,event.target.value)}
+            >
+              <option>Unconfirmed</option>
+              <option>Confirmed</option>
+              <option>Needs reply</option>
+              <option>Can't make it</option>
+            </select>
           </div>
         )}
         {!inactive && canComplete && (
@@ -173,7 +206,7 @@ function todayAppointments(rows, dateKey, groomer) {
     .sort(compareAppointmentTimes)
 }
 
-function Today({onOpen,onComplete,onUndo,onAddAppointment,completingId,revision,dogs}) {
+function Today({onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,completingId,confirmingId,revision,dogs}) {
   const [groomer,setGroomer] = useState('All')
   const [dateKey,setDateKey] = useState(() => businessDateKey())
   const [result,setResult] = useState(null)
@@ -267,7 +300,7 @@ function Today({onOpen,onComplete,onUndo,onAddAppointment,completingId,revision,
           <GoogleRoutePanel appointments={appointments} dogs={dogs} selectedGroomer={groomer} dateLabel={dateLabel} dateKey={dateKey}/>
           <div className="section-title"><h3>Appointments</h3></div>
           {appointments.length ? (
-            <div className="appt-list">{appointments.map(appt=><ApptCard key={appt.id} appt={appt} onOpen={()=>onOpen(appt)} onComplete={onComplete} onUndo={onUndo} completing={completingId===appt.id}/>)}</div>
+            <div className="appt-list">{appointments.map(appt=><ApptCard key={appt.id} appt={appt} onOpen={()=>onOpen(appt)} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id}/>)}</div>
           ) : (
             <div className="prototype-note">No appointments scheduled today{groomer === 'All' ? '' : ` for ${groomer}`}.</div>
           )}
@@ -586,7 +619,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey})
   )
 }
 
-function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,onFillOpening,completingId,revision,dogs}) {
+function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,onFillOpening,completingId,confirmingId,revision,dogs}) {
   const [groomer,setGroomer]=useState('All')
   const [weekStart,setWeekStart]=useState(() => {
     const now = new Date()
@@ -599,6 +632,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,onFillOpening,com
   const [weekRecord,setWeekRecord]=useState(null)
   const [loading,setLoading]=useState(true)
   const [error,setError]=useState('')
+  const [confirmationFilter,setConfirmationFilter]=useState('All')
 
   const ymd = (date) => {
     const y = date.getFullYear()
@@ -719,16 +753,20 @@ function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,onFillOpening,com
 
   const days = Array.from({length:5},(_,i)=>addDays(weekStart,i))
   const activeWeekAppointments = appointments.filter(appt => !appt.inactive)
-  const visibleAppointments =
+  const groomerAppointments =
     groomer === 'All'
       ? activeWeekAppointments
       : activeWeekAppointments.filter(a => a.groomer === groomer)
+  const confirmationNeededCount = groomerAppointments.filter(appt=>!appt.completed && needsClientConfirmation(appt.sourceRow)).length
+  const visibleAppointments = confirmationFilter === 'Needs confirmation'
+    ? groomerAppointments.filter(appt=>!appt.completed && needsClientConfirmation(appt.sourceRow))
+    : groomerAppointments
 
   const statusLabel = weekRecord?.status === 'confirmed' ? 'Confirmed week' : 'Draft week'
   const weekEnd = addDays(weekStart,4)
-  const weeklyRevenue = visibleAppointments.reduce((sum,appt)=>sum+(Number.isFinite(appt.price)?appt.price:0),0)
-  const weeklyCompleted = visibleAppointments.filter(appt=>appt.completed).length
-  const weeklyMissingPrices = visibleAppointments.some(appt=>!Number.isFinite(appt.price))
+  const weeklyRevenue = groomerAppointments.reduce((sum,appt)=>sum+(Number.isFinite(appt.price)?appt.price:0),0)
+  const weeklyCompleted = groomerAppointments.filter(appt=>appt.completed).length
+  const weeklyMissingPrices = groomerAppointments.some(appt=>!Number.isFinite(appt.price))
 
   return (
     <section>
@@ -768,9 +806,15 @@ function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,onFillOpening,com
             {statusLabel} · {groomer === 'All' ? 'Both groomers' : groomer}
           </div>
           <div className="stats-row">
-            <Stat label="Stops" value={visibleAppointments.length}/>
+            <Stat label="Stops" value={groomerAppointments.length}/>
             <Stat label="Week total" value={new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(weeklyRevenue)}/>
-            <Stat label="Completed" value={`${weeklyCompleted}/${visibleAppointments.length}`}/>
+            <Stat label="Completed" value={`${weeklyCompleted}/${groomerAppointments.length}`}/>
+          </div>
+          <div className="confirmation-filter">
+            <button type="button" className={confirmationFilter==='All'?'active':''} onClick={()=>setConfirmationFilter('All')}>All appointments</button>
+            <button type="button" className={confirmationFilter==='Needs confirmation'?'active attention':''} onClick={()=>setConfirmationFilter('Needs confirmation')}>
+              Needs confirmation{confirmationNeededCount ? ` (${confirmationNeededCount})` : ''}
+            </button>
           </div>
           {weeklyMissingPrices && <div className="prototype-note">Some appointments have no price saved; the week total includes known prices only.</div>}
         </>
@@ -828,7 +872,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,onFillOpening,com
                     .slice()
                     .sort(compareAppointmentTimes)
                     .map(appt=>(
-                      <ApptCard key={appt.id} appt={appt} onOpen={()=>onOpen(appt)} onComplete={onComplete} onUndo={onUndo} completing={completingId===appt.id}/>
+                      <ApptCard key={appt.id} appt={appt} onOpen={()=>onOpen(appt)} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id}/>
                     ))}
                 </div>
               </>
@@ -3447,6 +3491,7 @@ function plannerQueryFilters(text,dogs) {
   const unbookedOnly = /hasn['’]?t been booked|not booked back|booked back|unbooked|rebook/.test(lower)
   const service = /partial\s*groom/.test(lower) ? 'Partial Groom' : /bath\s*only/.test(lower) ? 'Bath Only' : /\bbath\b/.test(lower) ? 'Bath' : /\bgroom\b/.test(lower) ? 'Groom' : ''
   const priceLookup = /\bhow much\b|\bwhat does .+ cost\b|\bwhat(?:'s| is) (?:the )?price\b|\bprice (?:for|of)\b|\bcost (?:for|of)\b/.test(lower)
+  const confirmationOnly = /needs? (?:to )?confirm|needs? confirmation|not confirmed|still needs? (?:a )?reply|who.*confirm/.test(lower)
   let lookupName = ''
   if (priceLookup) {
     const patterns = [
@@ -3476,7 +3521,7 @@ function plannerQueryFilters(text,dogs) {
     if (hit) area = hit[1]
   }
   const routeIntent = /route|closest|fill|opening|add|fit/.test(lower)
-  return {lower,date,groomer,minPrice,maxMinutes,overdueOnly,unbookedOnly,service,area,routeIntent,priceLookup,lookupName}
+  return {lower,date,groomer,minPrice,maxMinutes,overdueOnly,unbookedOnly,service,area,routeIntent,priceLookup,lookupName,confirmationOnly}
 }
 
 function plannerNextBookableDate(groomer,fromKey=businessDateKey()) {
@@ -3576,6 +3621,32 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient}) {
 
       const planRows = (data || []).flatMap(week=>Array.isArray(week.plan_json)?week.plan_json:[])
       const activeRows = planRows.filter(row=>plannerActiveRow(row,today))
+
+      if (filters.confirmationOnly) {
+        const currentWeekStart = mondayForDate(today)
+        const weekEndDate = new Date(`${currentWeekStart}T12:00:00Z`)
+        weekEndDate.setUTCDate(weekEndDate.getUTCDate()+4)
+        const currentWeekEnd = weekEndDate.toISOString().slice(0,10)
+        const rowsNeeding = activeRows.filter(row=>{
+          const date = String(row.Date || '').slice(0,10)
+          if (date < currentWeekStart || date > currentWeekEnd) return false
+          if (filters.groomer && String(row.Groomer || '').trim() !== filters.groomer) return false
+          return needsClientConfirmation(row)
+        })
+        const byHousehold = new Map()
+        for (const row of rowsNeeding) {
+          const household = String(row['Household ID'] || '').trim()
+          const owner = String(row.Owner || '').trim()
+          const key = household ? `h:${household}` : `o:${owner.toLowerCase()}`
+          if (byHousehold.has(key)) continue
+          const group = groups.find(client=>client.key===key || client.owner.toLowerCase()===owner.toLowerCase()) || {key,owner,household,rows:[]}
+          byHousehold.set(key,{...group,confirmationRow:row,confirmation:clientConfirmationStatus(row),date:String(row.Date || '').slice(0,10),time:String(row['Start Time'] || row['Locked Time'] || '').trim(),price:Number(row.Price || 0),minutes:scheduleRowDuration(row,60),due:{detail:clientConfirmationStatus(row)}})
+        }
+        const candidates = [...byHousehold.values()].sort((a,b)=>String(a.date).localeCompare(String(b.date)) || clockMinutesForDisplay(a.time)-clockMinutesForDisplay(b.time)).slice(0,20)
+        setAnswer({mode:'confirmation',title:'Clients who still need confirmation this week',targetDate:'',filters,candidates,summary:''})
+        return
+      }
+
       const bookedKeys = new Set()
       for (const row of activeRows) {
         const household = String(row['Household ID'] || '').trim()
@@ -3755,6 +3826,11 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient}) {
   }
 
   const choose = candidate => {
+    if (answer?.mode === 'confirmation') {
+      onClose?.()
+      onClient?.({key:candidate.key,household:candidate.household || '',owner:candidate.owner})
+      return
+    }
     if (answer?.targetDate || answer?.filters?.unbookedOnly) {
       const groomer = candidate.targetGroomer || 'Jen'
       const date = answer?.targetDate || plannerNextBookableDate(groomer)
@@ -3776,7 +3852,8 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient}) {
   const quick = [
     'Who should I add Wednesday?',
     'Who is overdue near The Woodlands?',
-    "Who hasn't been booked back yet?"
+    "Who hasn't been booked back yet?",
+    "Who still needs to confirm this week?"
   ]
 
   return (
@@ -3822,6 +3899,8 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient}) {
                           <>
                             {(candidate.pricingBreakdown || []).map(item=><span key={`${candidate.key}-${item.dog}-${item.service}`}>{item.dog}: {item.service} · {item.price>0?`$${Math.round(item.price)}`:'price not saved'}{item.minutes>0?` · ${Math.round(item.minutes)} min`:''}</span>)}
                           </>
+                        ) : answer.mode==='confirmation' ? (
+                          <span>{candidate.confirmation} · {plannerDayLabel(candidate.date)} · {displayClockTime(candidate.time)}</span>
                         ) : (
                           <span>{candidate.due.detail} · {candidate.area || 'Area not set'} · {candidate.minutes} min</span>
                         )}
@@ -3829,7 +3908,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient}) {
                         {routeText && <span style={{fontWeight:candidate.routeInfo?.routeRisk?800:700,color:candidate.routeInfo?.routeRisk?'#9a5d19':undefined}}>{routeText}</span>}
                         {candidate.routeInfo?.routeRisk && candidate.routeInfo.risks?.[0] && <span style={{color:'#9a5d19'}}>⚠ {candidate.routeInfo.risks[0]}</span>}
                       </div>
-                      <div className="candidate-price">{answer.mode==='price' && candidate.price<=0?'—':`$${candidate.price}`}</div>
+                      <div className="candidate-price">{answer.mode==='confirmation' ? candidate.confirmation : (answer.mode==='price' && candidate.price<=0?'—':`$${candidate.price}`)}</div>
                     </button>
                   )
                 })}
@@ -3838,7 +3917,8 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient}) {
             {answer.candidates.length>0 && answer.targetDate && <div className="prototype-note" style={{marginTop:10}}>Tap a client to open Add Appointment with the day, client, groomer, and suggested time filled in. You can review everything before saving.</div>}
             {answer.candidates.length>0 && !answer.targetDate && answer.filters?.unbookedOnly && <div className="prototype-note" style={{marginTop:10}}>Tap a client to rebook them. Add Appointment will open with the client already selected; you can change the date, groomer, time, and services before saving.</div>}
             {answer.candidates.length>0 && !answer.targetDate && answer.mode==='price' && <div className="prototype-note" style={{marginTop:10}}>Tap the client to open their full Client Details.</div>}
-            {answer.candidates.length>0 && !answer.targetDate && !answer.filters?.unbookedOnly && answer.mode!=='price' && <div className="prototype-note" style={{marginTop:10}}>Tap any client to open their details. Ask with a day, like “Who should I add Thursday?”, to get appointment-ready suggestions.</div>}
+            {answer.candidates.length>0 && answer.mode==='confirmation' && <div className="prototype-note" style={{marginTop:10}}>These appointments are not confirmed yet. Use the confirmation control on Week or Today to mark Confirmed, Needs reply, or Can’t make it.</div>}
+            {answer.candidates.length>0 && !answer.targetDate && !answer.filters?.unbookedOnly && answer.mode!=='price' && answer.mode!=='confirmation' && <div className="prototype-note" style={{marginTop:10}}>Tap any client to open their details. Ask with a day, like “Who should I add Thursday?”, to get appointment-ready suggestions.</div>}
           </div>
         )}
         <div className="prototype-note" style={{marginTop:12,textAlign:'left'}}>Ask Planner reads your current clients and schedule. For day-specific questions it also uses your saved groomer rules, appointment lengths, and Google route data.</div>
@@ -3962,6 +4042,16 @@ const plannerThemeCss = `
   .sheet .segmented{background:#f1eee9!important;padding:4px!important;gap:3px!important;overflow-x:auto;}
   .sheet .segmented button{white-space:nowrap;min-width:max-content;padding-left:12px!important;padding-right:12px!important;}
   .sheet .segmented button.active{background:#fff!important;color:var(--gp-navy)!important;box-shadow:0 1px 4px rgba(23,34,63,.08);}
+  .confirmation-control{display:inline-flex;align-items:center;gap:6px;margin-top:9px;padding:5px 8px;border:1px solid #d9d9d6;border-radius:999px;background:#f7f7f5;color:#687080;position:relative;z-index:6;max-width:190px;}
+  .confirmation-control select{appearance:none;-webkit-appearance:none;border:0;background:transparent;color:inherit;font:inherit;font-size:12px;font-weight:850;padding:0 16px 0 0;min-width:0;max-width:145px;outline:none;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:calc(100% - 7px) 50%,calc(100% - 3px) 50%;background-size:4px 4px,4px 4px;background-repeat:no-repeat;}
+  .confirmation-control.confirmed{background:#edf7ef;border-color:#bddcc5;color:#267447;}
+  .confirmation-control.reply{background:#fff7e8;border-color:#e6c981;color:#76551b;}
+  .confirmation-control.cant{background:#fff0ef;border-color:#e6aaa5;color:#8b342f;}
+  .confirmation-control.unconfirmed{background:#f3f5f8;border-color:#d9dfe8;color:#4f5c70;}
+  .confirmation-filter{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 2px;}
+  .confirmation-filter button{border:1px solid #dfe2e7;background:#fff;color:#5d6572;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:800;}
+  .confirmation-filter button.active{background:#17223f;color:#fff;border-color:#17223f;}
+  .confirmation-filter button.attention.active{background:#fff7e8;color:#76551b;border-color:#e6c981;}
   @media (max-width:560px){
     .day-block{margin-left:-4px;margin-right:-4px;padding-left:8px;padding-right:8px;}
     .stats-row{gap:8px!important;}
@@ -3980,11 +4070,39 @@ export default function App() {
   const [scheduleRevision,setScheduleRevision]=useState(0)
   const [saveMessage,setSaveMessage]=useState('')
   const [completingId,setCompletingId]=useState('')
+  const [confirmingId,setConfirmingId]=useState('')
   const [assistant,setAssistant]=useState({open:false,initial:''})
   const [clientJump,setClientJump]=useState(null)
   const [addAppointment,setAddAppointment]=useState({open:false,date:businessDateKey(),preset:null})
   const [fillOpening,setFillOpening]=useState({open:false,date:businessDateKey(),groomer:'All',appointments:[]})
   const ask=(initial='')=>setAssistant({open:true,initial})
+  const setClientConfirmation = async (appt,status) => {
+    if (!appt || confirmingId) return
+    const allowed = ['Unconfirmed','Confirmed','Needs reply',"Can't make it"]
+    if (!allowed.includes(status)) return
+    setConfirmingId(appt.id)
+    setSaveMessage('')
+    try {
+      if (!supabase) throw new Error('Your schedule connection is not configured.')
+      const {data,error} = await supabase.rpc('set_grooming_confirmation',{
+        p_week_start:appt.weekStart,
+        p_expected_row:appt.sourceRow || {},
+        p_confirmation:status
+      })
+      if (error) {
+        if (error.code==='PGRST202' || error.code==='42883') throw new Error('Client confirmations need the one-time Supabase setup first.')
+        throw error
+      }
+      if (!['updated','unchanged'].includes(data?.status)) throw new Error('The confirmation status could not be saved. Refresh and try again.')
+      setSaveMessage(status==="Can't make it" ? `${appt.owner} marked as can't make it. Tap the appointment to reschedule or cancel.` : `${appt.owner}: ${status}.`)
+      setScheduleRevision(value=>value+1)
+    } catch (err) {
+      setSaveMessage(err?.message || 'Could not save the client confirmation status.')
+      window.alert(err?.message || 'Could not save the client confirmation status.')
+    } finally {
+      setConfirmingId('')
+    }
+  }
   const completeFromSchedule = async (appt) => {
     if (!appt || completingId) return
     const row = appt.sourceRow || {}
@@ -4115,9 +4233,9 @@ export default function App() {
 
   let body
   if (tab === 'Today') {
-    body = <Today dogs={dogs} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onAddAppointment={date=>setAddAppointment({open:true,date,preset:null})} completingId={completingId} revision={scheduleRevision}/>
+    body = <Today dogs={dogs} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onConfirmation={setClientConfirmation} onAddAppointment={date=>setAddAppointment({open:true,date,preset:null})} completingId={completingId} confirmingId={confirmingId} revision={scheduleRevision}/>
   } else if (tab === 'Week') {
-    body = <Week dogs={dogs} onAsk={ask} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onAddAppointment={(date,selectedGroomer)=>setAddAppointment({open:true,date,preset:['Jen','Haley'].includes(selectedGroomer)?{groomer:selectedGroomer}:null})} onFillOpening={payload=>setFillOpening({open:true,date:payload.date,groomer:payload.groomer,appointments:payload.appointments || []})} completingId={completingId} revision={scheduleRevision}/>
+    body = <Week dogs={dogs} onAsk={ask} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onConfirmation={setClientConfirmation} onAddAppointment={(date,selectedGroomer)=>setAddAppointment({open:true,date,preset:['Jen','Haley'].includes(selectedGroomer)?{groomer:selectedGroomer}:null})} onFillOpening={payload=>setFillOpening({open:true,date:payload.date,groomer:payload.groomer,appointments:payload.appointments || []})} completingId={completingId} confirmingId={confirmingId} revision={scheduleRevision}/>
   } else if (tab === 'Month') {
     body = <Month onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Clients') {
