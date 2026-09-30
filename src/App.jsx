@@ -264,7 +264,7 @@ function openCall(phone) {
   window.location.href = `tel:${clean}`
 }
 
-function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,confirmationSaving}) {
+function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,confirmationSaving,viewerMode=false}) {
   const [showTextMenu,setShowTextMenu] = useState(false)
   const [showLate,setShowLate] = useState(false)
   const [etaLoading,setEtaLoading] = useState(false)
@@ -327,7 +327,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,
             {appt.note}
           </div>
         )}
-        {!inactive && !completed && onConfirmation && (
+        {!viewerMode && !inactive && !completed && onConfirmation && (
           <div className={`confirmation-control ${confirmationTone(clientConfirmationStatus(row))}`}
             onPointerDown={event=>event.stopPropagation()} onTouchStart={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()}>
             <MessageCircle size={14}/>
@@ -344,7 +344,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,
             </select>
           </div>
         )}
-        {!inactive && !completed && appt.phone && (
+        {!viewerMode && !inactive && !completed && appt.phone && (
           <>
             <div className="appt-communication-row" onPointerDown={event=>event.stopPropagation()} onTouchStart={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()}>
               <button type="button" className="appt-text-btn" onClick={()=>{setShowTextMenu(value=>!value);setShowLate(false)}}>
@@ -377,7 +377,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,
             {communicationError && <div className="communication-error">{communicationError}</div>}
           </>
         )}
-        {!inactive && canComplete && (
+        {!viewerMode && !inactive && canComplete && (
           <button
             type="button"
             disabled={completing}
@@ -396,7 +396,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,completing,
             {completing ? 'Saving...' : 'Complete'}
           </button>
         )}
-        {!inactive && completed && canUndo && (
+        {!viewerMode && !inactive && completed && canUndo && (
           <button
             type="button"
             disabled={completing}
@@ -477,7 +477,7 @@ function todayAppointments(rows, dateKey, groomer, dogs) {
     .sort(compareAppointmentTimes)
 }
 
-function Today({onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,completingId,confirmingId,revision,dogs}) {
+function Today({onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,completingId,confirmingId,revision,dogs,viewerMode=false}) {
   const [groomer,setGroomer] = useState('All')
   const [dateKey,setDateKey] = useState(() => businessDateKey())
   const [result,setResult] = useState(null)
@@ -536,9 +536,9 @@ function Today({onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,complet
       <div className="page-head">
         <div><div className="eyebrow">{dateLabel}</div><h1>Today</h1></div>
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
-          <button className="text-btn" type="button" onClick={()=>onAddAppointment?.(dateKey)}>
+          {!viewerMode && <button className="text-btn" type="button" onClick={()=>onAddAppointment?.(dateKey)}>
             <Plus size={15}/> Add appointment
-          </button>
+          </button>}
           <button className="text-btn" disabled={loading} onClick={()=>setRefresh(value=>value+1)}>
             {loading ? 'Loading…' : 'Refresh'}
           </button>
@@ -568,10 +568,10 @@ function Today({onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,complet
             <Stat label="Completed" value={`${completed}/${appointments.length}`}/>
           </div>
           {missingPrices && <div className="prototype-note">Some appointments have no price saved; the total includes known prices only.</div>}
-          <GoogleRoutePanel appointments={appointments} dogs={dogs} selectedGroomer={groomer} dateLabel={dateLabel} dateKey={dateKey}/>
+          <GoogleRoutePanel appointments={appointments} dogs={dogs} selectedGroomer={groomer} dateLabel={dateLabel} dateKey={dateKey} viewerMode={viewerMode}/>
           <div className="section-title"><h3>Appointments</h3></div>
           {appointments.length ? (
-            <div className="appt-list">{appointments.map(appt=><ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={(mode)=>onOpen({...appt,_initialMode:mode || 'edit'})} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id}/>)}</div>
+            <div className="appt-list">{appointments.map(appt=><ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={(mode)=>onOpen({...appt,_initialMode:mode || 'edit'})} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id} viewerMode={viewerMode}/>)}</div>
           ) : (
             <div className="prototype-note">No appointments scheduled today{groomer === 'All' ? '' : ` for ${groomer}`}.</div>
           )}
@@ -695,7 +695,7 @@ function appointmentWindowText(value) {
   return `${fmt(minutes - 30)}–${fmt(minutes + 30)}`
 }
 
-function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey}) {
+function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,viewerMode=false}) {
   const [loading,setLoading] = useState(false)
   const [error,setError] = useState('')
   const [result,setResult] = useState(null)
@@ -841,7 +841,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey})
           )}
 
           <div style={{marginTop:9,display:'flex',alignItems:'center',justifyContent:'space-between',gap:'8px 14px',flexWrap:'wrap'}}>
-            {result?.mapsUrl && (
+            {!viewerMode && result?.mapsUrl && (
               <a href={result.mapsUrl} target="_blank" rel="noreferrer" style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:11,fontWeight:800,color:'#17223f',textDecoration:'none',whiteSpace:'nowrap'}}>
                 <MapPin size={14}/>Open in Google Maps
               </a>
@@ -890,7 +890,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey})
   )
 }
 
-function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,onFillOpening,completingId,confirmingId,revision,dogs}) {
+function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,onFillOpening,completingId,confirmingId,revision,dogs,viewerMode=false}) {
   const [groomer,setGroomer]=useState('All')
   const [weekStart,setWeekStart]=useState(() => {
     const now = new Date()
@@ -1125,7 +1125,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,on
                 <span>{dayDate.getDate()}</span>
               </div>
 
-              <div className="day-actions" style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
+              {!viewerMode && <div className="day-actions" style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
                 <button className="day-ai" type="button" onClick={()=>onAddAppointment?.(dateKey,groomer)}>
                   <Plus size={14}/>Add appointment
                 </button>
@@ -1140,7 +1140,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,on
                 >
                   <Sparkles size={14}/>Fill opening
                 </button>
-              </div>
+              </div>}
             </div>
 
             {dayAppointments.length > 0 ? (
@@ -1148,13 +1148,13 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,on
                 <div style={{fontSize:11,color:'#8a8f99',margin:'0 0 8px 2px'}}>
                   {activeAppointments.length} stop{activeAppointments.length===1?'':'s'} · ${Math.round(revenue)}
                 </div>
-                <GoogleRoutePanel appointments={activeAppointments} dogs={dogs} selectedGroomer={groomer} dateLabel={`${displayDay(dayDate)} ${displayDate(dayDate)}`} dateKey={dateKey}/>
+                <GoogleRoutePanel appointments={activeAppointments} dogs={dogs} selectedGroomer={groomer} dateLabel={`${displayDay(dayDate)} ${displayDate(dayDate)}`} dateKey={dateKey} viewerMode={viewerMode}/>
                 <div className="appt-list">
                   {dayAppointments
                     .slice()
                     .sort(compareAppointmentTimes)
                     .map(appt=>(
-                      <ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={(mode)=>onOpen({...appt,_initialMode:mode || 'edit'})} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id}/>
+                      <ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={(mode)=>onOpen({...appt,_initialMode:mode || 'edit'})} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id} viewerMode={viewerMode}/>
                     ))}
                 </div>
               </>
@@ -1169,7 +1169,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onAddAppointment,on
 
       {weekRecord && (
         <div className="prototype-note">
-          Tap an appointment to edit, change services, cancel, reschedule, or mark a no-show. Cancelled appointments and appointments moved to another week are hidden from the active schedule.
+          {viewerMode ? 'Viewer mode is read-only. You can open appointments to inspect them, but changes are disabled.' : 'Tap an appointment to edit, change services, cancel, reschedule, or mark a no-show. Cancelled appointments and appointments moved to another week are hidden from the active schedule.'}
         </div>
       )}
     </section>
@@ -2146,7 +2146,7 @@ function canonicalAreaLabel(value) {
   }).join(' ')
 }
 
-function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openClient, onOpenClientHandled, onRebook }) {
+function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openClient, onOpenClientHandled, onRebook, viewerMode=false }) {
   const [query, setQuery] = useState('')
   const [clientFilter, setClientFilter] = useState('all')
   const [areaFilter, setAreaFilter] = useState('all')
@@ -2709,7 +2709,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
           <div className="eyebrow">Live Supabase data</div>
           <h1>Clients</h1>
         </div>
-        <button className="primary-mini" onClick={() => { setDogMessage(''); setNewClientOpen(true); setDogEditor(blankDogForm()) }}><Plus size={16}/>New</button>
+        {!viewerMode && <button className="primary-mini" onClick={() => { setDogMessage(''); setNewClientOpen(true); setDogEditor(blankDogForm()) }}><Plus size={16}/>New</button>}
       </div>
 
       <div className="search">
@@ -3019,16 +3019,16 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
               )}
             </div>
 
-            <div className="client-quick-actions">
+            {!viewerMode && <div className="client-quick-actions">
               <button type="button" disabled={!selectedClient.phone} onClick={()=>{
                 if (selectedClient.scheduleInfo) openSms(selectedClient.phone,confirmationMessage({owner:selectedClient.owner,dogs:selectedClient.scheduleInfo.dogs || selectedClient.dogs.join(' + '),date:selectedClient.scheduleInfo.date,time:selectedClient.scheduleInfo.time}))
                 else openSms(selectedClient.phone)
               }}><MessageCircle size={15}/>{selectedClient.scheduleInfo ? 'Text confirmation' : 'Text client'}</button>
               <button type="button" disabled={!selectedClient.phone} onClick={()=>openCall(selectedClient.phone)}>Call</button>
               <button type="button" onClick={()=>{onRebook?.(selectedClient);setSelectedClient(null)}}><CalendarDays size={15}/> Book appointment</button>
-            </div>
+            </div>}
 
-            {!selectedClient.scheduleInfo && <div className="communication-card">
+            {!viewerMode && !selectedClient.scheduleInfo && <div className="communication-card">
               <div><strong>Rebooking text</strong><span>Choose the day you will be in {selectedClient.area || 'their area'}.</span></div>
               <div className="rebook-text-row">
                 <input type="date" value={rebookTextDate} min={businessDateKey()} onChange={event=>setRebookTextDate(event.target.value)} aria-label="Date you will be in this client's area"/>
@@ -3040,7 +3040,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
             <div className="form-grid">
               <label>
                 Phone
-                <input readOnly value={selectedClient.phone || '—'} />
+                <input readOnly value={viewerMode ? 'Hidden in viewer mode' : (selectedClient.phone || '—')} />
               </label>
 
               <label>
@@ -3052,14 +3052,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                 Address
                 <input
                   readOnly
-                  value={
-                    [
-                      selectedClient.address,
-                      selectedClient.city,
-                      selectedClient.state,
-                      selectedClient.zip
-                    ].filter(Boolean).join(', ') || '—'
-                  }
+                  value={viewerMode ? 'Hidden in viewer mode' : ([selectedClient.address,selectedClient.city,selectedClient.state,selectedClient.zip].filter(Boolean).join(', ') || '—')}
                 />
               </label>
 
@@ -3067,7 +3060,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                 Area
                 <select
                   value={addingArea ? '__new__' : areaEditValue}
-                  disabled={areaSaving}
+                  disabled={viewerMode || areaSaving}
                   onChange={event => {
                     const value = event.target.value
                     setAreaMessage('')
@@ -3090,7 +3083,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                 </select>
               </label>
 
-              {addingArea ? (
+              {!viewerMode && (addingArea ? (
                 <div style={{gridColumn:'1 / -1',display:'grid',gridTemplateColumns:'1fr auto',gap:8,alignItems:'end'}}>
                   <label>
                     New area name
@@ -3122,7 +3115,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                     {areaSaving ? 'Saving…' : 'Save Area'}
                   </button>
                 </div>
-              )}
+              ))}
 
               {areaMessage && (
                 <div className="prototype-note" style={{gridColumn:'1 / -1',marginTop:-2}} role="status">
@@ -3169,7 +3162,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                             {[nextService || servicePattern, frequency !== '' ? `Every ${frequency} wks` : ''].filter(Boolean).join(' · ') || 'Service details not set'}
                           </div>
                         </div>
-                        <button type="button" className="secondary-btn" onClick={() => { setDogMessage(''); editDog(row) }} style={{flex:'0 0 auto'}}>Edit</button>
+                        {!viewerMode && <button type="button" className="secondary-btn" onClick={() => { setDogMessage(''); editDog(row) }} style={{flex:'0 0 auto'}}>Edit</button>}
                       </div>
 
                       {!lastGroom && !lastBath ? (
@@ -3209,9 +3202,9 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
               </div>
             </div>
 
-            <div style={{display:'flex',justifyContent:'flex-end',marginTop:10}}>
+            {!viewerMode && <div style={{display:'flex',justifyContent:'flex-end',marginTop:10}}>
               <button type="button" className="primary-mini" onClick={() => { const form=blankDogForm(selectedClient); setDogMessage(''); setDogEditor(form); setSelectedClient(null) }}><Plus size={15}/>Add Dog</button>
-            </div>
+            </div>}
 
             <div style={{marginTop:18}}>
               <div className="eyebrow" style={{marginBottom:8}}>Appointment history</div>
@@ -3547,7 +3540,7 @@ function scheduleRiskBadge(severity) {
   return severity === 'danger' ? 'Conflict' : severity === 'warning' ? 'Tight route' : 'Looks good'
 }
 
-function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation}) {
+function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=false}) {
   const row = appt.sourceRow
   const today = businessDateKey()
   const originalDate = String(row.Date || today).slice(0,10)
@@ -3802,6 +3795,28 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation}) {
     } finally {
       savingRef.current=false;setSaving(false)
     }
+  }
+
+  if (viewerMode) {
+    return <div className="sheet-backdrop" onMouseDown={onClose}>
+      <div ref={dialogRef} className="sheet" role="dialog" aria-modal="true" aria-labelledby="completion-title" onMouseDown={event=>event.stopPropagation()} style={{maxHeight:'85dvh',overflowY:'auto'}}>
+        <div className="sheet-handle"/>
+        <div className="sheet-title">
+          <div><span>Viewer mode · read only</span><h2 id="completion-title">{appt.owner}</h2><p>{appt.dogs}</p></div>
+          <button ref={closeRef} className="icon-btn" aria-label="Close appointment" onClick={onClose}><X size={18}/></button>
+        </div>
+        <div className="prototype-note" style={{textAlign:'left',marginBottom:14}}>This demo account can inspect appointment details, but changes and customer contact actions are disabled.</div>
+        <div className="form-grid">
+          <label>Date<input readOnly value={textDate(originalDate) || originalDate || '—'} /></label>
+          <label>Time<input readOnly value={displayClockTime(row['Start Time'] || row['Locked Time'] || row['Original Start Time'])} /></label>
+          <label>Groomer<input readOnly value={String(row.Groomer || appt.groomer || '—')} /></label>
+          <label>Price<input readOnly value={Number.isFinite(Number(appt.price)) ? `$${Math.round(Number(appt.price))}` : '—'} /></label>
+          <label style={{gridColumn:'1 / -1'}}>Area<input readOnly value={String(appt.area || row['Area Cluster'] || '—')} /></label>
+          <label style={{gridColumn:'1 / -1'}}>Status<input readOnly value={String(row['Appointment Status'] || row.Status || 'Scheduled')} /></label>
+        </div>
+        <div className="sheet-actions"><button className="ghost" onClick={onClose}>Close</button></div>
+      </div>
+    </div>
   }
 
   return <div className="sheet-backdrop" onMouseDown={close}>
@@ -4104,7 +4119,7 @@ function plannerDayLabel(dateKey) {
   return new Date(`${dateKey}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric'})
 }
 
-function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient}) {
+function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=false}) {
   const [text,setText]=useState(initial||'')
   const [loading,setLoading]=useState(false)
   const [error,setError]=useState('')
@@ -4391,6 +4406,11 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient}) {
   }
 
   const choose = candidate => {
+    if (viewerMode) {
+      onClose?.()
+      onClient?.({key:candidate.key,household:candidate.household || '',owner:candidate.owner})
+      return
+    }
     if (answer?.mode === 'confirmation') {
       onClose?.()
       onClient?.({key:candidate.key,household:candidate.household || '',owner:candidate.owner})
@@ -4642,6 +4662,10 @@ const plannerThemeCss = `
   .rebook-text-row button{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid #dce1e8;background:#fff;color:#26345e;border-radius:11px;padding:9px 11px;font-size:12px;font-weight:850;}
   .rebook-text-row button:disabled{opacity:.45;}
   .communication-preview{font-size:11px;line-height:1.45;color:#657084;background:#fff;border:1px solid #e0e6ed;border-radius:11px;padding:9px 10px;}
+  .viewer-banner{margin:0 0 14px;padding:10px 12px;border:1px solid #d8dfea;border-radius:13px;background:#f3f6fb;color:#34415f;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;font-weight:750;}
+  .viewer-banner strong{color:#17223f;}
+  .viewer-badge{display:inline-flex;align-items:center;padding:4px 7px;border-radius:999px;background:#e8eef8;color:#30466d;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;}
+  .viewer-banner button{border:1px solid #ccd5e3;background:#fff;color:#31415f;border-radius:9px;padding:6px 9px;font-weight:800;font-size:11px;}
   @media (max-width:560px){
     .day-block{margin-left:-4px;margin-right:-4px;padding-left:8px;padding-right:8px;}
     .stats-row{gap:8px!important;}
@@ -4652,6 +4676,8 @@ const plannerThemeCss = `
 export default function App() {
   const [session, setSession] = useState(null)
   const [authReady, setAuthReady] = useState(false)
+  const [accessMode,setAccessMode] = useState('editor')
+  const [accessReady,setAccessReady] = useState(false)
   const [dogs, setDogs] = useState([])
   const [dataLoading, setDataLoading] = useState(false)
   const [dataError, setDataError] = useState('')
@@ -4788,6 +4814,25 @@ export default function App() {
 
   useEffect(() => {
     if (!session || !supabase) {
+      setAccessMode('editor')
+      setAccessReady(true)
+      return
+    }
+    let cancelled=false
+    setAccessReady(false)
+    supabase.rpc('get_grooming_access').then(({data,error})=>{
+      if(cancelled) return
+      setAccessMode(!error && data==='viewer' ? 'viewer' : 'editor')
+      setAccessReady(true)
+    })
+    return ()=>{cancelled=true}
+  },[session])
+
+  const viewerMode = accessMode === 'viewer'
+  const viewerNotice = () => setSaveMessage('Viewer mode is read-only. No client or schedule changes were made.')
+
+  useEffect(() => {
+    if (!session || !supabase) {
       setDogs([])
       return
     }
@@ -4821,7 +4866,7 @@ export default function App() {
     }
   }, [session,scheduleRevision])
 
-  if (!authReady) {
+  if (!authReady || (session && !accessReady)) {
     return (
       <div className="login-shell">
         <div className="login-card">Loading…</div>
@@ -4835,15 +4880,15 @@ export default function App() {
 
   let body
   if (tab === 'Today') {
-    body = <Today dogs={dogs} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onConfirmation={setClientConfirmation} onAddAppointment={date=>setAddAppointment({open:true,date,preset:null})} completingId={completingId} confirmingId={confirmingId} revision={scheduleRevision}/>
+    body = <Today dogs={dogs} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onAddAppointment={viewerMode?viewerNotice:date=>setAddAppointment({open:true,date,preset:null})} completingId={completingId} confirmingId={confirmingId} revision={scheduleRevision} viewerMode={viewerMode}/>
   } else if (tab === 'Week') {
-    body = <Week dogs={dogs} onAsk={ask} onOpen={setEditing} onComplete={completeFromSchedule} onUndo={undoCompleteFromSchedule} onConfirmation={setClientConfirmation} onAddAppointment={(date,selectedGroomer)=>setAddAppointment({open:true,date,preset:['Jen','Haley'].includes(selectedGroomer)?{groomer:selectedGroomer}:null})} onFillOpening={payload=>setFillOpening({open:true,date:payload.date,groomer:payload.groomer,appointments:payload.appointments || []})} completingId={completingId} confirmingId={confirmingId} revision={scheduleRevision}/>
+    body = <Week dogs={dogs} onAsk={ask} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onAddAppointment={viewerMode?viewerNotice:(date,selectedGroomer)=>setAddAppointment({open:true,date,preset:['Jen','Haley'].includes(selectedGroomer)?{groomer:selectedGroomer}:null})} onFillOpening={viewerMode?viewerNotice:payload=>setFillOpening({open:true,date:payload.date,groomer:payload.groomer,appointments:payload.appointments || []})} completingId={completingId} confirmingId={confirmingId} revision={scheduleRevision} viewerMode={viewerMode}/>
   } else if (tab === 'Month') {
     body = <Month dogs={dogs} onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Clients') {
-    body = <Clients dogs={dogs} loading={dataLoading} error={dataError} onOpen={setEditing} revision={scheduleRevision} openClient={clientJump} onOpenClientHandled={()=>setClientJump(null)} onRebook={openRebookForClient} onDataChanged={message=>{ setSaveMessage(message); setScheduleRevision(value=>value+1) }}/>
+    body = <Clients dogs={dogs} loading={dataLoading} error={dataError} onOpen={setEditing} revision={scheduleRevision} openClient={clientJump} onOpenClientHandled={()=>setClientJump(null)} onRebook={viewerMode?viewerNotice:openRebookForClient} onDataChanged={message=>{ setSaveMessage(message); setScheduleRevision(value=>value+1) }} viewerMode={viewerMode}/>
   } else {
-    body = <More dogs={dogs} revision={scheduleRevision} onAsk={ask} onRebook={openRebookForClient}/>
+    body = <More dogs={dogs} revision={scheduleRevision} onAsk={ask} onRebook={viewerMode?viewerNotice:openRebookForClient}/>
   }
 
   const nav=[['Today',Home],['Week',CalendarDays],['Month',Clock3],['Clients',Users],['More',Ellipsis]]
@@ -4853,10 +4898,11 @@ export default function App() {
       <style>{plannerThemeCss}</style>
       <header className="topbar">
         <div className="brand-mark">GP</div>
-        <div><strong>Grooming Planner</strong><span>Mobile business dashboard</span></div>
+        <div><strong>Grooming Planner</strong><span>{viewerMode ? 'Viewer demo · read only' : 'Mobile business dashboard'}</span></div>
         <button className="top-ai" onClick={()=>ask()}><Sparkles size={16}/>Ask Planner</button>
       </header>
       <main>
+        {viewerMode && <div className="viewer-banner"><div><span className="viewer-badge">Viewer</span> <strong>Read-only demo</strong> · Client phone numbers and street addresses are hidden, and changes are blocked.</div><button type="button" onClick={()=>supabase?.auth?.signOut?.()}>Sign out</button></div>}
         {saveMessage && <div className="prototype-note" role="status" style={{marginBottom:16}}>
           {saveMessage} <button className="text-btn" onClick={()=>setSaveMessage('')}>Dismiss</button>
         </div>}
@@ -4875,21 +4921,21 @@ export default function App() {
         ))}
       </nav>
 
-      {editing && <CompletionSheet appt={editing} dogs={dogs} onConfirmation={setClientConfirmation} onClose={()=>setEditing(null)} onSaved={message=>{
+      {editing && <CompletionSheet appt={editing} dogs={dogs} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} viewerMode={viewerMode} onClose={()=>setEditing(null)} onSaved={message=>{
         setEditing(null)
         setSaveMessage(message)
         setScheduleRevision(value=>value+1)
       }}/>}
-      <FillOpeningSheet open={fillOpening.open} dateKey={fillOpening.date} preferredGroomer={fillOpening.groomer} dayAppointments={fillOpening.appointments} dogs={dogs} onClose={()=>setFillOpening(current=>({...current,open:false}))} onChoose={preset=>{
+      {!viewerMode && <FillOpeningSheet open={fillOpening.open} dateKey={fillOpening.date} preferredGroomer={fillOpening.groomer} dayAppointments={fillOpening.appointments} dogs={dogs} onClose={()=>setFillOpening(current=>({...current,open:false}))} onChoose={preset=>{
         setFillOpening(current=>({...current,open:false}))
         setAddAppointment({open:true,date:preset.date,preset})
-      }}/>
-      <AddAppointmentSheet open={addAppointment.open} dateKey={addAppointment.date} dogs={dogs} preset={addAppointment.preset} onClose={()=>setAddAppointment(current=>({...current,open:false,preset:null}))} onSaved={message=>{
+      }}/> }
+      {!viewerMode && <AddAppointmentSheet open={addAppointment.open} dateKey={addAppointment.date} dogs={dogs} preset={addAppointment.preset} onClose={()=>setAddAppointment(current=>({...current,open:false,preset:null}))} onSaved={message=>{
         setAddAppointment(current=>({...current,open:false,preset:null}))
         setSaveMessage(message)
         setScheduleRevision(value=>value+1)
-      }}/>
-      <AssistantSheet open={assistant.open} initial={assistant.initial} dogs={dogs} onClose={()=>setAssistant({open:false,initial:''})} onChoose={preset=>{ setAssistant({open:false,initial:''}); setAddAppointment({open:true,date:preset.date,preset}) }} onClient={client=>{ setAssistant({open:false,initial:''}); setClientJump(client); setTab('Clients') }}/>
+      }}/> }
+      <AssistantSheet open={assistant.open} initial={assistant.initial} dogs={dogs} onClose={()=>setAssistant({open:false,initial:''})} onChoose={viewerMode?viewerNotice:preset=>{ setAssistant({open:false,initial:''}); setAddAppointment({open:true,date:preset.date,preset}) }} onClient={client=>{ setAssistant({open:false,initial:''}); setClientJump(client); setTab('Clients') }} viewerMode={viewerMode}/>
     </div>
   )
 }
