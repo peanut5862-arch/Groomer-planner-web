@@ -74,7 +74,7 @@ export default async function handler(req,res){
     if(!eventId) return send(res,400,{error:'The finish event is missing.'})
 
     const {data:eventRows,error:eventError}=await admin.from('groomer_finish_events')
-      .select('id,groomer,week_start,row_index,owner,dogs,appointment_date,appointment_time,push_sent_at')
+      .select('id,groomer,week_start,row_index,owner,dogs,appointment_date,appointment_time,payment_received_type,push_sent_at')
       .eq('id',eventId).limit(1)
     if(eventError) throw eventError
     const event=eventRows?.[0]
@@ -100,34 +100,77 @@ export default async function handler(req,res){
     if(subscriptionError) throw subscriptionError
 
     const dogText=String(event.dogs || '').trim()
+    const paymentType=String(event.payment_received_type || '').trim()
     const finishedText=`${groomer} finished ${event.owner}${dogText ? ` · ${dogText}` : ''}.`
+    const paymentText=paymentType ? ` Payment: ${paymentType}.` : ''
     const nextText=next ? ` Next: ${next.owner}${next.time ? ` at ${displayClock(next.time)}` : ''}.` : ' No more scheduled stops today.'
     const payload=JSON.stringify({
       title:`${groomer} finished a stop`,
-      body:`${finishedText}${nextText}`,
+      body:`${finishedText}${paymentText}${nextText}`,
       tag:`groomer-finished-${event.id}`,
       url:'/'
     })
 
+    if(!(subscriptions || []).length){
+      return send(res,409,{error:'No enabled owner phone subscription was found.'})
+    }
+
     let sent=0
     const stale=[]
+    const failures=[]
+
     await Promise.all((subscriptions || []).map(async row=>{
       try{
         await webpush.sendNotification(row.subscription,payload,{TTL:300,urgency:'high'})
         sent+=1
       }catch(error){
-        if(error?.statusCode===404 || error?.statusCode===410) stale.push(row.id)
+        const statusCode=Number(error?.statusCode || 0) || null
+        const body=String(error?.body || '').trim()
+        const message=String(error?.message || 'Push provider rejected the notification.').trim()
+
+        failures.push({
+          id:row.id,
+          statusCode,
+          message,
+          body:body.slice(0,500)
+        })
+
+        if(statusCode===404 || statusCode===410) stale.push(row.id)
       }
     }))
 
     if(stale.length){
-      await admin.from('push_subscriptions').update({enabled:false,updated_at:new Date().toISOString()}).in('id',stale)
-    }
-    if(sent>0){
-      await admin.from('groomer_finish_events').update({push_sent_at:new Date().toISOString()}).eq('id',event.id)
+      await admin.from('push_subscriptions')
+        .update({enabled:false,updated_at:new Date().toISOString()})
+        .in('id',stale)
     }
 
-    return send(res,200,{ok:true,sent,next:next?{owner:next.owner,time:next.time}:null})
+    if(sent>0){
+      const {error:markError}=await admin
+        .from('groomer_finish_events')
+        .update({push_sent_at:new Date().toISOString()})
+        .eq('id',event.id)
+
+      if(markError) throw markError
+
+      return send(res,200,{
+        ok:true,
+        sent,
+        next:next?{owner:next.owner,time:next.time}:null
+      })
+    }
+
+    const first=failures[0] || {}
+    const detail=[
+      first.statusCode ? `Push service returned ${first.statusCode}.` : '',
+      first.message || '',
+      first.body || ''
+    ].filter(Boolean).join(' ')
+
+    return send(res,502,{
+      error:detail || 'The push provider rejected the notification.',
+      failures:failures.length
+    })
   }catch(error){
     return send(res,500,{error:error?.message || 'Could not send the finish notification.'})
   }
