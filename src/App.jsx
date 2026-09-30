@@ -2034,12 +2034,18 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
   }
 
   const commonFrequencyOptions = ['2','4','6','8','10','12']
+  const blankAdditionalDog = () => ({
+    dog:'', service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'',
+    groom_minutes:'', bath_minutes:'', partial_groom_minutes:'', frequency_weeks:'', frequency_mode:'preset',
+    last_groom:'', last_bath:'', prior_service:'no', first_appointment_service:'Groom'
+  })
   const blankDogForm = (client = null) => ({
     household_id:client?.household || '', owner:client?.owner || '', original_dog:'', dog:'',
     phone:client?.phone || '', groomer:client?.groomer || '', area:client?.area || '', area_mode:'existing', new_area:'',
     address:client?.address || '', city:client?.city || '', state:client?.state || 'TX', zip:client?.zip || '',
     service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'', groom_minutes:'', bath_minutes:'', partial_groom_minutes:'', frequency_weeks:'', frequency_mode:'preset', last_groom:'', last_bath:'',
-    prior_service:'no', first_appointment_booked:false, first_appointment_date:'', first_appointment_groomer:'Jen', first_appointment_time:'09:00', first_appointment_service:'Groom', first_appointment_fixed:false
+    prior_service:'no', first_appointment_booked:false, first_appointment_date:'', first_appointment_groomer:'Jen', first_appointment_time:'09:00', first_appointment_service:'Groom', first_appointment_fixed:false,
+    additional_dogs:[]
   })
 
   const editDog = row => {
@@ -2062,64 +2068,95 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
     last_groom:String(valueOf(row,'last_groom','Last Groom','last_groom_date','Last Groom Date') || '').slice(0,10),
     last_bath:String(valueOf(row,'last_bath','Last Bath','last_bath_date','Last Bath Date') || '').slice(0,10),
     prior_service:(valueOf(row,'last_groom','Last Groom','last_groom_date','Last Groom Date') || valueOf(row,'last_bath','Last Bath','last_bath_date','Last Bath Date')) ? 'yes' : 'no',
-    first_appointment_booked:false, first_appointment_date:'', first_appointment_groomer:'Jen', first_appointment_time:'09:00', first_appointment_service:'Groom', first_appointment_fixed:false
+    first_appointment_booked:false, first_appointment_date:'', first_appointment_groomer:'Jen', first_appointment_time:'09:00', first_appointment_service:'Groom', first_appointment_fixed:false, additional_dogs:[]
     })
     setSelectedClient(null)
   }
 
   const saveDogForm = async (form, closeNew=false) => {
     if (!supabase || dogSaving) return
-    if (!String(form.owner||'').trim() || !String(form.dog||'').trim()) { setDogMessage('Owner and dog name are required.'); return }
+
+    const extraDogs = closeNew && Array.isArray(form.additional_dogs) ? form.additional_dogs : []
+    const dogsToSave = closeNew
+      ? [
+          {...form, additional_dogs:undefined},
+          ...extraDogs.map(dog => ({
+            ...form,
+            ...dog,
+            original_dog:'',
+            additional_dogs:undefined,
+            first_appointment_booked:false,
+            first_appointment_date:'',
+            first_appointment_groomer:form.first_appointment_groomer,
+            first_appointment_time:form.first_appointment_time,
+            first_appointment_fixed:form.first_appointment_fixed
+          }))
+        ]
+      : [form]
+
+    if (!String(form.owner||'').trim()) { setDogMessage('Owner name is required.'); return }
+    if (dogsToSave.some(dog => !String(dog.dog||'').trim())) { setDogMessage('Enter a name for every dog.'); return }
+    const dogNames = dogsToSave.map(dog => normalizedKey(dog.dog))
+    if (new Set(dogNames).size !== dogNames.length) { setDogMessage('Each dog needs a different name.'); return }
 
     const bookingFirstVisit = Boolean(closeNew && form.prior_service === 'no' && form.first_appointment_booked)
     if (bookingFirstVisit) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(form.first_appointment_date || ''))) { setDogMessage('Choose the first appointment date.'); return }
       if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(form.first_appointment_time || ''))) { setDogMessage('Choose a valid first appointment time.'); return }
       if (!['Jen','Haley'].includes(form.first_appointment_groomer)) { setDogMessage('Choose Jen or Haley for the first appointment.'); return }
-      if (!appointmentServiceOptions.includes(form.first_appointment_service)) { setDogMessage('Choose the first appointment service.'); return }
+      if (dogsToSave.some(dog => !appointmentServiceOptions.includes(dog.first_appointment_service || dog.service))) { setDogMessage('Choose a first appointment service for every dog.'); return }
       const weekday = new Date(`${form.first_appointment_date}T12:00:00Z`).getUTCDay()
       if (![1,2,3,4,5].includes(weekday)) { setDogMessage('First appointments must be Monday through Friday.'); return }
       if (form.first_appointment_groomer === 'Jen' && ![2,3,4].includes(weekday)) { setDogMessage('Jen works Tuesday through Thursday.'); return }
-      if (['Jen','Haley'].includes(form.groomer) && form.first_appointment_groomer !== form.groomer) { setDogMessage(`This dog is assigned to ${form.groomer}. Choose ${form.groomer} for the first appointment.`); return }
+      if (['Jen','Haley'].includes(form.groomer) && form.first_appointment_groomer !== form.groomer) { setDogMessage(`This household is assigned to ${form.groomer}. Choose ${form.groomer} for the first appointment.`); return }
     }
 
     setDogSaving(true); setDogMessage('')
-    let dogSaved = false
+    let savedCount = 0
     try {
       const num = v => String(v ?? '').trim()==='' ? null : Number(v)
-      const cleanLastGroom = closeNew && form.prior_service === 'no' ? null : (form.last_groom || null)
-      const cleanLastBath = closeNew && form.prior_service === 'no' ? null : (form.last_bath || null)
-      const {data,error:saveError} = await supabase.rpc('save_grooming_dog', {
-        p_household_id:String(form.household_id||'').trim() || null,
-        p_owner:String(form.owner||'').trim(), p_original_dog:String(form.original_dog||'').trim() || null,
-        p_dog:String(form.dog||'').trim(), p_phone:String(form.phone||'').trim() || null,
-        p_groomer:String(form.groomer||'').trim() || null, p_area:canonicalAreaLabel(form.area_mode==='new' ? form.new_area : form.area) || null,
-        p_address:String(form.address||'').trim() || null, p_city:String(form.city||'').trim() || null,
-        p_state:String(form.state||'').trim() || null, p_zip:String(form.zip||'').trim() || null,
-        p_service:form.service || 'Groom', p_price:num(form.groom_price || form.bath_price || form.partial_groom_price),
-        p_groom_price:num(form.groom_price), p_bath_price:num(form.bath_price), p_partial_groom_price:num(form.partial_groom_price),
-        p_groom_minutes:num(form.groom_minutes), p_bath_minutes:num(form.bath_minutes), p_partial_groom_minutes:num(form.partial_groom_minutes),
-        p_minutes:num(form.groom_minutes || form.bath_minutes || form.partial_groom_minutes),
-        p_frequency_weeks:num(form.frequency_weeks), p_last_groom:cleanLastGroom, p_last_bath:cleanLastBath
-      })
-      if (saveError) throw saveError
-      dogSaved = true
+      let householdId = String(form.household_id||'').trim() || null
+
+      for (const dogForm of dogsToSave) {
+        const cleanLastGroom = closeNew && dogForm.prior_service === 'no' ? null : (dogForm.last_groom || null)
+        const cleanLastBath = closeNew && dogForm.prior_service === 'no' ? null : (dogForm.last_bath || null)
+        const {data,error:saveError} = await supabase.rpc('save_grooming_dog', {
+          p_household_id:householdId,
+          p_owner:String(form.owner||'').trim(), p_original_dog:String(dogForm.original_dog||'').trim() || null,
+          p_dog:String(dogForm.dog||'').trim(), p_phone:String(form.phone||'').trim() || null,
+          p_groomer:String(form.groomer||'').trim() || null, p_area:canonicalAreaLabel(form.area_mode==='new' ? form.new_area : form.area) || null,
+          p_address:String(form.address||'').trim() || null, p_city:String(form.city||'').trim() || null,
+          p_state:String(form.state||'').trim() || null, p_zip:String(form.zip||'').trim() || null,
+          p_service:dogForm.service || 'Groom', p_price:num(dogForm.groom_price || dogForm.bath_price || dogForm.partial_groom_price),
+          p_groom_price:num(dogForm.groom_price), p_bath_price:num(dogForm.bath_price), p_partial_groom_price:num(dogForm.partial_groom_price),
+          p_groom_minutes:num(dogForm.groom_minutes), p_bath_minutes:num(dogForm.bath_minutes), p_partial_groom_minutes:num(dogForm.partial_groom_minutes),
+          p_minutes:num(dogForm.groom_minutes || dogForm.bath_minutes || dogForm.partial_groom_minutes),
+          p_frequency_weeks:num(dogForm.frequency_weeks), p_last_groom:cleanLastGroom, p_last_bath:cleanLastBath
+        })
+        if (saveError) throw saveError
+        savedCount += 1
+        const savedRow = Array.isArray(data) ? data[0] : data
+        householdId = String(savedRow?.household_id || savedRow?.householdId || householdId || '').trim() || null
+      }
 
       if (bookingFirstVisit) {
-        const defaults = serviceDefaultsForDog(form,form.first_appointment_service)
-        const savedRow = Array.isArray(data) ? data[0] : data
-        const savedHousehold = String(savedRow?.household_id || savedRow?.householdId || form.household_id || '').trim() || null
+        const appointmentDogs = dogsToSave.map(dog => {
+          const service = dog.first_appointment_service || dog.service || 'Groom'
+          return {...dog, firstService:service, defaults:serviceDefaultsForDog(dog,service)}
+        })
+        const totalPrice = appointmentDogs.reduce((sum,dog)=>sum + Number(dog.defaults.price || 0),0)
+        const totalMinutes = appointmentDogs.reduce((sum,dog)=>sum + Number(dog.defaults.minutes || 0),0)
         const area = canonicalAreaLabel(form.area_mode==='new' ? form.new_area : form.area)
         const {data:appointmentData,error:appointmentError} = await supabase.rpc('add_grooming_appointment',{
           p_date:form.first_appointment_date,
-          p_household_id:savedHousehold,
+          p_household_id:householdId,
           p_owner:String(form.owner||'').trim(),
-          p_dogs:`${String(form.dog||'').trim()} (${form.first_appointment_service})`,
+          p_dogs:appointmentDogs.map(dog=>`${String(dog.dog||'').trim()} (${dog.firstService})`).join(', '),
           p_groomer:form.first_appointment_groomer,
           p_start_time:form.first_appointment_time,
           p_fixed:Boolean(form.first_appointment_fixed),
-          p_price:defaults.price,
-          p_minutes:Math.max(1,Math.round(defaults.minutes || 1)),
+          p_price:totalPrice,
+          p_minutes:Math.max(1,Math.round(totalMinutes || 1)),
           p_area:area || null,
           p_note:'First visit'
         })
@@ -2132,15 +2169,28 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
 
       setDogEditor(null); if (closeNew) setNewClientOpen(false)
       onDataChanged?.(bookingFirstVisit
-        ? `${form.owner} saved · first visit ${textDate(form.first_appointment_date)} at ${displayClockTime(form.first_appointment_time)}.`
-        : `${form.dog} saved.`)
+        ? `${form.owner} · ${dogsToSave.length} dog${dogsToSave.length===1?'':'s'} saved · first visit ${textDate(form.first_appointment_date)} at ${displayClockTime(form.first_appointment_time)}.`
+        : closeNew && dogsToSave.length > 1 ? `${form.owner} · ${dogsToSave.length} dogs saved.` : `${form.dog} saved.`)
       if (selectedClient) setSelectedClient(null)
     } catch(err) {
-      setDogMessage(err?.message || (dogSaved ? 'Client saved, but the appointment could not be added.' : 'Could not save dog.'))
+      setDogMessage(err?.message || (savedCount ? `${savedCount} dog${savedCount===1?'':'s'} saved, but the rest could not be completed.` : 'Could not save dog.'))
     }
     finally { setDogSaving(false) }
   }
 
+  const updateAdditionalDog = (index, patch) => {
+    setDogEditor(current => current ? {
+      ...current,
+      additional_dogs:(current.additional_dogs || []).map((dog,i) => i === index ? {...dog,...patch} : dog)
+    } : current)
+  }
+
+  const removeAdditionalDog = index => {
+    setDogEditor(current => current ? {
+      ...current,
+      additional_dogs:(current.additional_dogs || []).filter((_,i) => i !== index)
+    } : current)
+  }
 
   useEffect(() => {
     if (!selectedClient || !supabase) {
@@ -2440,6 +2490,50 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
               {newClientOpen && dogEditor.prior_service==='no' && <div className="prototype-note" style={{gridColumn:'1 / -1',margin:0}}>
                 Leave Last Groom / Last Bath blank. When you complete their first appointment, Grooming Planner will automatically save that service as their real history.
               </div>}
+
+              {newClientOpen && <div style={{gridColumn:'1 / -1',display:'grid',gap:10}}>
+                {(dogEditor.additional_dogs || []).map((extraDog,index) => <div key={index} style={{border:'1px solid #e7e4de',borderRadius:16,padding:14,display:'grid',gap:10,background:'#fbfaf8'}}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}}>
+                    <strong style={{fontSize:15,color:'#172038'}}>Dog {index + 2}</strong>
+                    <button type="button" className="secondary-btn" onClick={()=>removeAdditionalDog(index)} style={{padding:'8px 10px'}}>Remove</button>
+                  </div>
+                  <label>Dog name<input value={extraDog.dog || ''} onChange={e=>updateAdditionalDog(index,{dog:e.target.value})}/></label>
+                  <label>Service<select value={extraDog.service || 'Groom'} onChange={e=>{
+                    const next=e.target.value
+                    updateAdditionalDog(index,{service:next,first_appointment_service:appointmentServiceOptions.includes(next)?next:(extraDog.first_appointment_service || 'Groom')})
+                  }}><option>Groom</option><option>Bath Only</option><option>Bath</option><option>Partial Groom</option><option>Service Varies</option></select></label>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                    <label>Groom price<input type="number" inputMode="decimal" value={extraDog.groom_price || ''} onChange={e=>updateAdditionalDog(index,{groom_price:e.target.value})}/></label>
+                    <label>Bath price<input type="number" inputMode="decimal" value={extraDog.bath_price || ''} onChange={e=>updateAdditionalDog(index,{bath_price:e.target.value})}/></label>
+                    <label>Partial price<input type="number" inputMode="decimal" value={extraDog.partial_groom_price || ''} onChange={e=>updateAdditionalDog(index,{partial_groom_price:e.target.value})}/></label>
+                    <label>Groom time<input type="number" inputMode="numeric" value={extraDog.groom_minutes || ''} onChange={e=>updateAdditionalDog(index,{groom_minutes:e.target.value})}/></label>
+                    <label>Bath time<input type="number" inputMode="numeric" value={extraDog.bath_minutes || ''} onChange={e=>updateAdditionalDog(index,{bath_minutes:e.target.value})}/></label>
+                    <label>Partial time<input type="number" inputMode="numeric" value={extraDog.partial_groom_minutes || ''} onChange={e=>updateAdditionalDog(index,{partial_groom_minutes:e.target.value})}/></label>
+                  </div>
+                  <label>Frequency (weeks)<select value={extraDog.frequency_mode==='custom'?'__custom__':String(extraDog.frequency_weeks || '')} onChange={e=>{
+                    const value=e.target.value
+                    if(value==='__custom__') updateAdditionalDog(index,{frequency_mode:'custom',frequency_weeks:commonFrequencyOptions.includes(String(extraDog.frequency_weeks || ''))?'':extraDog.frequency_weeks})
+                    else updateAdditionalDog(index,{frequency_mode:'preset',frequency_weeks:value})
+                  }}>
+                    <option value="">Choose frequency</option>
+                    {commonFrequencyOptions.map(value=><option key={value} value={value}>{value} weeks</option>)}
+                    <option value="__custom__">Other</option>
+                  </select></label>
+                  {extraDog.frequency_mode==='custom' && <label>Custom weeks<input type="number" min="1" inputMode="numeric" value={extraDog.frequency_weeks || ''} onChange={e=>updateAdditionalDog(index,{frequency_weeks:e.target.value})}/></label>}
+                  <label>Have we serviced this dog before?<select value={extraDog.prior_service || 'no'} onChange={e=>updateAdditionalDog(index,{prior_service:e.target.value,last_groom:e.target.value==='no'?'':extraDog.last_groom,last_bath:e.target.value==='no'?'':extraDog.last_bath})}>
+                    <option value="no">No — first visit with us</option>
+                    <option value="yes">Yes — we have service history</option>
+                  </select></label>
+                  {extraDog.prior_service==='yes' && <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                    <label>Last groom<input type="date" value={extraDog.last_groom || ''} onChange={e=>updateAdditionalDog(index,{last_groom:e.target.value})}/></label>
+                    <label>Last bath<input type="date" value={extraDog.last_bath || ''} onChange={e=>updateAdditionalDog(index,{last_bath:e.target.value})}/></label>
+                  </div>}
+                </div>)}
+                <button type="button" className="secondary-btn" onClick={()=>setDogEditor(current=>({...current,additional_dogs:[...(current.additional_dogs || []),blankAdditionalDog()]}))} style={{justifyContent:'center',padding:'12px 14px'}}>
+                  <Plus size={16}/> Add another dog
+                </button>
+              </div>}
+
               {newClientOpen && dogEditor.prior_service==='no' && <div style={{gridColumn:'1 / -1',border:'1px solid #e7e4de',borderRadius:14,padding:12,display:'grid',gap:10}}>
                 <label style={{display:'flex',gap:10,alignItems:'center',fontSize:13,fontWeight:800,width:'100%',minWidth:0,lineHeight:1.35}}>
                   <input type="checkbox" checked={Boolean(dogEditor.first_appointment_booked)} onChange={e=>setDogEditor({...dogEditor,first_appointment_booked:e.target.checked})} style={{width:22,height:22,minWidth:22,flex:'0 0 22px',margin:0,padding:0}}/>
@@ -2453,7 +2547,10 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
                     setDogEditor({...dogEditor,first_appointment_groomer:next,first_appointment_time:(!dogEditor.first_appointment_time || dogEditor.first_appointment_time===previousDefault)?defaultFirstStopTime(next):dogEditor.first_appointment_time})
                   }}><option>Jen</option><option>Haley</option></select></label>
                   <label>Time<input type="time" value={dogEditor.first_appointment_time || defaultFirstStopTime(dogEditor.first_appointment_groomer)} onChange={e=>setDogEditor({...dogEditor,first_appointment_time:e.target.value})}/></label>
-                  <label style={{gridColumn:'1 / -1'}}>First service<select value={dogEditor.first_appointment_service || 'Groom'} onChange={e=>setDogEditor({...dogEditor,first_appointment_service:e.target.value})}>{appointmentServiceOptions.map(service=><option key={service}>{service}</option>)}</select></label>
+                  <div style={{gridColumn:'1 / -1',display:'grid',gap:8}}>
+                    <label>{dogEditor.dog || 'Dog 1'} service<select value={dogEditor.first_appointment_service || dogEditor.service || 'Groom'} onChange={e=>setDogEditor({...dogEditor,first_appointment_service:e.target.value})}>{appointmentServiceOptions.map(service=><option key={service}>{service}</option>)}</select></label>
+                    {(dogEditor.additional_dogs || []).map((extraDog,index)=><label key={index}>{extraDog.dog || `Dog ${index+2}`} service<select value={extraDog.first_appointment_service || extraDog.service || 'Groom'} onChange={e=>updateAdditionalDog(index,{first_appointment_service:e.target.value})}>{appointmentServiceOptions.map(service=><option key={service}>{service}</option>)}</select></label>)}
+                  </div>
                   <label style={{gridColumn:'1 / -1',display:'flex',gap:10,alignItems:'flex-start',fontSize:13,fontWeight:700,width:'100%',minWidth:0,lineHeight:1.35}}>
                     <input type="checkbox" checked={Boolean(dogEditor.first_appointment_fixed)} onChange={e=>setDogEditor({...dogEditor,first_appointment_fixed:e.target.checked})} style={{width:22,height:22,minWidth:22,flex:'0 0 22px',margin:0,padding:0}}/>
                     <span style={{minWidth:0,whiteSpace:'normal',overflowWrap:'anywhere'}}>Fixed time (otherwise the normal ±30 minute arrival window applies)</span>
@@ -2461,7 +2558,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged }) {
                 </div>}
               </div>}
             </div>
-            <div className="prototype-note" style={{marginTop:12}}>Usual service: Groom, Bath Only, Bath, Partial Groom, or Service Varies. Each service can have its own price and time. For a brand-new client, do not use their upcoming appointment as Last Groom or Last Bath — schedule the first visit separately above.</div>
+            <div className="prototype-note" style={{marginTop:12}}>Usual service: Groom, Bath Only, Bath, Partial Groom, or Service Varies. Each service can have its own price and time. For a brand-new client, use Add another dog for households with multiple dogs. Do not use an upcoming appointment as Last Groom or Last Bath — schedule the first visit separately above.</div>
             {dogMessage && <div className="login-message" style={{marginTop:10}}>{dogMessage}</div>}
             <div className="sheet-actions"><button className="ghost" onClick={()=>{setDogEditor(null);setNewClientOpen(false)}}>Cancel</button><button className="save" disabled={dogSaving} onClick={()=>saveDogForm(dogEditor,newClientOpen)}>{dogSaving?'Saving…':'Save'}</button></div>
           </div>
@@ -2969,47 +3066,408 @@ function CompletionSheet({appt,dogs,onClose,onSaved}) {
   </div>
 }
 
-function AssistantSheet({open,initial,onClose}) {
+function plannerClientGroups(dogs) {
+  return Object.values((dogs || []).reduce((map,row)=>{
+    const household = String(row?.household_id || row?.['Household ID'] || '').trim()
+    const owner = String(row?.owner || row?.Owner || '').trim()
+    const dog = String(row?.dog || row?.Dog || '').trim()
+    if (!owner || !dog) return map
+    const key = household ? `h:${household}` : `o:${owner.toLowerCase()}`
+    if (!map[key]) map[key] = {key,owner,household,rows:[]}
+    map[key].rows.push(row)
+    return map
+  },{})).sort((a,b)=>a.owner.localeCompare(b.owner))
+}
+
+function plannerActiveRow(row,todayKey=businessDateKey()) {
+  if (!row || !String(row.Owner || '').trim()) return false
+  const date = String(row.Date || '').slice(0,10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < todayKey) return false
+  const apptStatus = String(row['Appointment Status'] || '').trim().toLowerCase()
+  const completion = String(row['Completion Status'] || '').trim().toLowerCase()
+  const status = String(row.Status || '').trim().toLowerCase()
+  if (completion === 'completed') return false
+  if (['cancelled','canceled','moved to another week','missed','no show','no-show','noshow'].includes(apptStatus)) return false
+  if (['cancelled','canceled','rescheduled','completed','missed','no show','no-show','noshow'].includes(status)) return false
+  return true
+}
+
+function plannerResolveDate(text,todayKey=businessDateKey()) {
+  const lower = String(text || '').toLowerCase()
+  const today = new Date(`${todayKey}T12:00:00Z`)
+  if (/\btoday\b/.test(lower)) return todayKey
+  if (/\btomorrow\b/.test(lower)) {
+    today.setUTCDate(today.getUTCDate()+1)
+    return today.toISOString().slice(0,10)
+  }
+  const days = [
+    ['sunday',0],['sun',0],['monday',1],['mon',1],['tuesday',2],['tue',2],['tues',2],
+    ['wednesday',3],['wed',3],['thursday',4],['thu',4],['thur',4],['thurs',4],
+    ['friday',5],['fri',5],['saturday',6],['sat',6]
+  ]
+  for (const [name,target] of days) {
+    if (new RegExp(`\\b${name}\\b`).test(lower)) {
+      const delta = (target - today.getUTCDay() + 7) % 7
+      today.setUTCDate(today.getUTCDate()+delta)
+      return today.toISOString().slice(0,10)
+    }
+  }
+  const iso = lower.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/)
+  if (iso) return iso[0]
+  return ''
+}
+
+function plannerUsualService(row) {
+  let service = canonicalServiceLabel(row?.service_pattern || row?.['Service Pattern'] || '')
+  if (service === 'Service Varies' || !appointmentServiceOptions.includes(service)) {
+    const next = canonicalServiceLabel(row?.next_service || row?.['Next Service'] || '')
+    service = appointmentServiceOptions.includes(next) ? next : 'Groom'
+  }
+  return service
+}
+
+function plannerClientTotals(rows) {
+  return (rows || []).reduce((acc,row)=>{
+    const service = plannerUsualService(row)
+    const values = serviceDefaultsForDog(row,service)
+    acc.price += Number(values.price || 0)
+    acc.minutes += Number(values.minutes || 0)
+    acc.services.push(service)
+    return acc
+  },{price:0,minutes:0,services:[]})
+}
+
+function plannerQueryFilters(text,dogs) {
+  const lower = String(text || '').toLowerCase().replace(/[’]/g,"'")
+  const date = plannerResolveDate(lower)
+  const groomer = /\bhaley\b/.test(lower) ? 'Haley' : /\bjen\b/.test(lower) ? 'Jen' : ''
+  const priceMatch = lower.match(/\$\s*(\d+(?:\.\d+)?)\s*\+|(?:at least|over|more than)\s*\$?\s*(\d+(?:\.\d+)?)/)
+  const minPrice = Number(priceMatch?.[1] || priceMatch?.[2] || 0)
+  const hourMatch = lower.match(/(\d+(?:\.\d+)?)\s*(?:hour|hr)s?\b/)
+  const minuteMatch = lower.match(/(\d+)\s*(?:minute|min)s?\b/)
+  const maxMinutes = hourMatch ? Math.round(Number(hourMatch[1])*60) : minuteMatch ? Number(minuteMatch[1]) : 0
+  const overdueOnly = /\boverdue\b/.test(lower)
+  const unbookedOnly = /hasn['’]?t been booked|not booked back|booked back|unbooked/.test(lower)
+  const service = /partial\s*groom/.test(lower) ? 'Partial Groom' : /bath\s*only/.test(lower) ? 'Bath Only' : /\bbath\b/.test(lower) ? 'Bath' : /\bgroom\b/.test(lower) ? 'Groom' : ''
+  const areas = [...new Set((dogs || []).map(row=>canonicalAreaLabel(row?.area || row?.Area || '')).filter(Boolean))]
+    .sort((a,b)=>b.length-a.length)
+  let area = areas.find(label=>lower.includes(label.toLowerCase())) || ''
+  if (!area) {
+    const broad = [
+      ['woodlands','The Woodlands'],['montgomery','Montgomery'],['conroe','Conroe'],['spring','Spring'],
+      ['tomball','Tomball'],['magnolia','Old Magnolia'],['willis','Willis'],['woodforest','Woodforest'],
+      ['cypress','Cypress'],['hockley','Hockley'],['april sound','April Sound']
+    ]
+    const hit = broad.find(([needle])=>lower.includes(needle))
+    if (hit) area = hit[1]
+  }
+  const routeIntent = /route|closest|fill|opening|add|fit/.test(lower)
+  return {lower,date,groomer,minPrice,maxMinutes,overdueOnly,unbookedOnly,service,area,routeIntent}
+}
+
+function plannerDayLabel(dateKey) {
+  if (!dateKey) return ''
+  return new Date(`${dateKey}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric'})
+}
+
+function AssistantSheet({open,initial,onClose,dogs,onChoose}) {
   const [text,setText]=useState(initial||'')
-  const [asked,setAsked]=useState(Boolean(initial))
-  React.useEffect(()=>{ if(open){setText(initial||'');setAsked(Boolean(initial))} },[open,initial])
+  const [loading,setLoading]=useState(false)
+  const [error,setError]=useState('')
+  const [answer,setAnswer]=useState(null)
+
+  useEffect(()=>{
+    if(open){
+      setText(initial||'')
+      setLoading(false)
+      setError('')
+      setAnswer(null)
+    }
+  },[open,initial])
+
   if(!open)return null
-  const run=()=>{ if(text.trim())setAsked(true) }
+
+  const run = async (query=text) => {
+    const prompt = String(query || '').trim()
+    if (!prompt || loading) return
+    setText(prompt)
+    setLoading(true)
+    setError('')
+    setAnswer(null)
+    try {
+      if (!supabase) throw new Error('Your schedule connection is not configured.')
+      const today = businessDateKey()
+      const filters = plannerQueryFilters(prompt,dogs)
+      let targetDate = filters.date
+      if (!targetDate && filters.routeIntent) targetDate = today
+
+      const startWeek = mondayForDate(today)
+      const endDate = new Date(`${today}T12:00:00Z`)
+      endDate.setUTCDate(endDate.getUTCDate()+84)
+      const endWeek = mondayForDate(endDate.toISOString().slice(0,10))
+      const {data,error:loadError} = await supabase
+        .from('weekly_drafts')
+        .select('week_start,plan_json')
+        .gte('week_start',startWeek)
+        .lte('week_start',endWeek)
+        .order('week_start',{ascending:true})
+      if (loadError) throw loadError
+
+      const planRows = (data || []).flatMap(week=>Array.isArray(week.plan_json)?week.plan_json:[])
+      const activeRows = planRows.filter(row=>plannerActiveRow(row,today))
+      const bookedKeys = new Set()
+      for (const row of activeRows) {
+        const household = String(row['Household ID'] || '').trim()
+        const owner = String(row.Owner || row.Client || '').trim()
+        if (household) bookedKeys.add(`h:${household}`)
+        if (owner) bookedKeys.add(`o:${owner.toLowerCase()}`)
+      }
+
+      const dayAppointments = targetDate ? todayAppointments(planRows,targetDate,'All') : []
+      const weekday = targetDate ? new Date(`${targetDate}T12:00:00Z`).getUTCDay() : null
+      const dayCounts = dayAppointments.reduce((acc,appt)=>{
+        if (appt.groomer==='Jen' || appt.groomer==='Haley') acc[appt.groomer] += 1
+        return acc
+      },{Jen:0,Haley:0})
+      const dayAreas = [...new Set(dayAppointments.map(appt=>canonicalAreaLabel(appt.area)).filter(Boolean))]
+      const groups = plannerClientGroups(dogs)
+      const targetDay = new Date(`${targetDate || today}T12:00:00Z`)
+
+      let candidates = groups.map(client=>{
+        const ownerKey = `o:${client.owner.toLowerCase()}`
+        const booked = bookedKeys.has(client.key) || bookedKeys.has(ownerKey)
+        if (booked) return null
+
+        const due = clientDueInfo(client.rows,targetDate || today)
+        if (filters.overdueOnly && due.status !== 'Overdue') return null
+        if (!filters.unbookedOnly && !['Overdue','Due today','Due this week','Due soon','Upcoming','Not enough data'].includes(due.status)) return null
+
+        const lastDates = client.rows.flatMap(row=>[
+          String(row?.last_groom || row?.['Last Groom'] || '').slice(0,10),
+          String(row?.last_bath || row?.['Last Bath'] || '').slice(0,10)
+        ]).filter(value=>/^\d{4}-\d{2}-\d{2}$/.test(value)).sort()
+        const lastService = lastDates.at(-1) || ''
+        if (targetDate && lastService && !filters.unbookedOnly) {
+          const last = new Date(`${lastService}T12:00:00Z`)
+          const daysSince = Math.floor((targetDay-last)/86400000)
+          if (daysSince >= 0 && daysSince < 14) return null
+        }
+
+        const assigned = [...new Set(client.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))]
+        const exclusive = assigned.length===1 ? assigned[0] : ''
+        let targetGroomer = filters.groomer
+        if (!targetGroomer && targetDate) {
+          if (weekday===1 || weekday===5) targetGroomer='Haley'
+          else if (exclusive) targetGroomer=exclusive
+          else targetGroomer = dayCounts.Jen <= dayCounts.Haley ? 'Jen' : 'Haley'
+        }
+        if (!targetGroomer && exclusive) targetGroomer = exclusive
+        if (!targetGroomer) targetGroomer = 'Jen'
+        if (targetDate) {
+          if ((weekday===1 || weekday===5) && targetGroomer!=='Haley') return null
+          if (targetGroomer==='Jen' && ![2,3,4].includes(weekday)) return null
+          if (exclusive && exclusive!==targetGroomer) return null
+        } else if (filters.groomer && exclusive && exclusive!==filters.groomer) return null
+
+        const totals = plannerClientTotals(client.rows)
+        const price = Math.round(totals.price || 0)
+        const minutes = Math.max(30,Math.round(totals.minutes || 60))
+        if (filters.minPrice && price < filters.minPrice) return null
+        if (filters.maxMinutes && minutes > filters.maxMinutes) return null
+        if (filters.service && !totals.services.some(service=>service===filters.service || (filters.service==='Groom' && ['Groom','Partial Groom'].includes(service)))) return null
+
+        const area = canonicalAreaLabel(client.rows.map(row=>row?.area || row?.Area || '').find(Boolean) || '')
+        if (filters.area) {
+          const wanted = filters.area.toLowerCase().replace(/^the\s+/,'')
+          const actual = area.toLowerCase().replace(/^the\s+/,'')
+          if (!actual.includes(wanted) && !wanted.includes(actual)) return null
+        }
+        const suggestedTime = targetDate ? openingForDuration(dayAppointments,minutes,targetGroomer) : ''
+        if (targetDate && filters.routeIntent && !suggestedTime) return null
+
+        const duePoints = due.status==='Overdue' ? 110 : due.status==='Due today' ? 100 : due.status==='Due this week' ? 90 : due.status==='Due soon' ? 72 : due.status==='Upcoming' ? 40 : 10
+        const overdueBonus = due.days < 0 ? Math.min(30,Math.abs(due.days)) : 0
+        const areaPoints = filters.area ? 35 : (area && dayAreas.some(value=>value===area) ? 12 : 0)
+        const groomerPoints = dayAppointments.some(appt=>appt.groomer===targetGroomer) ? 8 : 0
+        const openingPoints = targetDate ? (suggestedTime ? 28 : -40) : 0
+        return {...client,due,booked:false,area,targetGroomer,price,minutes,suggestedTime,lastService,totals,
+          score:duePoints+overdueBonus+areaPoints+groomerPoints+openingPoints}
+      }).filter(Boolean)
+
+      candidates.sort((a,b)=>b.score-a.score || (a.due.dueDate || '9999').localeCompare(b.due.dueDate || '9999') || a.owner.localeCompare(b.owner))
+      candidates = candidates.slice(0,8)
+
+      if (targetDate && filters.routeIntent && candidates.length) {
+        const lookup = clientAddressLookup(dogs)
+        const cacheMs = 15*60*1000
+        const fetchRoute = async (stops,groomer) => {
+          if (!stops.length) return {totalMinutes:0,totalMiles:0,legs:[]}
+          const signature = stops.map(stop=>`${stop.id}:${stop.address}:${stop.time}`).join('|')
+          const cacheKey = `ask-planner-route-v1:${targetDate}:${groomer}:${signature}`
+          try {
+            const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null')
+            if (cached?.payload && Number(cached.savedAt) > Date.now()-cacheMs) return cached.payload
+          } catch {}
+          const response = await fetch('/api/google-route',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stops,groomer})})
+          const payload = await response.json().catch(()=>({}))
+          if (!response.ok) throw new Error(payload?.error || `Google route check failed (${response.status}).`)
+          try { localStorage.setItem(cacheKey,JSON.stringify({savedAt:Date.now(),payload})) } catch {}
+          return payload
+        }
+
+        const baseByGroomer = {}
+        const baseRoute = groomer => {
+          if (!baseByGroomer[groomer]) {
+            const existing = dayAppointments.filter(appt=>appt.groomer===groomer).slice().sort(compareAppointmentTimes)
+            const stops = existing.map((appt,index)=>({id:appt.id || `existing-${index}`,owner:appt.owner,address:appointmentAddress(appt,lookup),time:String(appt.time || '').trim()}))
+            baseByGroomer[groomer] = stops.some(stop=>!stop.address)
+              ? Promise.resolve({unavailable:true})
+              : fetchRoute(stops,groomer).catch(()=>({unavailable:true}))
+          }
+          return baseByGroomer[groomer]
+        }
+
+        const ranked = await Promise.all(candidates.map(async candidate=>{
+          const address = candidate.rows.map(fullClientAddress).find(Boolean) || ''
+          if (!address) return {...candidate,routeInfo:{unavailable:true,label:'Address needed'}}
+          const existing = dayAppointments.filter(appt=>appt.groomer===candidate.targetGroomer).slice().sort(compareAppointmentTimes)
+            .map((appt,index)=>({id:appt.id || `existing-${index}`,owner:appt.owner,address:appointmentAddress(appt,lookup),time:String(appt.time || '').trim(),appt}))
+          if (existing.some(stop=>!stop.address)) return {...candidate,routeInfo:{unavailable:true,label:'Existing stop needs address'}}
+          const candidateStop = {id:`ask-${candidate.key}`,owner:candidate.owner,address,time:candidate.suggestedTime,candidate:true}
+          const proposed = [...existing,candidateStop].sort((a,b)=>{
+            const first=clockMinutesForDisplay(a.time), second=clockMinutesForDisplay(b.time)
+            if (!Number.isFinite(first)) return 1
+            if (!Number.isFinite(second)) return -1
+            return first-second
+          })
+          try {
+            const [base,next] = await Promise.all([baseRoute(candidate.targetGroomer),fetchRoute(proposed.map(({appt,candidate,...stop})=>stop),candidate.targetGroomer)])
+            if (base?.unavailable) return {...candidate,routeInfo:{unavailable:true,label:'Google route unavailable'}}
+            const addedMinutes=Math.max(0,Number(next.totalMinutes||0)-Number(base.totalMinutes||0))
+            const addedMiles=Math.max(0,Number(next.totalMiles||0)-Number(base.totalMiles||0))
+            const candidateIndex = proposed.findIndex(stop=>stop.id===candidateStop.id)
+            const previous = candidateIndex>0 ? proposed[candidateIndex-1] : null
+            const following = candidateIndex>=0 && candidateIndex<proposed.length-1 ? proposed[candidateIndex+1] : null
+            const legIn = (next.legs || []).find(leg=>leg.toId===candidateStop.id)
+            const legOut = (next.legs || []).find(leg=>leg.fromId===candidateStop.id)
+            const candidateMinutes = clockMinutesForDisplay(candidate.suggestedTime)
+            const risks = []
+            if (previous?.appt && Number.isFinite(candidateMinutes)) {
+              const previousStart = clockMinutesForDisplay(previous.time)
+              const arrival = previousStart + appointmentDurationMinutes(previous.appt) + Number(legIn?.minutes || 0)
+              if (Number.isFinite(previousStart) && arrival > candidateMinutes + 30) risks.push(`${Math.ceil(arrival-(candidateMinutes+30))} min past ${candidate.owner}'s window`)
+            }
+            if (following?.appt && Number.isFinite(candidateMinutes)) {
+              const followingStart = clockMinutesForDisplay(following.time)
+              const arrival = candidateMinutes + Number(candidate.minutes || 0) + Number(legOut?.minutes || 0)
+              if (Number.isFinite(followingStart) && arrival > followingStart + 30) risks.push(`${Math.ceil(arrival-(followingStart+30))} min past ${following.owner}'s window`)
+            }
+            const routeRisk = risks.length>0
+            let routePoints = addedMinutes<=10?55:addedMinutes<=20?42:addedMinutes<=30?28:addedMinutes<=45?12:addedMinutes<=60?0:-20
+            if (routeRisk) routePoints -= 65
+            const label = routeRisk ? 'Route risk' : addedMinutes<=15?'Great route':addedMinutes<=30?'Good route':addedMinutes<=45?'Okay route':'Longer drive'
+            return {...candidate,score:candidate.score+routePoints,routeInfo:{addedMinutes,addedMiles,label,routeRisk,risks}}
+          } catch {
+            return {...candidate,routeInfo:{unavailable:true,label:'Google route unavailable'}}
+          }
+        }))
+        candidates = ranked.sort((a,b)=>b.score-a.score || a.owner.localeCompare(b.owner)).slice(0,6)
+      } else {
+        candidates = candidates.slice(0,6)
+      }
+
+      const title = filters.unbookedOnly && !targetDate
+        ? 'Clients not booked back yet'
+        : targetDate ? `Best fits for ${plannerDayLabel(targetDate)}` : 'Best client matches'
+      const summaryBits = []
+      if (filters.overdueOnly) summaryBits.push('overdue only')
+      if (filters.area) summaryBits.push(filters.area)
+      if (filters.groomer) summaryBits.push(filters.groomer)
+      if (filters.minPrice) summaryBits.push(`$${filters.minPrice}+`)
+      if (filters.maxMinutes) summaryBits.push(`${filters.maxMinutes} min or less`)
+      if (filters.service) summaryBits.push(filters.service)
+      setAnswer({title,targetDate,filters,candidates,summary:summaryBits.join(' · ')})
+    } catch(err) {
+      setError(err?.message || 'Ask Planner could not check your schedule.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const choose = candidate => {
+    if (!answer?.targetDate) return
+    onClose?.()
+    onChoose?.({
+      date:answer.targetDate,
+      clientKey:candidate.key,
+      groomer:candidate.targetGroomer,
+      time:candidate.suggestedTime || defaultFirstStopTime(candidate.targetGroomer),
+      fixed:false,
+      note:'Added from Ask Planner'
+    })
+  }
+
+  const quick = [
+    'Who should I add Wednesday?',
+    'Who is overdue near The Woodlands?',
+    "Who hasn't been booked back yet?"
+  ]
+
   return (
     <div className="sheet-backdrop" onMouseDown={onClose}>
-      <div className="assistant-sheet" onMouseDown={e=>e.stopPropagation()}>
+      <div className="assistant-sheet" onMouseDown={e=>e.stopPropagation()} style={{maxHeight:'90dvh',overflowY:'auto'}}>
         <div className="sheet-handle"/>
         <div className="assistant-title">
           <div className="ai-orb"><WandSparkles size={19}/></div>
-          <div><span>Ask Planner</span><strong>What do you want to do?</strong></div>
+          <div><span>Ask Planner</span><strong>What do you want to figure out?</strong></div>
           <button className="icon-btn" onClick={onClose}><X size={18}/></button>
         </div>
         <div className="quick-prompts">
-          {["Fill Thursday’s cancellation","Who is overdue near The Woodlands?","Move Leah to 9:30 and reroute"].map(q=>
-            <button key={q} onClick={()=>{setText(q);setAsked(true)}}>{q}</button>
-          )}
+          {quick.map(q=><button key={q} onClick={()=>run(q)}>{q}</button>)}
         </div>
         <div className="ai-input">
-          <Sparkles size={18}/><input value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==='Enter'&&run()} placeholder="Ask me to fill, move, route, or find clients…"/>
-          <button onClick={run}>Ask</button>
+          <Sparkles size={18}/><input value={text} disabled={loading} onChange={e=>setText(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();run()}}} placeholder="Try: I need a $100+ groom Thursday…"/>
+          <button disabled={loading || !text.trim()} onClick={()=>run()}>{loading?'Checking…':'Ask'}</button>
         </div>
-        {asked&&(
+
+        {loading && <div className="prototype-note" style={{marginTop:12}}>Checking clients, future bookings, schedule openings, and Google route fit…</div>}
+        {error && <div className="login-message" role="alert" style={{marginTop:12}}>{error}</div>}
+        {answer && !loading && (
           <div className="ai-result">
-            <div className="result-head"><CheckCircle2 size={17}/><strong>Best options for this opening</strong></div>
-            <p>I’d keep this opening in The Woodlands and contact these clients first:</p>
-            <div className="candidate-list">
-              {fillCandidates.map((c,i)=>(
-                <button className="candidate" key={c.owner}>
-                  <div className="candidate-rank">{i+1}</div>
-                  <div className="candidate-main"><strong>{c.owner} · {c.dogs}</strong><span>{c.due} · {c.minutes} min · {c.drive} min drive</span></div>
-                  <div className="candidate-price">${c.price}</div>
-                </button>
-              ))}
-            </div>
-            <div className="ai-actions"><button className="ghost"><MessageCircle size={16}/>Draft texts</button><button className="save"><Sparkles size={16}/>Add top choice</button></div>
+            <div className="result-head"><CheckCircle2 size={17}/><strong>{answer.title}</strong></div>
+            {answer.summary && <p style={{marginTop:6}}>{answer.summary}</p>}
+            {answer.candidates.length===0 ? (
+              <div className="prototype-note">I couldn't find an unbooked client that matches those filters right now. Try widening the area, price, service length, or day.</div>
+            ) : (
+              <div className="candidate-list">
+                {answer.candidates.map((candidate,index)=>{
+                  const dogsLabel = candidate.rows.map(row=>String(row?.dog || row?.Dog || '').trim()).filter(Boolean).join(' + ')
+                  const routeText = candidate.routeInfo?.unavailable
+                    ? candidate.routeInfo.label
+                    : candidate.routeInfo
+                      ? `${candidate.routeInfo.label} · adds about ${Math.round(candidate.routeInfo.addedMinutes)} min${candidate.routeInfo.addedMiles>=0.1?` · ${candidate.routeInfo.addedMiles.toFixed(1)} mi`:''}`
+                      : ''
+                  return (
+                    <button className="candidate" key={candidate.key} type="button" onClick={()=>choose(candidate)} style={{textAlign:'left',width:'100%',cursor:answer.targetDate?'pointer':'default'}}>
+                      <div className="candidate-rank">{index+1}</div>
+                      <div className="candidate-main">
+                        <strong>{candidate.owner} · {dogsLabel}</strong>
+                        <span>{candidate.due.detail} · {candidate.area || 'Area not set'} · {candidate.minutes} min</span>
+                        {answer.targetDate && <span>{candidate.targetGroomer}{candidate.suggestedTime?` · ${displayClockTime(candidate.suggestedTime)}`:' · choose time manually'}</span>}
+                        {routeText && <span style={{fontWeight:candidate.routeInfo?.routeRisk?800:700,color:candidate.routeInfo?.routeRisk?'#9a5d19':undefined}}>{routeText}</span>}
+                        {candidate.routeInfo?.routeRisk && candidate.routeInfo.risks?.[0] && <span style={{color:'#9a5d19'}}>⚠ {candidate.routeInfo.risks[0]}</span>}
+                      </div>
+                      <div className="candidate-price">${candidate.price}</div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+            {answer.candidates.length>0 && answer.targetDate && <div className="prototype-note" style={{marginTop:10}}>Tap a client to open Add Appointment with the day, client, groomer, and suggested time filled in. You can review everything before saving.</div>}
+            {answer.candidates.length>0 && !answer.targetDate && <div className="prototype-note" style={{marginTop:10}}>This is a client list, not a schedule change. Ask with a day, like “Who should I add Thursday?”, to get appointment-ready suggestions.</div>}
           </div>
         )}
-        <div className="prototype-note">Prototype: this shows the intended AI workflow. The production version would connect this bar to the scheduling engine and AI backend.</div>
+        <div className="prototype-note" style={{marginTop:12,textAlign:'left'}}>Ask Planner reads your current clients and schedule. For day-specific questions it also uses your saved groomer rules, appointment lengths, and Google route data.</div>
       </div>
     </div>
   )
@@ -3288,7 +3746,7 @@ export default function App() {
         setSaveMessage(message)
         setScheduleRevision(value=>value+1)
       }}/>
-      <AssistantSheet open={assistant.open} initial={assistant.initial} onClose={()=>setAssistant({open:false,initial:''})}/>
+      <AssistantSheet open={assistant.open} initial={assistant.initial} dogs={dogs} onClose={()=>setAssistant({open:false,initial:''})} onChoose={preset=>{ setAssistant({open:false,initial:''}); setAddAppointment({open:true,date:preset.date,preset}) }}/>
     </div>
   )
 }
