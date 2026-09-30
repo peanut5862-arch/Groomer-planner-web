@@ -723,6 +723,9 @@ function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,onFillOpening,com
 
   const statusLabel = weekRecord?.status === 'confirmed' ? 'Confirmed week' : 'Draft week'
   const weekEnd = addDays(weekStart,4)
+  const weeklyRevenue = visibleAppointments.reduce((sum,appt)=>sum+(Number.isFinite(appt.price)?appt.price:0),0)
+  const weeklyCompleted = visibleAppointments.filter(appt=>appt.completed).length
+  const weeklyMissingPrices = visibleAppointments.some(appt=>!Number.isFinite(appt.price))
 
   return (
     <section>
@@ -755,6 +758,20 @@ function Week({onAsk,onOpen,onComplete,onUndo,onAddAppointment,onFillOpening,com
           </button>
         ))}
       </div>
+
+      {!loading && !error && weekRecord && (
+        <>
+          <div className="eyebrow" style={{margin:'16px 0 12px'}}>
+            {statusLabel} · {groomer === 'All' ? 'Both groomers' : groomer}
+          </div>
+          <div className="stats-row">
+            <Stat label="Stops" value={visibleAppointments.length}/>
+            <Stat label="Week total" value={new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(weeklyRevenue)}/>
+            <Stat label="Completed" value={`${weeklyCompleted}/${visibleAppointments.length}`}/>
+          </div>
+          {weeklyMissingPrices && <div className="prototype-note">Some appointments have no price saved; the week total includes known prices only.</div>}
+        </>
+      )}
 
       {loading && <div className="prototype-note">Loading your saved week…</div>}
       {error && <div className="login-message">{error}</div>}
