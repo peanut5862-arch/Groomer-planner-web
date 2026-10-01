@@ -2248,7 +2248,7 @@ function canonicalServiceLabel(value) {
   return String(value || '').trim()
 }
 
-const appointmentServiceOptions = ['Groom','Bath Only','Bath','Partial Groom']
+const appointmentServiceOptions = ['Groom','Bath Only','Partial Groom']
 
 function parseAppointmentDogServices(value) {
   return String(value || '').split(',').map(part=>part.trim()).filter(Boolean).map(part=>{
@@ -2386,6 +2386,10 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
   const [paymentPreference,setPaymentPreference] = useState('')
   const [paymentPreferenceSaving,setPaymentPreferenceSaving] = useState(false)
   const [paymentPreferenceMessage,setPaymentPreferenceMessage] = useState('')
+  const [clientDetails,setClientDetails] = useState(null)
+  const [clientDetailsSaving,setClientDetailsSaving] = useState(false)
+  const [clientDetailsMessage,setClientDetailsMessage] = useState('')
+  const [dogDetailsLookup,setDogDetailsLookup] = useState({})
 
   const valueOf = (row, ...keys) => {
     for (const key of keys) {
@@ -2592,6 +2596,9 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
       setAreaMessage('')
       setPaymentPreference('')
       setPaymentPreferenceMessage('')
+      setClientDetails(null)
+      setClientDetailsMessage('')
+      setDogDetailsLookup({})
       return
     }
     setAreaEditValue(canonicalAreaLabel(selectedClient.area))
@@ -2624,6 +2631,44 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
     loadPaymentPreference()
     return () => { cancelled = true }
   }, [selectedClient?.household, selectedClient?.owner])
+
+  useEffect(() => {
+    if (!selectedClient || !supabase) return
+    let cancelled = false
+    const loadExtraDetails = async () => {
+      const householdId = String(selectedClient.household || '').trim()
+      if (!householdId) return
+      const [{data:clientRow,error:clientError},{data:dogRows,error:dogError}] = await Promise.all([
+        supabase.from('client_details').select('*').eq('household_id',householdId).maybeSingle(),
+        supabase.from('dog_details').select('*').eq('household_id',householdId)
+      ])
+      if (cancelled) return
+      if (clientError) setClientDetailsMessage(clientError.message || 'Could not load client details.')
+      const base = clientRow || {}
+      setClientDetails({
+        gate_access_notes:base.gate_access_notes || '', parking_notes:base.parking_notes || '', client_notes:base.client_notes || '',
+        preferred_appointment_window:base.preferred_appointment_window || '', preferred_time:base.preferred_time || '',
+        contact_preference:base.contact_preference || 'Text', alternate_contact_name:base.alternate_contact_name || '', alternate_contact_phone:base.alternate_contact_phone || '',
+        fixed_time:Boolean(base.fixed_time), receipt_preference:base.receipt_preference || '', client_status:base.client_status || 'Active'
+      })
+      if (!dogError) setDogDetailsLookup(Object.fromEntries((dogRows || []).map(row => [normalizedKey(row.dog_name),row])))
+    }
+    loadExtraDetails()
+    return () => { cancelled = true }
+  }, [selectedClient?.household, selectedClient?.owner, revision])
+
+  const saveClientDetails = async () => {
+    if (!selectedClient || !clientDetails || !supabase || clientDetailsSaving) return
+    setClientDetailsSaving(true); setClientDetailsMessage('')
+    try {
+      const {error} = await supabase.from('client_details').upsert({
+        household_id:String(selectedClient.household || '').trim(), owner_name:String(selectedClient.owner || '').trim(), ...clientDetails, updated_at:new Date().toISOString()
+      },{onConflict:'household_id'})
+      if (error) throw error
+      setClientDetailsMessage('Client details saved.')
+    } catch(err) { setClientDetailsMessage(err?.message || 'Could not save client details.') }
+    finally { setClientDetailsSaving(false) }
+  }
 
   const savePaymentPreference = async () => {
     if (!selectedClient || !supabase || paymentPreferenceSaving) return
@@ -2697,7 +2742,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
   const blankAdditionalDog = () => ({
     dog:'', service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'',
     groom_minutes:'', bath_minutes:'', partial_groom_minutes:'', frequency_weeks:'', frequency_mode:'preset',
-    last_groom:'', last_bath:'', prior_service:'no', first_appointment_service:'Groom'
+    last_groom:'', last_bath:'', prior_service:'no', first_appointment_service:'Groom', grooming_notes:'', behavior_notes:'', medical_notes:'', alternate_service:false, alternate_service_1:'Groom', alternate_service_2:'Bath Only'
   })
   const blankDogForm = (client = null) => ({
     household_id:client?.household || '', owner:client?.owner || '', original_dog:'', dog:'',
@@ -2705,7 +2750,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
     address:client?.address || '', city:client?.city || '', state:client?.state || 'TX', zip:client?.zip || '',
     service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'', groom_minutes:'', bath_minutes:'', partial_groom_minutes:'', frequency_weeks:'', frequency_mode:'preset', last_groom:'', last_bath:'',
     prior_service:'no', first_appointment_booked:false, first_appointment_date:'', first_appointment_groomer:'Jen', first_appointment_time:'09:00', first_appointment_service:'Groom', first_appointment_fixed:false, first_appointment_override:false,
-    additional_dogs:[]
+    additional_dogs:[], gate_access_notes:'', parking_notes:'', client_notes:'', preferred_appointment_window:'', preferred_time:'', contact_preference:'Text', alternate_contact_name:'', alternate_contact_phone:'', fixed_time:false, receipt_preference:'', client_status:'Active', grooming_notes:'', behavior_notes:'', medical_notes:'', alternate_service:false, alternate_service_1:'Groom', alternate_service_2:'Bath Only'
   })
 
   const editDog = row => {
@@ -2728,7 +2773,13 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
     last_groom:String(valueOf(row,'last_groom','Last Groom','last_groom_date','Last Groom Date') || '').slice(0,10),
     last_bath:String(valueOf(row,'last_bath','Last Bath','last_bath_date','Last Bath Date') || '').slice(0,10),
     prior_service:(valueOf(row,'last_groom','Last Groom','last_groom_date','Last Groom Date') || valueOf(row,'last_bath','Last Bath','last_bath_date','Last Bath Date')) ? 'yes' : 'no',
-    first_appointment_booked:false, first_appointment_date:'', first_appointment_groomer:'Jen', first_appointment_time:'09:00', first_appointment_service:'Groom', first_appointment_fixed:false, first_appointment_override:false, additional_dogs:[]
+    first_appointment_booked:false, first_appointment_date:'', first_appointment_groomer:'Jen', first_appointment_time:'09:00', first_appointment_service:'Groom', first_appointment_fixed:false, first_appointment_override:false, additional_dogs:[],
+    grooming_notes:dogDetailsLookup[normalizedKey(valueOf(row,'dog','Dog'))]?.grooming_notes || '',
+    behavior_notes:dogDetailsLookup[normalizedKey(valueOf(row,'dog','Dog'))]?.behavior_notes || '',
+    medical_notes:dogDetailsLookup[normalizedKey(valueOf(row,'dog','Dog'))]?.medical_notes || '',
+    alternate_service:Boolean(dogDetailsLookup[normalizedKey(valueOf(row,'dog','Dog'))]?.alternate_service),
+    alternate_service_1:dogDetailsLookup[normalizedKey(valueOf(row,'dog','Dog'))]?.alternate_service_1 || 'Groom',
+    alternate_service_2:dogDetailsLookup[normalizedKey(valueOf(row,'dog','Dog'))]?.alternate_service_2 || 'Bath Only'
     })
     setSelectedClient(null)
   }
@@ -2797,6 +2848,39 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
         savedCount += 1
         const savedRow = Array.isArray(data) ? data[0] : data
         householdId = String(savedRow?.household_id || savedRow?.householdId || householdId || '').trim() || null
+      }
+
+      // Save the household/client extras after we know the final household id.
+      if (householdId && closeNew) {
+        const {error:clientDetailsError} = await supabase.from('client_details').upsert({
+          household_id:householdId, owner_name:String(form.owner||'').trim(),
+          gate_access_notes:String(form.gate_access_notes||'').trim() || null,
+          parking_notes:String(form.parking_notes||'').trim() || null,
+          client_notes:String(form.client_notes||'').trim() || null,
+          preferred_appointment_window:String(form.preferred_appointment_window||'').trim() || null,
+          preferred_time:String(form.preferred_time||'').trim() || null,
+          contact_preference:String(form.contact_preference||'').trim() || null,
+          alternate_contact_name:String(form.alternate_contact_name||'').trim() || null,
+          alternate_contact_phone:String(form.alternate_contact_phone||'').trim() || null,
+          fixed_time:Boolean(form.fixed_time), receipt_preference:String(form.receipt_preference||'').trim() || null,
+          client_status:String(form.client_status||'Active').trim() || 'Active', updated_at:new Date().toISOString()
+        },{onConflict:'household_id'})
+        if (clientDetailsError) throw clientDetailsError
+      }
+      if (householdId) {
+        for (const dogForm of dogsToSave) {
+          const {error:dogDetailsError} = await supabase.from('dog_details').upsert({
+            household_id:householdId, dog_name:String(dogForm.dog||'').trim(),
+            grooming_notes:String(dogForm.grooming_notes||'').trim() || null,
+            behavior_notes:String(dogForm.behavior_notes||'').trim() || null,
+            medical_notes:String(dogForm.medical_notes||'').trim() || null,
+            alternate_service:Boolean(dogForm.alternate_service),
+            alternate_service_1:dogForm.alternate_service ? (dogForm.alternate_service_1 || 'Groom') : null,
+            alternate_service_2:dogForm.alternate_service ? (dogForm.alternate_service_2 || 'Bath Only') : null,
+            updated_at:new Date().toISOString()
+          },{onConflict:'household_id,dog_name'})
+          if (dogDetailsError) throw dogDetailsError
+        }
       }
 
       if (bookingFirstVisit) {
@@ -3132,10 +3216,24 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
               <label style={{gridColumn:'1 / -1'}}>Address<input value={dogEditor.address} onChange={e=>setDogEditor({...dogEditor,address:e.target.value})}/></label>
               <label>City<input value={dogEditor.city} onChange={e=>setDogEditor({...dogEditor,city:e.target.value})}/></label>
               <label>ZIP<input value={dogEditor.zip} onChange={e=>setDogEditor({...dogEditor,zip:e.target.value})}/></label>
+              {newClientOpen && <>
+                <div className="eyebrow" style={{gridColumn:'1 / -1',marginTop:8}}>Client preferences</div>
+                <label style={{gridColumn:'1 / -1'}}>Gate / access instructions<textarea value={dogEditor.gate_access_notes || ''} onChange={e=>setDogEditor({...dogEditor,gate_access_notes:e.target.value})}/></label>
+                <label style={{gridColumn:'1 / -1'}}>Parking / driveway notes<textarea value={dogEditor.parking_notes || ''} onChange={e=>setDogEditor({...dogEditor,parking_notes:e.target.value})}/></label>
+                <label style={{gridColumn:'1 / -1'}}>Client notes<textarea value={dogEditor.client_notes || ''} onChange={e=>setDogEditor({...dogEditor,client_notes:e.target.value})}/></label>
+                <label>Preferred window<select value={dogEditor.preferred_appointment_window || ''} onChange={e=>setDogEditor({...dogEditor,preferred_appointment_window:e.target.value})}><option value="">No preference</option><option>Morning</option><option>Midday</option><option>Afternoon</option></select></label>
+                <label>Usual time<input type="time" value={dogEditor.preferred_time || ''} onChange={e=>setDogEditor({...dogEditor,preferred_time:e.target.value})}/></label>
+                <label>Contact preference<select value={dogEditor.contact_preference || 'Text'} onChange={e=>setDogEditor({...dogEditor,contact_preference:e.target.value})}><option>Text</option><option>Call</option><option>Either</option></select></label>
+                <label>Status<select value={dogEditor.client_status || 'Active'} onChange={e=>setDogEditor({...dogEditor,client_status:e.target.value})}><option>Active</option><option>Paused</option><option>Inactive</option></select></label>
+                <label>Alternate contact<input value={dogEditor.alternate_contact_name || ''} onChange={e=>setDogEditor({...dogEditor,alternate_contact_name:e.target.value})}/></label>
+                <label>Alternate phone<input value={dogEditor.alternate_contact_phone || ''} onChange={e=>setDogEditor({...dogEditor,alternate_contact_phone:e.target.value})}/></label>
+                <label>Receipt preference<select value={dogEditor.receipt_preference || ''} onChange={e=>setDogEditor({...dogEditor,receipt_preference:e.target.value})}><option value="">No preference</option><option>Text receipt</option><option>Email receipt</option><option>No receipt</option></select></label>
+                <label style={{display:'flex',gap:10,alignItems:'center'}}><input type="checkbox" checked={Boolean(dogEditor.fixed_time)} onChange={e=>setDogEditor({...dogEditor,fixed_time:e.target.checked})} style={{width:20,height:20}}/>Fixed time / do not move</label>
+              </>}
               <label style={{gridColumn:'1 / -1'}}>Service<select value={dogEditor.service} onChange={e=>{
                 const next=e.target.value
                 setDogEditor({...dogEditor,service:next,first_appointment_service:appointmentServiceOptions.includes(next)?next:(dogEditor.first_appointment_service || 'Groom')})
-              }}><option>Groom</option><option>Bath Only</option><option>Bath</option><option>Partial Groom</option><option>Service Varies</option></select></label>
+              }}><option>Groom</option><option>Bath Only</option><option>Partial Groom</option><option>Service Varies</option></select></label>
               <label>Groom price<input type="number" inputMode="decimal" value={dogEditor.groom_price} onChange={e=>setDogEditor({...dogEditor,groom_price:e.target.value})}/></label>
               <label>Bath price<input type="number" inputMode="decimal" value={dogEditor.bath_price} onChange={e=>setDogEditor({...dogEditor,bath_price:e.target.value})}/></label>
               <label>Partial Groom price<input type="number" inputMode="decimal" value={dogEditor.partial_groom_price} onChange={e=>setDogEditor({...dogEditor,partial_groom_price:e.target.value})}/></label>
@@ -3160,6 +3258,12 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                 <label>Last groom<input type="date" value={dogEditor.last_groom} onChange={e=>setDogEditor({...dogEditor,last_groom:e.target.value})}/></label>
                 <label>Last bath<input type="date" value={dogEditor.last_bath} onChange={e=>setDogEditor({...dogEditor,last_bath:e.target.value})}/></label>
               </>}
+              <div className="eyebrow" style={{gridColumn:'1 / -1',marginTop:8}}>Dog notes</div>
+              <label style={{gridColumn:'1 / -1'}}>Grooming notes<textarea value={dogEditor.grooming_notes || ''} onChange={e=>setDogEditor({...dogEditor,grooming_notes:e.target.value})}/></label>
+              <label style={{gridColumn:'1 / -1'}}>Behavior / handling notes<textarea value={dogEditor.behavior_notes || ''} onChange={e=>setDogEditor({...dogEditor,behavior_notes:e.target.value})}/></label>
+              <label style={{gridColumn:'1 / -1'}}>Medical / senior notes<textarea value={dogEditor.medical_notes || ''} onChange={e=>setDogEditor({...dogEditor,medical_notes:e.target.value})}/></label>
+              <label style={{gridColumn:'1 / -1',display:'flex',gap:10,alignItems:'center'}}><input type="checkbox" checked={Boolean(dogEditor.alternate_service)} onChange={e=>setDogEditor({...dogEditor,alternate_service:e.target.checked})} style={{width:20,height:20}}/>Alternate services</label>
+              {dogEditor.alternate_service && <><label>Alternate 1<select value={dogEditor.alternate_service_1 || 'Groom'} onChange={e=>setDogEditor({...dogEditor,alternate_service_1:e.target.value})}><option>Groom</option><option>Partial Groom</option><option>Bath Only</option></select></label><label>Alternate 2<select value={dogEditor.alternate_service_2 || 'Bath Only'} onChange={e=>setDogEditor({...dogEditor,alternate_service_2:e.target.value})}><option>Groom</option><option>Partial Groom</option><option>Bath Only</option></select></label></>}
               {newClientOpen && dogEditor.prior_service==='no' && <div className="prototype-note" style={{gridColumn:'1 / -1',margin:0}}>
                 Leave Last Groom / Last Bath blank. When you complete their first appointment, Grooming Planner will automatically save that service as their real history.
               </div>}
@@ -3174,7 +3278,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                   <label>Service<select value={extraDog.service || 'Groom'} onChange={e=>{
                     const next=e.target.value
                     updateAdditionalDog(index,{service:next,first_appointment_service:appointmentServiceOptions.includes(next)?next:(extraDog.first_appointment_service || 'Groom')})
-                  }}><option>Groom</option><option>Bath Only</option><option>Bath</option><option>Partial Groom</option><option>Service Varies</option></select></label>
+                  }}><option>Groom</option><option>Bath Only</option><option>Partial Groom</option><option>Service Varies</option></select></label>
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
                     <label>Groom price<input type="number" inputMode="decimal" value={extraDog.groom_price || ''} onChange={e=>updateAdditionalDog(index,{groom_price:e.target.value})}/></label>
                     <label>Bath price<input type="number" inputMode="decimal" value={extraDog.bath_price || ''} onChange={e=>updateAdditionalDog(index,{bath_price:e.target.value})}/></label>
@@ -3193,6 +3297,11 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                     <option value="__custom__">Other</option>
                   </select></label>
                   {extraDog.frequency_mode==='custom' && <label>Custom weeks<input type="number" min="1" inputMode="numeric" value={extraDog.frequency_weeks || ''} onChange={e=>updateAdditionalDog(index,{frequency_weeks:e.target.value})}/></label>}
+                  <label>Grooming notes<textarea value={extraDog.grooming_notes || ''} onChange={e=>updateAdditionalDog(index,{grooming_notes:e.target.value})}/></label>
+                  <label>Behavior / handling<textarea value={extraDog.behavior_notes || ''} onChange={e=>updateAdditionalDog(index,{behavior_notes:e.target.value})}/></label>
+                  <label>Medical / senior<textarea value={extraDog.medical_notes || ''} onChange={e=>updateAdditionalDog(index,{medical_notes:e.target.value})}/></label>
+                  <label style={{display:'flex',gap:10,alignItems:'center'}}><input type="checkbox" checked={Boolean(extraDog.alternate_service)} onChange={e=>updateAdditionalDog(index,{alternate_service:e.target.checked})} style={{width:20,height:20}}/>Alternate services</label>
+                  {extraDog.alternate_service && <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}><label>Alternate 1<select value={extraDog.alternate_service_1 || 'Groom'} onChange={e=>updateAdditionalDog(index,{alternate_service_1:e.target.value})}><option>Groom</option><option>Partial Groom</option><option>Bath Only</option></select></label><label>Alternate 2<select value={extraDog.alternate_service_2 || 'Bath Only'} onChange={e=>updateAdditionalDog(index,{alternate_service_2:e.target.value})}><option>Groom</option><option>Partial Groom</option><option>Bath Only</option></select></label></div>}
                   <label>Have we serviced this dog before?<select value={extraDog.prior_service || 'no'} onChange={e=>updateAdditionalDog(index,{prior_service:e.target.value,last_groom:e.target.value==='no'?'':extraDog.last_groom,last_bath:e.target.value==='no'?'':extraDog.last_bath})}>
                     <option value="no">No — first visit with us</option>
                     <option value="yes">Yes — we have service history</option>
@@ -3239,7 +3348,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                 </div>}
               </div>}
             </div>
-            <div className="prototype-note" style={{marginTop:12}}>Usual service: Groom, Bath Only, Bath, Partial Groom, or Service Varies. Each service can have its own price and time. For a brand-new client, use Add another dog for households with multiple dogs. Do not use an upcoming appointment as Last Groom or Last Bath — schedule the first visit separately above.</div>
+            <div className="prototype-note" style={{marginTop:12}}>Usual service: Groom, Bath Only, Partial Groom, or Service Varies. Each service can have its own price and time. For a brand-new client, use Add another dog for households with multiple dogs. Do not use an upcoming appointment as Last Groom or Last Bath — schedule the first visit separately above.</div>
             {dogMessage && <div className="login-message" style={{marginTop:10}}>{dogMessage}</div>}
             <div className="sheet-actions"><button className="ghost" onClick={()=>{setDogEditor(null);setNewClientOpen(false)}}>Cancel</button><button className="save" disabled={dogSaving} onClick={()=>saveDogForm(dogEditor,newClientOpen)}>{dogSaving?'Saving…':'Save'}</button></div>
           </div>
@@ -3414,6 +3523,22 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
               </div>}
               {paymentPreferenceMessage && <div className="prototype-note" style={{gridColumn:'1 / -1',marginTop:-2}} role="status">{paymentPreferenceMessage}</div>}
 
+              {!viewerMode && clientDetails && <div style={{gridColumn:'1 / -1',borderTop:'1px solid #ebe8e2',paddingTop:14,display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                <div className="eyebrow" style={{gridColumn:'1 / -1'}}>Client preferences</div>
+                <label style={{gridColumn:'1 / -1'}}>Gate / access<textarea value={clientDetails.gate_access_notes} onChange={e=>setClientDetails({...clientDetails,gate_access_notes:e.target.value})}/></label>
+                <label style={{gridColumn:'1 / -1'}}>Parking / driveway<textarea value={clientDetails.parking_notes} onChange={e=>setClientDetails({...clientDetails,parking_notes:e.target.value})}/></label>
+                <label style={{gridColumn:'1 / -1'}}>Client notes<textarea value={clientDetails.client_notes} onChange={e=>setClientDetails({...clientDetails,client_notes:e.target.value})}/></label>
+                <label>Preferred window<select value={clientDetails.preferred_appointment_window} onChange={e=>setClientDetails({...clientDetails,preferred_appointment_window:e.target.value})}><option value="">No preference</option><option>Morning</option><option>Midday</option><option>Afternoon</option></select></label>
+                <label>Usual time<input type="time" value={clientDetails.preferred_time} onChange={e=>setClientDetails({...clientDetails,preferred_time:e.target.value})}/></label>
+                <label>Contact<select value={clientDetails.contact_preference} onChange={e=>setClientDetails({...clientDetails,contact_preference:e.target.value})}><option>Text</option><option>Call</option><option>Either</option></select></label>
+                <label>Status<select value={clientDetails.client_status} onChange={e=>setClientDetails({...clientDetails,client_status:e.target.value})}><option>Active</option><option>Paused</option><option>Inactive</option></select></label>
+                <label>Alternate contact<input value={clientDetails.alternate_contact_name} onChange={e=>setClientDetails({...clientDetails,alternate_contact_name:e.target.value})}/></label>
+                <label>Alternate phone<input value={clientDetails.alternate_contact_phone} onChange={e=>setClientDetails({...clientDetails,alternate_contact_phone:e.target.value})}/></label>
+                <label>Receipt<select value={clientDetails.receipt_preference} onChange={e=>setClientDetails({...clientDetails,receipt_preference:e.target.value})}><option value="">No preference</option><option>Text receipt</option><option>Email receipt</option><option>No receipt</option></select></label>
+                <label style={{display:'flex',gap:10,alignItems:'center'}}><input type="checkbox" checked={Boolean(clientDetails.fixed_time)} onChange={e=>setClientDetails({...clientDetails,fixed_time:e.target.checked})} style={{width:20,height:20}}/>Fixed time / do not move</label>
+                <div style={{gridColumn:'1 / -1',display:'flex',justifyContent:'space-between',gap:10,alignItems:'center'}}><span style={{fontSize:11,color:'#7b828e'}}>{clientDetailsMessage}</span><button type="button" className="secondary-btn" disabled={clientDetailsSaving} onClick={saveClientDetails}>{clientDetailsSaving?'Saving…':'Save client details'}</button></div>
+              </div>}
+
               <label>
                 Dogs
                 <input readOnly value={selectedClient.dogs.join(', ') || '—'} />
@@ -3481,6 +3606,12 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                         </div>
                       </div>
 
+                      {dogDetailsLookup[normalizedKey(dog)] && <div style={{fontSize:11.5,color:'#59616e',marginTop:9,lineHeight:1.5}}>
+                        {dogDetailsLookup[normalizedKey(dog)].grooming_notes && <div><strong>Grooming:</strong> {dogDetailsLookup[normalizedKey(dog)].grooming_notes}</div>}
+                        {dogDetailsLookup[normalizedKey(dog)].behavior_notes && <div><strong>Handling:</strong> {dogDetailsLookup[normalizedKey(dog)].behavior_notes}</div>}
+                        {dogDetailsLookup[normalizedKey(dog)].medical_notes && <div><strong>Medical/senior:</strong> {dogDetailsLookup[normalizedKey(dog)].medical_notes}</div>}
+                        {dogDetailsLookup[normalizedKey(dog)].alternate_service && <div><strong>Alternates:</strong> {dogDetailsLookup[normalizedKey(dog)].alternate_service_1} ↔ {dogDetailsLookup[normalizedKey(dog)].alternate_service_2}</div>}
+                      </div>}
                       <div style={{fontSize:11.5,color:'#7b828e',marginTop:9,lineHeight:1.5}}>
                         {[servicePattern,
                           price !== '' ? `$${price}` : '',
