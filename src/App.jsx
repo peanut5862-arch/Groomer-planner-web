@@ -1,10 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { supabase } from './supabase.js'
+import { AppLauncher } from '@capacitor/app-launcher'
+import { Capacitor } from '@capacitor/core'
 import {
   CalendarDays, ChevronLeft, ChevronRight, Clock3, Dog, Ellipsis, Home,
   MapPin, Plus, Route, Search, Settings, Sparkles, Users, WalletCards, X,
   CheckCircle2, MessageCircle, WandSparkles, LogOut, Share2
 } from 'lucide-react'
+
+
+const API_ORIGIN = 'https://groomer-planner.vercel.app'
+function apiUrl(path) {
+  const clean = String(path || '')
+  return Capacitor.isNativePlatform() ? `${API_ORIGIN}${clean}` : clean
+}
 
 function dismissFormKeyboard() {
   if (typeof document === 'undefined') return
@@ -208,7 +217,7 @@ function paymentReminderMessage({owner,total,paymentMethod}) {
     ? n.toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:0,maximumFractionDigits:2})
     : '$0'
   const detail = paymentMethodDetails(paymentMethod)
-  return `Hi ${first}! today's grooming total is ${amount}. Thank you!${detail ? `\n\n${detail}` : ''}`
+  return `Hi ${first}! Today's grooming total is ${amount}. Thank you!${detail ? `\n\n${detail}` : ''}`
 }
 
 function backInAreaMessage({date}) {
@@ -277,7 +286,7 @@ async function googleEtaToAppointment(appt,dogs) {
   const address = appointmentAddress(appt,lookup)
   if (!address) throw new Error(`Add a street address for ${appt?.owner || 'this client'} first.`)
   const position = await currentPosition()
-  const response = await fetch('/api/google-route',{
+  const response = await fetch(apiUrl('/api/google-route'),{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
@@ -312,6 +321,34 @@ function openCall(phone) {
 function googleMapsAddressUrl(address) {
   const clean = String(address || '').trim()
   return clean ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(clean)}` : ''
+}
+
+async function openExternalUrl(url) {
+  const clean = String(url || '').trim()
+  if (!clean) return
+
+  // On iOS, force Google Maps URLs into the installed Google Maps app.
+  // `comgooglemapsurl://` accepts an existing google.com/maps URL after
+  // replacing the normal http/https scheme.
+  const isGoogleMapsUrl = /^https?:\/\/(?:www\.)?google\.[^/]+\/maps\//i.test(clean)
+    || /^https?:\/\/maps\.google\.[^/]+\//i.test(clean)
+  const nativeGoogleUrl = isGoogleMapsUrl
+    ? clean.replace(/^https?:\/\//i,'comgooglemapsurl://')
+    : clean
+
+  try {
+    const nativeResult = await AppLauncher.openUrl({ url: nativeGoogleUrl })
+    if (nativeResult?.completed !== false) return
+  } catch {}
+
+  // Fall back to the universal Google Maps URL. AppLauncher can return
+  // { completed: false } without throwing, so check the result explicitly.
+  try {
+    const webResult = await AppLauncher.openUrl({ url: clean })
+    if (webResult?.completed !== false) return
+  } catch {}
+
+  window.location.href = clean
 }
 
 async function shareAppointmentAddress({owner,address}) {
@@ -896,6 +933,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
   const [result,setResult] = useState(null)
   const [updatedAt,setUpdatedAt] = useState(null)
   const [expanded,setExpanded] = useState(false)
+  const [mapOpenMessage,setMapOpenMessage] = useState('')
 
   const sorted = (Array.isArray(appointments) ? appointments : [])
     .filter(appt=>!appt?.inactive)
@@ -928,6 +966,24 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
   const suggestedDeparture = Number.isFinite(firstStopMinutes) && firstDriveMinutes > 0
     ? displayClockFromMinutes(firstStopMinutes - Math.ceil(firstDriveMinutes))
     : ''
+
+  const fallbackMapsUrl = (() => {
+    if (!stops.length) return ''
+    const addresses = stops.map(stop=>String(stop?.address || '').trim()).filter(Boolean)
+    if (!addresses.length) return ''
+    const params = new URLSearchParams({
+      api:'1',
+      travelmode:'driving',
+      dir_action:'navigate'
+    })
+    // The server route is home -> clients -> home. When the native payload omits mapsUrl,
+    // still give Google Maps the scheduled client stops; the user can start navigation from
+    // their current/home position.
+    params.set('destination', addresses[addresses.length - 1])
+    if (addresses.length > 1) params.set('waypoints', addresses.slice(0,-1).join('|'))
+    return `https://www.google.com/maps/dir/?${params.toString()}`
+  })()
+  const routeMapsUrl = String(result?.mapsUrl || fallbackMapsUrl || '').trim()
 
   const checkTraffic = async ({force=false}={}) => {
     if (mixedGroomers) {
@@ -962,7 +1018,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
     setLoading(true)
     setError('')
     try {
-      const response = await fetch('/api/google-route',{
+      const response = await fetch(apiUrl('/api/google-route'),{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({stops,groomer:routeGroomer})
@@ -991,6 +1047,34 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
     // Route signature captures the stops/times/groomer. Other values are derived from it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[signature])
+
+  const openRouteInGoogleMaps = async () => {
+    const routeUrl = routeMapsUrl
+    if (!routeUrl) {
+      setMapOpenMessage('No Google Maps route URL was returned.')
+      return
+    }
+
+    const nativeUrl = routeUrl.replace(/^https?:\/\//i,'comgooglemapsurl://')
+    setMapOpenMessage('Checking Google Maps…')
+
+    try {
+      const check = await AppLauncher.canOpenUrl({url:'comgooglemapsurl://'})
+      if (!check?.value) {
+        setMapOpenMessage('iOS is not detecting the Google Maps app.')
+        return
+      }
+
+      const opened = await AppLauncher.openUrl({url:nativeUrl})
+      if (opened?.completed) {
+        setMapOpenMessage('')
+      } else {
+        setMapOpenMessage('iOS detected Google Maps but did not open the route.')
+      }
+    } catch (err) {
+      setMapOpenMessage(`Google Maps launch error: ${err?.message || 'unknown error'}`)
+    }
+  }
 
   if (!sorted.length) return null
 
@@ -1036,10 +1120,14 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
           )}
 
           <div style={{marginTop:9,display:'flex',alignItems:'center',justifyContent:'space-between',gap:'8px 14px',flexWrap:'wrap'}}>
-            {!viewerMode && result?.mapsUrl && (
-              <a href={result.mapsUrl} target="_blank" rel="noreferrer" style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:11,fontWeight:800,color:'#17223f',textDecoration:'none',whiteSpace:'nowrap'}}>
+            {!viewerMode && routeMapsUrl && (
+              <button
+                type="button"
+                onClick={openRouteInGoogleMaps}
+                style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:11,fontWeight:800,color:'#17223f',textDecoration:'none',whiteSpace:'nowrap',border:'none',background:'transparent',padding:0,cursor:'pointer'}}
+              >
                 <MapPin size={14}/>Open in Google Maps
-              </a>
+              </button>
             )}
 
             <button
@@ -1050,6 +1138,12 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
               {expanded ? 'Hide route details ▴' : 'View route details ▾'}
             </button>
           </div>
+
+          {mapOpenMessage && (
+            <div className="login-message" role="status" style={{marginTop:8}}>
+              {mapOpenMessage}
+            </div>
+          )}
 
           {expanded && (
             <div style={{marginTop:8,paddingTop:8,borderTop:'1px solid #eceef1'}}>
@@ -1729,7 +1823,7 @@ function FillOpeningGoogleResults({candidates,dateKey,dayAppointments,dogs,onCho
         if (cached?.payload && Number(cached?.savedAt) > Date.now() - cacheMs) return cached.payload
       } catch {}
 
-      const response = await fetch('/api/google-route',{
+      const response = await fetch(apiUrl('/api/google-route'),{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({stops,groomer})
@@ -2398,6 +2492,37 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
   const dogEditorRef = useRef(initialDraft.current)
   const [newClientOpen, setNewClientOpen] = useState(Boolean(initialDraft.current))
   const [draftMessage, setDraftMessage] = useState(initialDraft.current ? 'Your unfinished client was restored.' : '')
+
+  // Keep the page behind the New Client sheet completely still on iPhone/WKWebView.
+  // Without this, iOS can pan the whole document when the keyboard or a focused field appears.
+  useEffect(() => {
+    if (!newClientOpen || !dogEditor) return undefined
+    const scrollY = window.scrollY || window.pageYOffset || 0
+    const body = document.body
+    const previous = {
+      position: body.style.position,
+      top: body.style.top,
+      left: body.style.left,
+      right: body.style.right,
+      width: body.style.width,
+      overflow: body.style.overflow
+    }
+    body.style.position = 'fixed'
+    body.style.top = `-${scrollY}px`
+    body.style.left = '0'
+    body.style.right = '0'
+    body.style.width = '100%'
+    body.style.overflow = 'hidden'
+    return () => {
+      body.style.position = previous.position
+      body.style.top = previous.top
+      body.style.left = previous.left
+      body.style.right = previous.right
+      body.style.width = previous.width
+      body.style.overflow = previous.overflow
+      window.scrollTo(0, scrollY)
+    }
+  }, [newClientOpen, Boolean(dogEditor)])
   const setDogEditor = value => {
     const next = typeof value === 'function' ? value(dogEditorRef.current) : value
     dogEditorRef.current = next
@@ -3250,8 +3375,8 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
       </div>
 
       {dogEditor && (
-        <div className="sheet-backdrop" onMouseDown={() => { setDogEditor(null); if(newClientOpen) setNewClientOpen(false) }}>
-          <div className="sheet" onMouseDown={e=>e.stopPropagation()} style={{maxHeight:'90dvh',overflowY:'auto'}}>
+        <div className={`sheet-backdrop ${newClientOpen ? 'new-client-backdrop' : ''}`} onMouseDown={() => { setDogEditor(null); if(newClientOpen) setNewClientOpen(false) }}>
+          <div className={`sheet ${newClientOpen ? 'new-client-sheet' : ''}`} onMouseDown={e=>e.stopPropagation()} style={newClientOpen ? undefined : {maxHeight:'90dvh',overflowY:'auto'}}>
             <div className="sheet-handle" />
             <div className="sheet-title"><div><span>{dogEditor.original_dog ? 'Edit dog' : newClientOpen ? 'New client' : 'Add dog'}</span><h2>{dogEditor.original_dog || dogEditor.dog || 'Dog details'}</h2></div><button className="icon-btn" onClick={()=>{setDogEditor(null);setNewClientOpen(false)}}><X size={18}/></button></div>
             <div className="form-grid dog-entry-form">
@@ -4245,7 +4370,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
             if (cached?.payload && Number(cached.savedAt) > Date.now()-15*60*1000) routePayload = cached.payload
           } catch {}
           if (!routePayload) {
-            const response = await fetch('/api/google-route',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({groomer,stops:routeRows.map(({row,...stop})=>stop)})})
+            const response = await fetch(apiUrl('/api/google-route'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({groomer,stops:routeRows.map(({row,...stop})=>stop)})})
             const payload = await response.json().catch(()=>({}))
             if (response.ok) {
               routePayload = payload
@@ -4867,7 +4992,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
             const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null')
             if (cached?.payload && Number(cached.savedAt) > Date.now()-cacheMs) return cached.payload
           } catch {}
-          const response = await fetch('/api/google-route',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stops,groomer})})
+          const response = await fetch(apiUrl('/api/google-route'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stops,groomer})})
           const payload = await response.json().catch(()=>({}))
           if (!response.ok) throw new Error(payload?.error || `Google route check failed (${response.status}).`)
           try { localStorage.setItem(cacheKey,JSON.stringify({savedAt:Date.now(),payload})) } catch {}
@@ -5265,7 +5390,7 @@ function GroomerStopCard({appt,onFinish,finishing}) {
         )}
 
         <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>
-          {mapsUrl && <a href={mapsUrl} target="_blank" rel="noreferrer" className="day-ai" style={{textDecoration:'none',display:'inline-flex',alignItems:'center',gap:6}}><MapPin size={14}/>Open address</a>}
+          {mapsUrl && <button type="button" onClick={()=>openExternalUrl(mapsUrl)} className="day-ai" style={{display:'inline-flex',alignItems:'center',gap:6}}><MapPin size={14}/>Open address</button>}
           {canFinish && <button type="button" className="save" disabled={finishing || !paymentType} onClick={()=>onFinish(appt,paymentType)}>{finishing?'Saving…':'✓ Finished'}</button>}
           {appt.finished && <div style={{fontSize:12,fontWeight:900,color:'#267447',padding:'8px 0'}}>✓ Finished</div>}
         </div>
@@ -5593,6 +5718,56 @@ const plannerThemeCss = `
   .viewer-banner strong{color:#17223f;}
   .viewer-badge{display:inline-flex;align-items:center;padding:4px 7px;border-radius:999px;background:#e8eef8;color:#30466d;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;}
   .viewer-banner button{border:1px solid #ccd5e3;background:#fff;color:#31415f;border-radius:9px;padding:6px 9px;font-weight:800;font-size:11px;}
+  /* Native iPhone/WKWebView: anchor New Client to the viewport so opening the keyboard
+     scrolls only the form instead of shifting the whole app around. */
+  .new-client-backdrop{
+    position:fixed!important;
+    inset:0!important;
+    overflow:hidden!important;
+    overscroll-behavior:none!important;
+    align-items:stretch!important;
+    justify-content:stretch!important;
+  }
+  .new-client-sheet{
+    position:fixed!important;
+    left:0!important;
+    right:0!important;
+    top:max(env(safe-area-inset-top),8px)!important;
+    bottom:0!important;
+    width:100%!important;
+    max-width:none!important;
+    max-height:none!important;
+    height:auto!important;
+    margin:0!important;
+    transform:none!important;
+    overflow-x:hidden!important;
+    overflow-y:auto!important;
+    overscroll-behavior:contain!important;
+    -webkit-overflow-scrolling:touch;
+    border-radius:22px 22px 0 0!important;
+    padding-bottom:max(18px,env(safe-area-inset-bottom))!important;
+    box-sizing:border-box!important;
+  }
+  .new-client-sheet .sheet-title{
+    position:sticky;
+    top:0;
+    z-index:30;
+    background:#fff;
+    margin-left:-2px;
+    margin-right:-2px;
+    padding-top:8px;
+    padding-bottom:10px;
+  }
+  .new-client-sheet .sheet-actions{
+    position:sticky;
+    bottom:calc(-1 * max(18px,env(safe-area-inset-bottom)));
+    z-index:30;
+    background:#fff;
+    padding-top:10px;
+    padding-bottom:max(18px,env(safe-area-inset-bottom));
+    border-top:1px solid #eee9e2;
+  }
+
   .sheet .dog-entry-form,.sheet .additional-dog-card{grid-template-columns:repeat(2,minmax(0,1fr));min-width:0;}
   .dog-entry-form > *,.additional-dog-card > *{min-width:0;}
   .dog-entry-form label{display:grid;gap:6px;min-width:0;}
