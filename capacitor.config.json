@@ -1,0 +1,8 @@
+{
+  "appId": "com.pawpular.groomingplanner",
+  "appName": "Grooming Planner",
+  "webDir": "dist",
+  "ios": {
+    "contentInset": "automatic"
+  }
+}
