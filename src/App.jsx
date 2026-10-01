@@ -15,6 +15,64 @@ function apiUrl(path) {
   return Capacitor.isNativePlatform() ? `${API_ORIGIN}${clean}` : clean
 }
 
+
+function useRememberScrollPosition(key) {
+  const lastScrollRef = useRef(0)
+
+  useEffect(() => {
+    const storageKey = `grooming-scroll:${key}`
+    let timers = []
+
+    const save = () => {
+      const y = window.scrollY || document.documentElement.scrollTop || 0
+      if (y >= 0) {
+        lastScrollRef.current = y
+        sessionStorage.setItem(storageKey, String(y))
+      }
+    }
+
+    const restore = () => {
+      const saved = Number(sessionStorage.getItem(storageKey) || lastScrollRef.current || 0)
+
+      timers.forEach(clearTimeout)
+      timers = []
+
+      const doRestore = () => {
+        if (saved > 0) window.scrollTo(0, saved)
+      }
+
+      doRestore()
+      timers.push(setTimeout(doRestore, 50))
+      timers.push(setTimeout(doRestore, 200))
+      timers.push(setTimeout(doRestore, 500))
+      timers.push(setTimeout(doRestore, 1000))
+    }
+
+    const visibility = () => {
+      if (document.visibilityState === 'hidden') save()
+      else restore()
+    }
+
+    const onScroll = () => save()
+
+    window.addEventListener('scroll', onScroll, { passive:true })
+    window.addEventListener('pagehide', save)
+    window.addEventListener('pageshow', restore)
+    document.addEventListener('visibilitychange', visibility)
+
+    restore()
+
+    return () => {
+      save()
+      timers.forEach(clearTimeout)
+      window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('pagehide', save)
+      window.removeEventListener('pageshow', restore)
+      document.removeEventListener('visibilitychange', visibility)
+    }
+  }, [key])
+}
+
 function dismissFormKeyboard() {
   if (typeof document === 'undefined') return
   const active = document.activeElement
@@ -5798,7 +5856,9 @@ export default function App() {
   const [dogs, setDogs] = useState([])
   const [dataLoading, setDataLoading] = useState(false)
   const [dataError, setDataError] = useState('')
-  const [tab,setTab]=useState('Today')
+  const [tab,setTab]=useState(()=>sessionStorage.getItem('grooming-owner-tab') || 'Today')
+  useRememberScrollPosition(`owner:${tab}`)
+  useEffect(()=>{ sessionStorage.setItem('grooming-owner-tab', tab) },[tab])
   const [editing,setEditing]=useState(null)
   const [scheduleRevision,setScheduleRevision]=useState(0)
   const [saveMessage,setSaveMessage]=useState('')
