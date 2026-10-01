@@ -795,7 +795,7 @@ function routeKey(value) {
 function fullClientAddress(row) {
   const street = routeValue(row,'address','Address')
   const city = routeValue(row,'city','City')
-  const state = routeValue(row,'state','State') 
+  const state = routeValue(row,'state','State')
   const zip = routeValue(row,'zip','ZIP','Zip')
   if (!street) return ''
   const cityState = [city,state].filter(Boolean).join(', ')
@@ -4886,7 +4886,7 @@ function GroomerStopCard({appt,onFinish,finishing}) {
           <div style={{marginTop:12,padding:10,border:'1px solid #e0e5ec',borderRadius:12,background:'#f8fafc'}}>
             <div style={{fontSize:11,fontWeight:900,color:'#34415f',marginBottom:7}}>Payment received</div>
             <div style={{display:'flex',gap:7,flexWrap:'wrap'}}>
-              {['Cash','Check','Electronic'].map(type=>(
+              {['Cash/Check','Electronic'].map(type=>(
                 <button
                   key={type}
                   type="button"
@@ -4905,7 +4905,7 @@ function GroomerStopCard({appt,onFinish,finishing}) {
                 </button>
               ))}
             </div>
-            {!paymentType && <div style={{fontSize:10.5,color:'#7b828e',marginTop:7}}>Choose Cash, Check, or Electronic before marking this stop finished.</div>}
+            {!paymentType && <div style={{fontSize:10.5,color:'#7b828e',marginTop:7}}>Choose Cash/Check or Electronic before marking this stop finished.</div>}
           </div>
         )}
 
