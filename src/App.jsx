@@ -795,7 +795,7 @@ function routeKey(value) {
 function fullClientAddress(row) {
   const street = routeValue(row,'address','Address')
   const city = routeValue(row,'city','City')
-  const state = routeValue(row,'state','State') || 'TX'
+  const state = routeValue(row,'state','State') 
   const zip = routeValue(row,'zip','ZIP','Zip')
   if (!street) return ''
   const cityState = [city,state].filter(Boolean).join(', ')
