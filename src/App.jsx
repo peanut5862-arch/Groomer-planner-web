@@ -6,6 +6,12 @@ import {
   CheckCircle2, MessageCircle, WandSparkles, LogOut, Share2
 } from 'lucide-react'
 
+function dismissFormKeyboard() {
+  if (typeof document === 'undefined') return
+  const active = document.activeElement
+  if (active?.matches('input, select, textarea, [contenteditable="true"]')) active.blur()
+}
+
 const demoDays = [
   { day:'Mon', date:29, groomer:'Haley', appointments:[
     { time:'8:30', owner:'Leslie Dunn', dogs:'Gus', area:'The Woodlands', price:120, drive:18, status:'confirmed' },
@@ -2681,6 +2687,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
 
   const saveClientDetails = async () => {
     if (!selectedClient || !clientDetails || !supabase || clientDetailsSaving) return
+    dismissFormKeyboard()
     setClientDetailsSaving(true); setClientDetailsMessage('')
     try {
       const {error} = await supabase.from('client_details').upsert({
@@ -2694,6 +2701,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
 
   const savePaymentPreference = async () => {
     if (!selectedClient || !supabase || paymentPreferenceSaving) return
+    dismissFormKeyboard()
     const key = paymentPreferenceKey(selectedClient.household,selectedClient.owner)
     if (!key) {
       setPaymentPreferenceMessage('Could not identify this client.')
@@ -2869,6 +2877,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
       if (firstVisitOverrideReasons.length && !form.first_appointment_override) { setDogMessage('Turn on Manual override to book this first visit outside the normal groomer rules.'); return }
     }
 
+    dismissFormKeyboard()
     setDogSaving(true); setDogMessage('')
     let savedCount = 0
     try {
@@ -3245,7 +3254,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
           <div className="sheet" onMouseDown={e=>e.stopPropagation()} style={{maxHeight:'90dvh',overflowY:'auto'}}>
             <div className="sheet-handle" />
             <div className="sheet-title"><div><span>{dogEditor.original_dog ? 'Edit dog' : newClientOpen ? 'New client' : 'Add dog'}</span><h2>{dogEditor.original_dog || dogEditor.dog || 'Dog details'}</h2></div><button className="icon-btn" onClick={()=>{setDogEditor(null);setNewClientOpen(false)}}><X size={18}/></button></div>
-            <div className="form-grid">
+            <div className="form-grid dog-entry-form">
               <label>Owner<input value={dogEditor.owner} onChange={e=>setDogEditor({...dogEditor,owner:e.target.value})}/></label>
               <label>Dog name<input value={dogEditor.dog} onChange={e=>setDogEditor({...dogEditor,dog:e.target.value})}/></label>
               <label>Phone<input value={dogEditor.phone} onChange={e=>setDogEditor({...dogEditor,phone:e.target.value})}/></label>
@@ -3328,25 +3337,23 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                 Leave Last Groom / Last Bath blank. When you complete their first appointment, Grooming Planner will automatically save that service as their real history.
               </div>}
 
-              {newClientOpen && <div style={{gridColumn:'1 / -1',display:'grid',gap:10}}>
-                {(dogEditor.additional_dogs || []).map((extraDog,index) => <div key={index} style={{border:'1px solid #e7e4de',borderRadius:16,padding:14,display:'grid',gap:10,background:'#fbfaf8'}}>
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}}>
+              {newClientOpen && <div className="additional-dogs" style={{gridColumn:'1 / -1',display:'grid',gridTemplateColumns:'minmax(0,1fr)',gap:10,minWidth:0}}>
+                {(dogEditor.additional_dogs || []).map((extraDog,index) => <div key={index} className="form-grid additional-dog-card" style={{minWidth:0,border:'1px solid #e7e4de',borderRadius:16,padding:14,display:'grid',gap:10,background:'#fbfaf8'}}>
+                  <div style={{gridColumn:'1 / -1',display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,minWidth:0}}>
                     <strong style={{fontSize:15,color:'#172038'}}>Dog {index + 2}</strong>
                     <button type="button" className="secondary-btn" onClick={()=>removeAdditionalDog(index)} style={{padding:'8px 10px'}}>Remove</button>
                   </div>
-                  <label>Dog name<input value={extraDog.dog || ''} onChange={e=>updateAdditionalDog(index,{dog:e.target.value})}/></label>
-                  <label>Service<select value={extraDog.service || 'Groom'} onChange={e=>{
+                  <label style={{gridColumn:'1 / -1'}}>Dog name<input value={extraDog.dog || ''} onChange={e=>updateAdditionalDog(index,{dog:e.target.value})}/></label>
+                  <label style={{gridColumn:'1 / -1'}}>Service<select value={extraDog.service || 'Groom'} onChange={e=>{
                     const next=e.target.value
                     updateAdditionalDog(index,{service:next,first_appointment_service:appointmentServiceOptions.includes(next)?next:(extraDog.first_appointment_service || 'Groom')})
                   }}><option>Groom</option><option>Bath Only</option><option>Partial Groom</option><option>Service Varies</option></select></label>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-                    <label>Groom price<input type="number" inputMode="decimal" value={extraDog.groom_price || ''} onChange={e=>updateAdditionalDog(index,{groom_price:e.target.value})}/></label>
-                    <label>Bath price<input type="number" inputMode="decimal" value={extraDog.bath_price || ''} onChange={e=>updateAdditionalDog(index,{bath_price:e.target.value})}/></label>
-                    <label>Partial price<input type="number" inputMode="decimal" value={extraDog.partial_groom_price || ''} onChange={e=>updateAdditionalDog(index,{partial_groom_price:e.target.value})}/></label>
-                    <label>Groom time<input type="number" inputMode="numeric" value={extraDog.groom_minutes || ''} onChange={e=>updateAdditionalDog(index,{groom_minutes:e.target.value})}/></label>
-                    <label>Bath time<input type="number" inputMode="numeric" value={extraDog.bath_minutes || ''} onChange={e=>updateAdditionalDog(index,{bath_minutes:e.target.value})}/></label>
-                    <label>Partial time<input type="number" inputMode="numeric" value={extraDog.partial_groom_minutes || ''} onChange={e=>updateAdditionalDog(index,{partial_groom_minutes:e.target.value})}/></label>
-                  </div>
+                  <label>Groom price<input type="number" inputMode="decimal" value={extraDog.groom_price || ''} onChange={e=>updateAdditionalDog(index,{groom_price:e.target.value})}/></label>
+                  <label>Bath price<input type="number" inputMode="decimal" value={extraDog.bath_price || ''} onChange={e=>updateAdditionalDog(index,{bath_price:e.target.value})}/></label>
+                  <label>Partial Groom price<input type="number" inputMode="decimal" value={extraDog.partial_groom_price || ''} onChange={e=>updateAdditionalDog(index,{partial_groom_price:e.target.value})}/></label>
+                  <label>Groom time (min)<input type="number" inputMode="numeric" value={extraDog.groom_minutes || ''} onChange={e=>updateAdditionalDog(index,{groom_minutes:e.target.value})}/></label>
+                  <label>Bath time (min)<input type="number" inputMode="numeric" value={extraDog.bath_minutes || ''} onChange={e=>updateAdditionalDog(index,{bath_minutes:e.target.value})}/></label>
+                  <label>Partial Groom time (min)<input type="number" inputMode="numeric" value={extraDog.partial_groom_minutes || ''} onChange={e=>updateAdditionalDog(index,{partial_groom_minutes:e.target.value})}/></label>
                   <label>Frequency (weeks)<select value={extraDog.frequency_mode==='custom'?'__custom__':String(extraDog.frequency_weeks || '')} onChange={e=>{
                     const value=e.target.value
                     if(value==='__custom__') updateAdditionalDog(index,{frequency_mode:'custom',frequency_weeks:commonFrequencyOptions.includes(String(extraDog.frequency_weeks || ''))?'':extraDog.frequency_weeks})
@@ -3357,19 +3364,20 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                     <option value="__custom__">Other</option>
                   </select></label>
                   {extraDog.frequency_mode==='custom' && <label>Custom weeks<input type="number" min="1" inputMode="numeric" value={extraDog.frequency_weeks || ''} onChange={e=>updateAdditionalDog(index,{frequency_weeks:e.target.value})}/></label>}
-                  <label>Grooming notes<textarea value={extraDog.grooming_notes || ''} onChange={e=>updateAdditionalDog(index,{grooming_notes:e.target.value})}/></label>
-                  <label>Behavior / handling<textarea value={extraDog.behavior_notes || ''} onChange={e=>updateAdditionalDog(index,{behavior_notes:e.target.value})}/></label>
-                  <label>Medical / senior<textarea value={extraDog.medical_notes || ''} onChange={e=>updateAdditionalDog(index,{medical_notes:e.target.value})}/></label>
-                  <label style={{display:'flex',gap:10,alignItems:'center'}}><input type="checkbox" checked={Boolean(extraDog.alternate_service)} onChange={e=>updateAdditionalDog(index,{alternate_service:e.target.checked})} style={{width:20,height:20}}/>Alternate services</label>
-                  {extraDog.alternate_service && <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}><label>Alternate 1<select value={extraDog.alternate_service_1 || 'Groom'} onChange={e=>updateAdditionalDog(index,{alternate_service_1:e.target.value})}><option>Groom</option><option>Partial Groom</option><option>Bath Only</option></select></label><label>Alternate 2<select value={extraDog.alternate_service_2 || 'Bath Only'} onChange={e=>updateAdditionalDog(index,{alternate_service_2:e.target.value})}><option>Groom</option><option>Partial Groom</option><option>Bath Only</option></select></label></div>}
-                  <label>Have we serviced this dog before?<select value={extraDog.prior_service || 'no'} onChange={e=>updateAdditionalDog(index,{prior_service:e.target.value,last_groom:e.target.value==='no'?'':extraDog.last_groom,last_bath:e.target.value==='no'?'':extraDog.last_bath})}>
+                  <label style={{gridColumn:'1 / -1'}}>Have we serviced this dog before?<select value={extraDog.prior_service || 'no'} onChange={e=>updateAdditionalDog(index,{prior_service:e.target.value,last_groom:e.target.value==='no'?'':extraDog.last_groom,last_bath:e.target.value==='no'?'':extraDog.last_bath})}>
                     <option value="no">No — first visit with us</option>
                     <option value="yes">Yes — we have service history</option>
                   </select></label>
-                  {extraDog.prior_service==='yes' && <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                  {extraDog.prior_service==='yes' && <>
                     <label>Last groom<input type="date" value={extraDog.last_groom || ''} onChange={e=>updateAdditionalDog(index,{last_groom:e.target.value})}/></label>
                     <label>Last bath<input type="date" value={extraDog.last_bath || ''} onChange={e=>updateAdditionalDog(index,{last_bath:e.target.value})}/></label>
-                  </div>}
+                  </>}
+                  <div className="eyebrow" style={{gridColumn:'1 / -1',marginTop:8}}>Dog notes</div>
+                  <label style={{gridColumn:'1 / -1'}}>Grooming notes<textarea value={extraDog.grooming_notes || ''} onChange={e=>updateAdditionalDog(index,{grooming_notes:e.target.value})}/></label>
+                  <label style={{gridColumn:'1 / -1'}}>Behavior / handling notes<textarea value={extraDog.behavior_notes || ''} onChange={e=>updateAdditionalDog(index,{behavior_notes:e.target.value})}/></label>
+                  <label style={{gridColumn:'1 / -1'}}>Medical / senior notes<textarea value={extraDog.medical_notes || ''} onChange={e=>updateAdditionalDog(index,{medical_notes:e.target.value})}/></label>
+                  <label style={{gridColumn:'1 / -1',display:'flex',gap:10,alignItems:'center'}}><input type="checkbox" checked={Boolean(extraDog.alternate_service)} onChange={e=>updateAdditionalDog(index,{alternate_service:e.target.checked})} style={{width:20,height:20}}/>Alternate services</label>
+                  {extraDog.alternate_service && <><label>Alternate 1<select value={extraDog.alternate_service_1 || 'Groom'} onChange={e=>updateAdditionalDog(index,{alternate_service_1:e.target.value})}><option>Groom</option><option>Partial Groom</option><option>Bath Only</option></select></label><label>Alternate 2<select value={extraDog.alternate_service_2 || 'Bath Only'} onChange={e=>updateAdditionalDog(index,{alternate_service_2:e.target.value})}><option>Groom</option><option>Partial Groom</option><option>Bath Only</option></select></label></>}
                 </div>)}
                 <button type="button" className="secondary-btn" onClick={()=>setDogEditor(current=>({...current,additional_dogs:[...(current.additional_dogs || []),blankAdditionalDog()]}))} style={{justifyContent:'center',padding:'12px 14px'}}>
                   <Plus size={16}/> Add another dog
@@ -5585,6 +5593,21 @@ const plannerThemeCss = `
   .viewer-banner strong{color:#17223f;}
   .viewer-badge{display:inline-flex;align-items:center;padding:4px 7px;border-radius:999px;background:#e8eef8;color:#30466d;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;}
   .viewer-banner button{border:1px solid #ccd5e3;background:#fff;color:#31415f;border-radius:9px;padding:6px 9px;font-weight:800;font-size:11px;}
+  .sheet .dog-entry-form,.sheet .additional-dog-card{grid-template-columns:repeat(2,minmax(0,1fr));min-width:0;}
+  .dog-entry-form > *,.additional-dog-card > *{min-width:0;}
+  .dog-entry-form label{display:grid;gap:6px;min-width:0;}
+  .dog-entry-form input:not([type="checkbox"]),.dog-entry-form select,.dog-entry-form textarea{width:100%;max-width:100%;min-width:0;box-sizing:border-box;}
+  .dog-entry-form textarea{min-height:76px;resize:vertical;}
+  @media (max-width:480px){
+    .sheet .dog-entry-form,.sheet .additional-dog-card{grid-template-columns:minmax(0,1fr);}
+  }
+  /* Keep rapid taps from zooming the page; scrolling and pinch zoom remain available. */
+  html{touch-action:manipulation;}
+  button,a,input,select,textarea,[role="button"]{touch-action:manipulation;}
+  @media (any-pointer:coarse), (max-width:767px){
+    /* iPhone focus zoom is triggered by small form text, including payment fields. */
+    body input,body select,body textarea{font-size:16px!important;}
+  }
   @media (max-width:560px){
     .day-block{margin-left:-4px;margin-right:-4px;padding-left:8px;padding-right:8px;}
     .stats-row{gap:8px!important;}
@@ -5655,6 +5678,7 @@ export default function App() {
   }
   const savePaymentFromSchedule = async (appt,status,method,tip) => {
     if (!appt || paymentSavingId) return false
+    dismissFormKeyboard()
     setPaymentSavingId(appt.id)
     setSaveMessage('')
     try {
