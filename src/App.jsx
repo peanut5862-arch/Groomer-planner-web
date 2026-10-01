@@ -1048,6 +1048,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
   const [error,setError]=useState('')
   const [confirmationFilter,setConfirmationFilter]=useState('All')
   const loadedWeekRef=useRef('')
+  const dayRefs=useRef({})
 
   const ymd = (date) => {
     const y = date.getFullYear()
@@ -1195,6 +1196,12 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
   const weeklyRevenue = groomerAppointments.reduce((sum,appt)=>sum+(Number.isFinite(appt.price)?appt.price:0),0)
   const weeklyCompleted = groomerAppointments.filter(appt=>appt.completed).length
   const weeklyMissingPrices = groomerAppointments.some(appt=>!Number.isFinite(appt.price))
+  const todayKey = businessDateKey()
+  const jumpToDay = (dateKey) => {
+    const target = dayRefs.current[dateKey]
+    if (!target) return
+    target.scrollIntoView({behavior:'smooth',block:'start'})
+  }
 
   return (
     <section>
@@ -1247,6 +1254,24 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
               Tomorrow reminders{tomorrowReminderCount ? ` (${tomorrowReminderCount})` : ''}
             </button>
           </div>
+          <div className="week-day-jump" aria-label="Jump to a day">
+            {days.map(dayDate => {
+              const dateKey = ymd(dayDate)
+              const dayRows = groomerAppointments.filter(appt=>appt.date===dateKey)
+              const done = dayRows.filter(appt=>appt.completed).length
+              return (
+                <button
+                  key={dateKey}
+                  type="button"
+                  className={dateKey===todayKey?'today':''}
+                  onClick={()=>jumpToDay(dateKey)}
+                >
+                  <span>{displayDay(dayDate)} {dayDate.getDate()}</span>
+                  <small>{dayRows.length ? `${done}/${dayRows.length} done` : 'No stops'}</small>
+                </button>
+              )
+            })}
+          </div>
           {weeklyMissingPrices && <div className="prototype-note">Some appointments have no price saved; the week total includes known prices only.</div>}
         </>
       )}
@@ -1267,7 +1292,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
         const revenue = activeAppointments.reduce((sum,a)=>sum+(Number.isFinite(a.price)?a.price:0),0)
 
         return (
-          <div className="day-block" key={dateKey}>
+          <div className="day-block" key={dateKey} ref={node=>{ if (node) dayRefs.current[dateKey]=node }}>
             <div className="day-head">
               <div>
                 <strong>{displayDay(dayDate)}</strong>
@@ -5167,6 +5192,13 @@ const plannerThemeCss = `
   .confirmation-filter button{border:1px solid #dfe2e7;background:#fff;color:#5d6572;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:800;}
   .confirmation-filter button.active{background:#17223f;color:#fff;border-color:#17223f;}
   .confirmation-filter button.attention.active{background:#fff7e8;color:#76551b;border-color:#e6c981;}
+  .week-day-jump{position:sticky;top:86px;z-index:18;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin:12px -4px 6px;padding:7px;background:rgba(247,244,239,.96);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid #e6e1d9;border-radius:15px;box-shadow:0 6px 16px rgba(23,34,63,.08);}
+  .week-day-jump button{min-width:0;border:1px solid #dfe2e7;background:#fff;color:#455064;border-radius:11px;padding:7px 3px 6px;font:inherit;text-align:center;}
+  .week-day-jump button span{display:block;font-size:11px;font-weight:900;white-space:nowrap;}
+  .week-day-jump button small{display:block;margin-top:2px;font-size:8.5px;font-weight:800;color:#8a8f99;white-space:nowrap;}
+  .week-day-jump button.today{background:#17223f;color:#fff;border-color:#17223f;box-shadow:0 2px 6px rgba(23,34,63,.18);}
+  .week-day-jump button.today small{color:#dbe3f2;}
+  .day-block{scroll-margin-top:155px;}
   .appt-text-btn{display:inline-flex;align-items:center;gap:5px;margin-top:9px;margin-left:7px;padding:6px 9px;border:1px solid #d7dde6;border-radius:999px;background:#fff;color:#31415f;font-size:12px;font-weight:850;position:relative;z-index:6;}
   .appt-text-btn.reminder{background:#fff7e8;border-color:#e6c981;color:#76551b;}
   .appt-communication-row{display:flex;gap:0;align-items:center;flex-wrap:wrap;position:relative;z-index:6;}
