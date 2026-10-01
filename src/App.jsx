@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 
 
-const API_ORIGIN = 'https://groomer-planner.vercel.app'
+const API_ORIGIN = 'https://groomer-planner-web.vercel.app'
 function apiUrl(path) {
   const clean = String(path || '')
   return Capacitor.isNativePlatform() ? `${API_ORIGIN}${clean}` : clean
