@@ -157,13 +157,50 @@ function finishedReadyMessage({owner,dogs}) {
   return `Hi ${first}! ${petNames} ${count > 1 ? 'are' : 'is'} all finished and ready 😊`
 }
 
-function paymentReminderMessage({owner,total}) {
+const PAYMENT_METHOD_OPTIONS = ['Venmo','PayPal','Cash App','Zelle','Apple Pay','Cash/Check']
+
+function paymentPreferenceKey(household,owner) {
+  const householdValue = String(household || '').trim().toLowerCase()
+  if (householdValue) return `h:${householdValue}`
+  const ownerValue = String(owner || '').trim().toLowerCase()
+  return ownerValue ? `o:${ownerValue}` : ''
+}
+
+function paymentMethodDetails(method) {
+  switch (String(method || '').trim()) {
+    case 'Venmo': return 'Venmo: https://venmo.com/peanut5862'
+    case 'PayPal': return 'PayPal: https://www.paypal.com/paypalme/jkopald?country.x=US&locale.x=en_US'
+    case 'Cash App': return 'Cash App: https://cash.app/$Peanut02'
+    case 'Zelle': return 'Zelle: Jennifer Griffin · 832-691-7871'
+    case 'Apple Pay': return 'Apple Pay: 832-691-7871'
+    case 'Cash/Check': return 'Cash or check is perfect. Thank you!'
+    default: return ''
+  }
+}
+
+async function preferredPaymentForAppointment(appt) {
+  if (!supabase || !appt) return ''
+  const row = appt?.sourceRow || {}
+  const household = row?.['Household ID'] || row?.household_id || ''
+  const key = paymentPreferenceKey(household,appt?.owner || row?.Owner)
+  if (!key) return ''
+  const {data,error} = await supabase
+    .from('client_payment_preferences')
+    .select('payment_method')
+    .eq('owner_key',key)
+    .maybeSingle()
+  if (error) throw error
+  return String(data?.payment_method || '').trim()
+}
+
+function paymentReminderMessage({owner,total,paymentMethod}) {
   const first = String(owner || '').trim().split(/\s+/)[0] || 'there'
   const n = Number(total)
   const amount = Number.isFinite(n)
     ? n.toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:0,maximumFractionDigits:2})
     : '$0'
-  return `Hi ${first}! today's grooming total is ${amount}. Thank you!`
+  const detail = paymentMethodDetails(paymentMethod)
+  return `Hi ${first}! today's grooming total is ${amount}. Thank you!${detail ? `\n\n${detail}` : ''}`
 }
 
 function backInAreaMessage({date}) {
@@ -421,7 +458,14 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
                 {date===today && <button type="button" onClick={()=>sendAppointmentText(imHereMessage({owner:appt.owner}),"I'm here")}>I'm here</button>}
                 {date===today && <button type="button" onClick={()=>sendAppointmentText(needAccessMessage({owner:appt.owner}),'Need access')}>Need access</button>}
                 <button type="button" onClick={()=>sendAppointmentText(finishedReadyMessage({owner:appt.owner,dogs:appt.dogs}),'Finished / ready')}>Finished / ready</button>
-                <button type="button" onClick={()=>sendAppointmentText(paymentReminderMessage({owner:appt.owner,total:appt.price}),'Payment')}>Payment total</button>
+                <button type="button" onClick={async()=>{
+                  try {
+                    const paymentMethod = await preferredPaymentForAppointment(appt)
+                    sendAppointmentText(paymentReminderMessage({owner:appt.owner,total:appt.price,paymentMethod}),'Payment')
+                  } catch (err) {
+                    setCommunicationError(err?.message || 'Could not load the preferred payment method.')
+                  }
+                }}>Payment total</button>
                 <button type="button" onClick={()=>openSms(appt.phone,'')}>Custom text</button>
                 <button type="button" onClick={()=>openCall(appt.phone)}>Call</button>
                 <button type="button" disabled={!clientAddress} onClick={sendClientAddress}><Share2 size={13}/> Send address</button>
@@ -2339,6 +2383,9 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
   const [dogSaving, setDogSaving] = useState(false)
   const [dogMessage, setDogMessage] = useState('')
   const [rebookTextDate, setRebookTextDate] = useState('')
+  const [paymentPreference,setPaymentPreference] = useState('')
+  const [paymentPreferenceSaving,setPaymentPreferenceSaving] = useState(false)
+  const [paymentPreferenceMessage,setPaymentPreferenceMessage] = useState('')
 
   const valueOf = (row, ...keys) => {
     for (const key of keys) {
@@ -2543,6 +2590,8 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
       setAddingArea(false)
       setNewArea('')
       setAreaMessage('')
+      setPaymentPreference('')
+      setPaymentPreferenceMessage('')
       return
     }
     setAreaEditValue(canonicalAreaLabel(selectedClient.area))
@@ -2550,7 +2599,58 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
     setNewArea('')
     setAreaMessage('')
     setRebookTextDate('')
+    setPaymentPreference('')
+    setPaymentPreferenceMessage('')
   }, [selectedClient?.household, selectedClient?.owner])
+
+  useEffect(() => {
+    if (!selectedClient || !supabase) return
+    let cancelled = false
+    const loadPaymentPreference = async () => {
+      const key = paymentPreferenceKey(selectedClient.household,selectedClient.owner)
+      if (!key) return
+      const {data,error:preferenceError} = await supabase
+        .from('client_payment_preferences')
+        .select('payment_method')
+        .eq('owner_key',key)
+        .maybeSingle()
+      if (cancelled) return
+      if (preferenceError) {
+        setPaymentPreferenceMessage(preferenceError.message || 'Could not load preferred payment.')
+        return
+      }
+      setPaymentPreference(String(data?.payment_method || '').trim())
+    }
+    loadPaymentPreference()
+    return () => { cancelled = true }
+  }, [selectedClient?.household, selectedClient?.owner])
+
+  const savePaymentPreference = async () => {
+    if (!selectedClient || !supabase || paymentPreferenceSaving) return
+    const key = paymentPreferenceKey(selectedClient.household,selectedClient.owner)
+    if (!key) {
+      setPaymentPreferenceMessage('Could not identify this client.')
+      return
+    }
+    setPaymentPreferenceSaving(true)
+    setPaymentPreferenceMessage('')
+    try {
+      const {error:saveError} = await supabase
+        .from('client_payment_preferences')
+        .upsert({
+          owner_key:key,
+          owner_name:String(selectedClient.owner || '').trim(),
+          payment_method:paymentPreference || null,
+          updated_at:new Date().toISOString()
+        },{onConflict:'owner_key'})
+      if (saveError) throw saveError
+      setPaymentPreferenceMessage(paymentPreference ? `${paymentPreference} saved as preferred payment.` : 'Preferred payment cleared.')
+    } catch (err) {
+      setPaymentPreferenceMessage(err?.message || 'Could not save preferred payment.')
+    } finally {
+      setPaymentPreferenceSaving(false)
+    }
+  }
 
   const saveClientArea = async rawArea => {
     if (!selectedClient || !supabase || areaSaving) return
@@ -3296,6 +3396,23 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                   {areaMessage}
                 </div>
               )}
+
+              <label style={{gridColumn:'1 / -1'}}>
+                Preferred payment
+                <select
+                  value={paymentPreference}
+                  disabled={viewerMode || paymentPreferenceSaving}
+                  onChange={event=>{setPaymentPreference(event.target.value);setPaymentPreferenceMessage('')}}
+                >
+                  <option value="">No preference</option>
+                  {PAYMENT_METHOD_OPTIONS.map(method=><option key={method} value={method}>{method}</option>)}
+                </select>
+              </label>
+              {!viewerMode && <div style={{gridColumn:'1 / -1',display:'flex',justifyContent:'space-between',gap:10,alignItems:'center',flexWrap:'wrap'}}>
+                <div style={{fontSize:11,color:'#7b828e'}}>{paymentPreference ? paymentMethodDetails(paymentPreference) : 'Payment total texts will use the standard message.'}</div>
+                <button type="button" className="secondary-btn" disabled={paymentPreferenceSaving} onClick={savePaymentPreference}>{paymentPreferenceSaving?'Saving…':'Save payment preference'}</button>
+              </div>}
+              {paymentPreferenceMessage && <div className="prototype-note" style={{gridColumn:'1 / -1',marginTop:-2}} role="status">{paymentPreferenceMessage}</div>}
 
               <label>
                 Dogs
@@ -4095,7 +4212,14 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
             {originalDate===businessDateKey() && <button type="button" disabled={!phone} onClick={()=>recordAndText(imHereMessage({owner:appt.owner}),"I'm here")}>I'm here</button>}
             {originalDate===businessDateKey() && <button type="button" disabled={!phone} onClick={()=>recordAndText(needAccessMessage({owner:appt.owner}),'Need access')}>Need access</button>}
             <button type="button" disabled={!phone} onClick={()=>recordAndText(finishedReadyMessage({owner:appt.owner,dogs:appt.dogs}),'Finished / ready')}>Finished / ready</button>
-            <button type="button" disabled={!phone} onClick={()=>recordAndText(paymentReminderMessage({owner:appt.owner,total:appt.price}),'Payment')}>Payment total</button>
+            <button type="button" disabled={!phone} onClick={async()=>{
+              try {
+                const paymentMethod = await preferredPaymentForAppointment(appt)
+                recordAndText(paymentReminderMessage({owner:appt.owner,total:appt.price,paymentMethod}),'Payment')
+              } catch (err) {
+                setError(err?.message || 'Could not load the preferred payment method.')
+              }
+            }}>Payment total</button>
             <button type="button" disabled={!phone} onClick={()=>openSms(phone,'')}>Custom text</button>
             <button type="button" disabled={!phone} onClick={()=>openCall(phone)}>Call</button>
             <button type="button" disabled={!clientAddress} onClick={sendClientAddress}><Share2 size={13}/> Send address</button>
@@ -4959,6 +5083,7 @@ function GroomerPortal({session,groomer}) {
   const [revision,setRevision]=useState(0)
   const [finishingId,setFinishingId]=useState('')
   const [notice,setNotice]=useState('')
+  const dayRefs=useRef({})
   const today=businessDateKey()
   const activeWeek=tab==='Today'?mondayForDate(today):weekStart
 
@@ -5055,7 +5180,31 @@ function GroomerPortal({session,groomer}) {
   }else{
     const weekEnd=addDays(parseLocalDate(activeWeek) || new Date(`${activeWeek}T12:00:00`),4)
     const weekStartDate=parseLocalDate(activeWeek) || new Date(`${activeWeek}T12:00:00`)
-    body=(<section><div className="page-head"><div><div className="eyebrow">{displayDate(weekStartDate)} – {displayDate(weekEnd)}</div><h1>Week</h1></div><div className="month-arrows"><button className="icon-btn" onClick={()=>shiftWeek(-1)}><ChevronLeft size={18}/></button><button className="icon-btn" onClick={()=>shiftWeek(1)}><ChevronRight size={18}/></button></div></div>{loading&&<div className="prototype-note">Loading your week…</div>}{error&&<div className="login-message">{error}</div>}{!loading&&!error&&Array.from({length:5},(_,i)=>addDays(weekStartDate,i)).map(day=>{const dateKey=ymd(day);const dayAppts=appointments.filter(a=>a.date===dateKey);return <div className="day-block" key={dateKey}><div className="day-head"><div><strong>{displayDay(day)}</strong><span>{day.getDate()}</span></div></div>{dayAppts.length?<><div style={{fontSize:11,color:'#8a8f99',margin:'0 0 8px 2px'}}>{dayAppts.length} stop{dayAppts.length===1?'':'s'} · {dayAppts.filter(a=>a.finished).length} finished</div><GoogleRoutePanel appointments={dayAppts} dogs={[]} selectedGroomer={groomer} dateLabel={`${displayDay(day)} ${displayDate(day)}`} dateKey={dateKey} viewerMode={false}/><div className="appt-list">{dayAppts.map(appt=><GroomerStopCard key={appt.id} appt={appt} onFinish={finishStop} finishing={finishingId===appt.id}/>)}</div></>:<div className="prototype-note">No appointments</div>}</div>})}</section>)
+    const weekDays=Array.from({length:5},(_,i)=>addDays(weekStartDate,i))
+    const jumpToDay=dateKey=>{
+      const target=dayRefs.current[dateKey]
+      if(target) target.scrollIntoView({behavior:'smooth',block:'start'})
+    }
+    body=(<section>
+      <div className="page-head"><div><div className="eyebrow">{displayDate(weekStartDate)} – {displayDate(weekEnd)}</div><h1>Week</h1></div><div className="month-arrows"><button className="icon-btn" onClick={()=>shiftWeek(-1)}><ChevronLeft size={18}/></button><button className="icon-btn" onClick={()=>shiftWeek(1)}><ChevronRight size={18}/></button></div></div>
+      {loading&&<div className="prototype-note">Loading your week…</div>}
+      {error&&<div className="login-message">{error}</div>}
+      {!loading&&!error&&<>
+        <div className="week-day-jump" aria-label="Jump to a day">
+          {weekDays.map(day=>{
+            const dateKey=ymd(day)
+            const dayAppts=appointments.filter(a=>a.date===dateKey)
+            const done=dayAppts.filter(a=>a.finished).length
+            return <button key={dateKey} type="button" className={dateKey===today?'today':''} onClick={()=>jumpToDay(dateKey)}><span>{displayDay(day)} {day.getDate()}</span><small>{dayAppts.length?`${done}/${dayAppts.length} done`:'No stops'}</small></button>
+          })}
+        </div>
+        {weekDays.map(day=>{
+          const dateKey=ymd(day)
+          const dayAppts=appointments.filter(a=>a.date===dateKey)
+          return <div className="day-block" key={dateKey} ref={node=>{if(node) dayRefs.current[dateKey]=node}}><div className="day-head"><div><strong>{displayDay(day)}</strong><span>{day.getDate()}</span></div></div>{dayAppts.length?<><div style={{fontSize:11,color:'#8a8f99',margin:'0 0 8px 2px'}}>{dayAppts.length} stop{dayAppts.length===1?'':'s'} · {dayAppts.filter(a=>a.finished).length} finished</div><GoogleRoutePanel appointments={dayAppts} dogs={[]} selectedGroomer={groomer} dateLabel={`${displayDay(day)} ${displayDate(day)}`} dateKey={dateKey} viewerMode={false}/><div className="appt-list">{dayAppts.map(appt=><GroomerStopCard key={appt.id} appt={appt} onFinish={finishStop} finishing={finishingId===appt.id}/>)}</div></>:<div className="prototype-note">No appointments</div>}</div>
+        })}
+      </>}
+    </section>)
   }
 
   return (
