@@ -157,7 +157,7 @@ function finishedReadyMessage({owner,dogs}) {
   return `Hi ${first}! ${petNames} ${count > 1 ? 'are' : 'is'} all finished and ready 😊`
 }
 
-const PAYMENT_METHOD_OPTIONS = ['Venmo','PayPal','Cash App','Zelle','Apple Pay','Cash/Check']
+const PAYMENT_METHOD_OPTIONS = ['Cash','Check','Venmo','PayPal','Cash App','Zelle','Apple Pay','Cash/Check']
 
 function paymentPreferenceKey(household,owner) {
   const householdValue = String(household || '').trim().toLowerCase()
@@ -174,6 +174,8 @@ function paymentMethodDetails(method) {
     case 'Zelle': return 'Zelle: Jennifer Griffin · 832-691-7871'
     case 'Apple Pay': return 'Apple Pay: 832-691-7871'
     case 'Cash/Check': return 'Cash or check is perfect. Thank you!'
+    case 'Cash': return 'Cash is perfect. Thank you!'
+    case 'Check': return 'A check is perfect. Thank you!'
     default: return ''
   }
 }
@@ -2364,7 +2366,15 @@ function canonicalAreaLabel(value) {
   }).join(' ')
 }
 
-function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openClient, onOpenClientHandled, onRebook, viewerMode=false }) {
+function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openClient, onOpenClientHandled, onRebook, viewerMode=false, userId='' }) {
+  const draftKey = userId && !viewerMode ? `grooming-planner:new-client:v1:${userId}` : ''
+  const initialDraft = useRef(undefined)
+  if (initialDraft.current === undefined) {
+    try {
+      const saved = draftKey ? JSON.parse(localStorage.getItem(draftKey) || 'null') : null
+      initialDraft.current = saved?.version === 1 && saved.form && typeof saved.form === 'object' && !Array.isArray(saved.form) ? saved.form : null
+    } catch { initialDraft.current = null }
+  }
   const [query, setQuery] = useState('')
   const [clientFilter, setClientFilter] = useState('all')
   const [areaFilter, setAreaFilter] = useState('all')
@@ -2378,8 +2388,22 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
   const [newArea, setNewArea] = useState('')
   const [areaSaving, setAreaSaving] = useState(false)
   const [areaMessage, setAreaMessage] = useState('')
-  const [dogEditor, setDogEditor] = useState(null)
-  const [newClientOpen, setNewClientOpen] = useState(false)
+  const [dogEditor, updateDogEditor] = useState(initialDraft.current)
+  const dogEditorRef = useRef(initialDraft.current)
+  const [newClientOpen, setNewClientOpen] = useState(Boolean(initialDraft.current))
+  const [draftMessage, setDraftMessage] = useState(initialDraft.current ? 'Your unfinished client was restored.' : '')
+  const setDogEditor = value => {
+    const next = typeof value === 'function' ? value(dogEditorRef.current) : value
+    dogEditorRef.current = next
+    // Write during each field change so an app switch need not wait for an effect.
+    if (newClientOpen && next && draftKey) {
+      try {
+        localStorage.setItem(draftKey, JSON.stringify({version:1, form:next}))
+        setDraftMessage('Draft saved on this device.')
+      } catch { setDraftMessage('Draft could not be saved on this device. Keep this form open until you save the client.') }
+    }
+    updateDogEditor(next)
+  }
   const [dogSaving, setDogSaving] = useState(false)
   const [dogMessage, setDogMessage] = useState('')
   const [rebookTextDate, setRebookTextDate] = useState('')
@@ -2571,9 +2595,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
       const matchesArea = areaFilter === 'all' || normalizedKey(client.area) === normalizedKey(areaFilter)
       return matchesSearch && (clientFilter === 'all' || (needsScheduling && matchesArea))
     })
-    .sort((a,b) => a.dueInfo.rank - b.dueInfo.rank ||
-      (a.dueInfo.dueDate || '9999-99-99').localeCompare(b.dueInfo.dueDate || '9999-99-99') ||
-      a.owner.localeCompare(b.owner))
+    .sort((a,b) => String(a.owner || '').trim().localeCompare(String(b.owner || '').trim(), 'en', {sensitivity:'base', numeric:true}))
 
   useEffect(() => {
     if (!openClient) return
@@ -2750,8 +2772,33 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
     address:client?.address || '', city:client?.city || '', state:client?.state || 'TX', zip:client?.zip || '',
     service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'', groom_minutes:'', bath_minutes:'', partial_groom_minutes:'', frequency_weeks:'', frequency_mode:'preset', last_groom:'', last_bath:'',
     prior_service:'no', first_appointment_booked:false, first_appointment_date:'', first_appointment_groomer:'Jen', first_appointment_time:'09:00', first_appointment_service:'Groom', first_appointment_fixed:false, first_appointment_override:false,
-    additional_dogs:[], gate_access_notes:'', parking_notes:'', client_notes:'', preferred_appointment_window:'', preferred_time:'', contact_preference:'Text', alternate_contact_name:'', alternate_contact_phone:'', fixed_time:false, receipt_preference:'', client_status:'Active', grooming_notes:'', behavior_notes:'', medical_notes:'', alternate_service:false, alternate_service_1:'Groom', alternate_service_2:'Bath Only'
+    preferred_payment:'', additional_dogs:[], gate_access_notes:'', parking_notes:'', client_notes:'', preferred_appointment_window:'', preferred_time:'', contact_preference:'Text', alternate_contact_name:'', alternate_contact_phone:'', fixed_time:false, receipt_preference:'', client_status:'Active', grooming_notes:'', behavior_notes:'', medical_notes:'', alternate_service:false, alternate_service_1:'Groom', alternate_service_2:'Bath Only'
   })
+
+  const openNewClient = () => {
+    let draft = null
+    try {
+      const saved = draftKey ? JSON.parse(localStorage.getItem(draftKey) || 'null') : null
+      if (saved?.version === 1 && saved.form && typeof saved.form === 'object' && !Array.isArray(saved.form)) draft = saved.form
+    } catch {}
+    const form = {...blankDogForm(), ...(draft || {})}
+    dogEditorRef.current = form
+    updateDogEditor(form)
+    setDogMessage('')
+    setDraftMessage(draft ? 'Your unfinished client was restored.' : '')
+    setNewClientOpen(true)
+  }
+
+  const clearNewClientDraft = () => {
+    if (dogSaving) return
+    try { if (draftKey) localStorage.removeItem(draftKey) }
+    catch { setDraftMessage('Could not clear the saved draft.'); return }
+    const form = blankDogForm()
+    dogEditorRef.current = form
+    updateDogEditor(form)
+    setDogMessage('')
+    setDraftMessage('Draft cleared. Ready for a new client.')
+  }
 
   const editDog = row => {
     const client = selectedClient
@@ -2850,6 +2897,15 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
         householdId = String(savedRow?.household_id || savedRow?.householdId || householdId || '').trim() || null
       }
 
+      if (closeNew && form.preferred_payment) {
+        const {error:preferenceError} = await supabase.from('client_payment_preferences').upsert({
+          owner_key:paymentPreferenceKey(householdId,form.owner),
+          owner_name:String(form.owner || '').trim(), payment_method:form.preferred_payment,
+          updated_at:new Date().toISOString()
+        },{onConflict:'owner_key'})
+        if (preferenceError) throw preferenceError
+      }
+
       // Save the household/client extras after we know the final household id.
       if (householdId && closeNew) {
         const {error:clientDetailsError} = await supabase.from('client_details').upsert({
@@ -2911,6 +2967,9 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
         if (appointmentData?.status !== 'added') throw new Error('Client saved, but the first appointment could not be confirmed.')
       }
 
+      if (closeNew && draftKey) {
+        try { localStorage.removeItem(draftKey) } catch {}
+      }
       setDogEditor(null); if (closeNew) setNewClientOpen(false)
       onDataChanged?.(bookingFirstVisit
         ? `${form.owner} · ${dogsToSave.length} dog${dogsToSave.length===1?'':'s'} saved · first visit ${textDate(form.first_appointment_date)} at ${displayClockTime(form.first_appointment_time)}.`
@@ -3067,7 +3126,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
           <div className="eyebrow">Live Supabase data</div>
           <h1>Clients</h1>
         </div>
-        {!viewerMode && <button className="primary-mini" onClick={() => { setDogMessage(''); setNewClientOpen(true); setDogEditor(blankDogForm()) }}><Plus size={16}/>New</button>}
+        {!viewerMode && <button className="primary-mini" onClick={openNewClient}><Plus size={16}/>New</button>}
       </div>
 
       <div className="search">
@@ -3131,7 +3190,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
       <div className="prototype-note" style={{marginTop:10}}>
         {clientFilter === 'needs'
           ? 'Showing due or overdue clients who do not already have an active appointment booked.'
-          : 'Clients who still need attention are shown first. Already-booked clients show Scheduled instead of Overdue.'}
+          : 'Clients are listed A–Z by owner name. Already-booked clients show Scheduled instead of Overdue.'}
       </div>
 
       {loading && <div className="prototype-note">Loading your clients…</div>}
@@ -3218,6 +3277,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
               <label>ZIP<input value={dogEditor.zip} onChange={e=>setDogEditor({...dogEditor,zip:e.target.value})}/></label>
               {newClientOpen && <>
                 <div className="eyebrow" style={{gridColumn:'1 / -1',marginTop:8}}>Client preferences</div>
+                <label style={{gridColumn:'1 / -1'}}>Preferred payment<select value={dogEditor.preferred_payment || ''} onChange={e=>setDogEditor({...dogEditor,preferred_payment:e.target.value})}><option value="">No preference</option>{PAYMENT_METHOD_OPTIONS.filter(method=>method!=='Cash/Check').map(method=><option key={method} value={method}>{method}</option>)}</select></label>
                 <label style={{gridColumn:'1 / -1'}}>Gate / access instructions<textarea value={dogEditor.gate_access_notes || ''} onChange={e=>setDogEditor({...dogEditor,gate_access_notes:e.target.value})}/></label>
                 <label style={{gridColumn:'1 / -1'}}>Parking / driveway notes<textarea value={dogEditor.parking_notes || ''} onChange={e=>setDogEditor({...dogEditor,parking_notes:e.target.value})}/></label>
                 <label style={{gridColumn:'1 / -1'}}>Client notes<textarea value={dogEditor.client_notes || ''} onChange={e=>setDogEditor({...dogEditor,client_notes:e.target.value})}/></label>
@@ -3350,7 +3410,8 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
             </div>
             <div className="prototype-note" style={{marginTop:12}}>Usual service: Groom, Bath Only, Partial Groom, or Service Varies. Each service can have its own price and time. For a brand-new client, use Add another dog for households with multiple dogs. Do not use an upcoming appointment as Last Groom or Last Bath — schedule the first visit separately above.</div>
             {dogMessage && <div className="login-message" style={{marginTop:10}}>{dogMessage}</div>}
-            <div className="sheet-actions"><button className="ghost" onClick={()=>{setDogEditor(null);setNewClientOpen(false)}}>Cancel</button><button className="save" disabled={dogSaving} onClick={()=>saveDogForm(dogEditor,newClientOpen)}>{dogSaving?'Saving…':'Save'}</button></div>
+            {newClientOpen && <div className="prototype-note" style={{marginTop:10,display:'flex',gap:10,justifyContent:'space-between',alignItems:'center'}}><span role="status">{draftMessage || 'Your entries save as you type. Closing this form keeps your draft.'}</span><button type="button" className="ghost" disabled={dogSaving} onClick={clearNewClientDraft}>Clear draft</button></div>}
+            <div className="sheet-actions"><button className="ghost" disabled={dogSaving} onClick={()=>{setDogEditor(null);setNewClientOpen(false)}}>{newClientOpen?'Close':'Cancel'}</button><button className="save" disabled={dogSaving} onClick={()=>saveDogForm(dogEditor,newClientOpen)}>{dogSaving?'Saving…':'Save'}</button></div>
           </div>
         </div>
       )}
@@ -5790,7 +5851,7 @@ export default function App() {
   } else if (tab === 'Month') {
     body = <Month dogs={dogs} onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Clients') {
-    body = <Clients dogs={dogs} loading={dataLoading} error={dataError} onOpen={setEditing} revision={scheduleRevision} openClient={clientJump} onOpenClientHandled={()=>setClientJump(null)} onRebook={viewerMode?viewerNotice:openRebookForClient} onDataChanged={message=>{ setSaveMessage(message); setScheduleRevision(value=>value+1) }} viewerMode={viewerMode}/>
+    body = <Clients userId={session?.user?.id || ''} dogs={dogs} loading={dataLoading} error={dataError} onOpen={setEditing} revision={scheduleRevision} openClient={clientJump} onOpenClientHandled={()=>setClientJump(null)} onRebook={viewerMode?viewerNotice:openRebookForClient} onDataChanged={message=>{ setSaveMessage(message); setScheduleRevision(value=>value+1) }} viewerMode={viewerMode}/>
   } else {
     body = <More dogs={dogs} revision={scheduleRevision} onAsk={ask} onRebook={viewerMode?viewerNotice:openRebookForClient} session={session} showPushSetup={!viewerMode}/>
   }
