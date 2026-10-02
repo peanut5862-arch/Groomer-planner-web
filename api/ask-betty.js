@@ -103,6 +103,7 @@ Allowed intents:
 - confirmations: asking who needs confirmation / is unconfirmed.
 - brief: asking what needs attention / business brief.
 - weather: asking for current or forecast weather, rain, storms, temperatures, heat, or cold for a place/date.
+- reschedule: asking to move, reschedule, or change an EXISTING appointment to another day/date/time.
 - general: everything else, including earnings, commissions, totals, time, business questions, explanations, and normal conversation.
 
 Important:
@@ -111,6 +112,8 @@ Important:
 - 'What will the weather be tomorrow?' is weather.
 - 'How much is Amanda?' or 'What does Junior cost?' is client_price.
 - 'Who should I add Wednesday?' is planner_schedule.
+- 'Can you move Nikki to Thursday?' is reschedule, NOT planner_schedule.
+- 'Move Tammy to Monday' is reschedule, NOT planner_schedule.
 - If the user says 'What about Haley instead?' after a prior planner candidate result, classify planner_schedule.
 - If the user says 'Which one pays the most?' after a prior candidate list, classify general so Betty can compare the prior result.
 Use conversation and previousPlannerResult to resolve follow-ups.
@@ -125,7 +128,7 @@ Use conversation and previousPlannerResult to resolve follow-ups.
       try {
         const match = raw.match(/\{[\s\S]*\}/);
         const parsed = JSON.parse(match ? match[0] : raw);
-        if (["planner_schedule", "client_price", "confirmations", "brief", "weather", "general"].includes(parsed?.intent)) intent = parsed.intent;
+        if (["planner_schedule", "client_price", "confirmations", "brief", "weather", "reschedule", "general"].includes(parsed?.intent)) intent = parsed.intent;
       } catch {}
       return res.status(200).json({ intent });
     }

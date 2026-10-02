@@ -4850,7 +4850,41 @@ function plannerDayLabel(dateKey) {
   return new Date(`${dateKey}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric'})
 }
 
-function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=false}) {
+
+function bettyRescheduleRequest(text) {
+  const raw = String(text || '').trim()
+  const lower = raw.toLowerCase().replace(/[’]/g,"'")
+  if (!/\b(move|reschedule|change)\b/.test(lower)) return null
+  const targetDate = plannerResolveDate(lower)
+  if (!targetDate) return null
+  const dateWords = '(?:today|tomorrow|sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat|20\\d{2}-\\d{2}-\\d{2})'
+  const patterns = [
+    new RegExp(`(?:can\\s+you\\s+|could\\s+you\\s+|please\\s+)?(?:move|reschedule|change)\\s+(?:the\\s+)?(?:appointment\\s+for\\s+)?(.+?)\\s+(?:to|for|on)\\s+(?:next\\s+)?${dateWords}(?:\\?|$)`,'i'),
+    new RegExp(`(?:move|reschedule|change)\\s+(.+?)\\s+(?:appointment\\s+)?(?:to|for|on)\\s+(?:next\\s+)?${dateWords}(?:\\?|$)`,'i')
+  ]
+  const hit = patterns.map(pattern=>raw.match(pattern)).find(Boolean)
+  let subject = String(hit?.[1] || '').trim()
+  subject = subject.replace(/^(?:the|my)\s+/i,'').replace(/\s+(?:appointment|appt)$/i,'').trim()
+  if (!subject) return null
+  return {subject,targetDate}
+}
+
+function bettyAppointmentMatchScore(row, subject) {
+  const needle = String(subject || '').toLowerCase().trim()
+  if (!needle) return 0
+  const owner = String(row?.Owner || '').toLowerCase().trim()
+  const dogs = String(row?.Dogs || '').toLowerCase().replace(/\s*\([^)]*\)/g,'').trim()
+  const dogNames = dogs.split(/\s*[+,]&?\s*|\s+and\s+/).map(value=>value.trim()).filter(Boolean)
+  if (owner === needle) return 120
+  if (dogNames.includes(needle)) return 115
+  if (owner.startsWith(needle) || needle.startsWith(owner)) return 100
+  if (dogNames.some(name=>name.startsWith(needle) || needle.startsWith(name))) return 95
+  if (owner.includes(needle) || needle.includes(owner)) return 80
+  if (dogNames.some(name=>name.includes(needle) || needle.includes(name))) return 75
+  return 0
+}
+
+function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleChanged,viewerMode=false}) {
   const memoryKey='grooming-ask-betty-session-v3'
   const readMemory=()=>{
     if(typeof window==='undefined') return null
@@ -4968,6 +5002,70 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
       const today = businessDateKey()
       let filters = plannerQueryFilters(prompt,dogs)
       const groups = plannerClientGroups(dogs)
+
+      // Action requests are handled before the suggestion router so a day name
+      // like "Thursday" cannot accidentally turn "move Nikki to Thursday" into
+      // a "Best fits for Thursday" search.
+      const rescheduleRequest = bettyRescheduleRequest(prompt)
+      if (rescheduleRequest) {
+        const rangeStart = mondayForDate(today)
+        const endDate = new Date(`${today}T12:00:00Z`)
+        endDate.setUTCDate(endDate.getUTCDate()+84)
+        const rangeEnd = mondayForDate(endDate.toISOString().slice(0,10))
+        const {data:weeks,error:weekError} = await supabase
+          .from('weekly_drafts')
+          .select('week_start,plan_json')
+          .gte('week_start',rangeStart)
+          .lte('week_start',rangeEnd)
+          .order('week_start',{ascending:true})
+        if (weekError) throw weekError
+
+        const matches=[]
+        for (const week of (weeks || [])) {
+          for (const row of (Array.isArray(week?.plan_json) ? week.plan_json : [])) {
+            if (!plannerActiveRow(row,today)) continue
+            const score=bettyAppointmentMatchScore(row,rescheduleRequest.subject)
+            if (score>0) matches.push({row,weekStart:String(week.week_start || '').slice(0,10),score})
+          }
+        }
+        matches.sort((a,b)=>b.score-a.score || String(a.row?.Date || '').localeCompare(String(b.row?.Date || '')))
+        const best=matches[0]
+        if (!best) {
+          const reply=`I couldn't find an active appointment for ${rescheduleRequest.subject}. Try the client or dog name exactly as it appears in the planner.`
+          const nextConversation=[...conversation.slice(-12),{role:'user',text:prompt},{role:'assistant',text:reply}].slice(-16)
+          shouldAutoScrollRef.current=true
+          setConversation(nextConversation)
+          setAnswer({mode:'ai',title:'Betty',text:reply,targetDate:'',filters:{},candidates:[],summary:''})
+          return
+        }
+
+        const row=best.row
+        const sourceDate=String(row.Date || '').slice(0,10)
+        const targetDate=rescheduleRequest.targetDate
+        const targetGroomer=String(row.Groomer || '').trim() || 'Haley'
+        const targetTime=appointmentTimeInput(String(row['Start Time'] || row['Locked Time'] || '')) || defaultFirstStopTime(targetGroomer)
+        const household=String(row['Household ID'] || '').trim().toLowerCase()
+        const owner=String(row.Owner || '').trim()
+        const clientRows=(dogs || []).filter(client=>{
+          const clientHousehold=String(client?.household_id || client?.['Household ID'] || '').trim().toLowerCase()
+          const clientOwner=String(client?.owner || client?.Owner || '').trim().toLowerCase()
+          return (household && clientHousehold===household) || (!household && clientOwner===owner.toLowerCase())
+        })
+        const assignedGroomers=[...new Set(clientRows.map(client=>String(client?.groomer || client?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))]
+        const ruleWarnings=schedulingOverrideReasons(targetDate,targetGroomer,assignedGroomers)
+        const proposal=`${owner} is currently ${plannerDayLabel(sourceDate)} at ${displayClockTime(targetTime)} with ${targetGroomer}. Move ${owner} to ${plannerDayLabel(targetDate)} at ${displayClockTime(targetTime)} with ${targetGroomer}?`
+        const nextConversation=[...conversation.slice(-12),{role:'user',text:prompt},{role:'assistant',text:proposal}].slice(-16)
+        shouldAutoScrollRef.current=true
+        setConversation(nextConversation)
+        setAnswer({
+          mode:'reschedule',title:'Move appointment',text:proposal,targetDate,filters:{},candidates:[],summary:'',
+          reschedule:{
+            owner,dogs:String(row.Dogs || '').trim(),sourceDate,targetDate,targetTime,targetGroomer,
+            weekStart:best.weekStart,sourceRow:row,ruleWarnings
+          }
+        })
+        return
+      }
 
       const summarizePlannerAnswer = value => {
         if (!value || value.mode === 'ai') return null
@@ -5451,6 +5549,39 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
     }
   }
 
+  const confirmBettyReschedule = async () => {
+    const move=answer?.reschedule
+    if (!move || loading || viewerMode) return
+    if ((move.ruleWarnings || []).length) return
+    setLoading(true)
+    setError('')
+    shouldAutoScrollRef.current=true
+    try {
+      const {data,error:saveError}=await supabase.rpc('reschedule_grooming_appointment_safe',{
+        p_week_start:move.weekStart,
+        p_expected_row:move.sourceRow,
+        p_target_date:move.targetDate,
+        p_target_time:move.targetTime,
+        p_target_groomer:move.targetGroomer,
+        p_note:null
+      })
+      if (saveError) {
+        if (saveError.code==='PGRST202' || saveError.code==='42883') throw new Error('Rescheduling has not been enabled in Supabase yet.')
+        throw saveError
+      }
+      if (data?.status!=='rescheduled') throw new Error('The move could not be confirmed. Refresh the planner before trying again.')
+      const success=`Done — ${move.owner} was moved to ${plannerDayLabel(move.targetDate)} at ${displayClockTime(move.targetTime)} with ${move.targetGroomer}.`
+      const nextConversation=[...conversation.slice(-12),{role:'user',text:'Confirm move'},{role:'assistant',text:success}].slice(-16)
+      setConversation(nextConversation)
+      setAnswer({mode:'ai',title:'Betty',text:success,targetDate:'',filters:{},candidates:[],summary:''})
+      onScheduleChanged?.(success)
+    } catch(err) {
+      setError(err?.message || 'Betty could not move the appointment.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const choose = candidate => {
     if (viewerMode) {
       onClose?.()
@@ -5510,13 +5641,40 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
         <div className="quick-prompts">
           {quick.map(q=><button key={q} onClick={()=>run(q)}>{q}</button>)}
         </div>
-        {loading && <div className="prototype-note" style={{marginTop:12}}>🐾 Betty is thinking…</div>}
+        {loading && <div className="ai-result" style={{marginTop:12}}><div className="result-head"><CheckCircle2 size={17}/><strong>Betty</strong></div><div style={{display:'flex',justifyContent:'flex-start',marginTop:10}}><div style={{maxWidth:'88%',padding:'10px 12px',border:'1px solid #e6e8ed',borderRadius:12,background:'#f8f9fb',fontSize:13,lineHeight:1.5,color:'#6b7280'}}>Betty is thinking…</div></div></div>}
         {error && <div className="login-message" role="alert" style={{marginTop:12}}>{error}</div>}
         {answer && !loading && (
           <div className="ai-result">
             <div className="result-head"><CheckCircle2 size={17}/><strong>{answer.title}</strong></div>
             {answer.summary && <p style={{marginTop:6}}>{answer.summary}</p>}
-            {answer.mode==='ai' ? (
+            {answer.mode==='reschedule' ? (
+              <div style={{display:'grid',gap:10,marginTop:10}}>
+                <div style={{padding:'12px',border:'1px solid #e6e8ed',borderRadius:12,background:'#f8f9fb'}}>
+                  <div style={{fontSize:12,color:'#7b828e',marginBottom:7}}>CURRENT</div>
+                  <strong style={{display:'block',fontSize:14}}>{answer.reschedule.owner} · {answer.reschedule.dogs}</strong>
+                  <span style={{display:'block',marginTop:4,fontSize:12,color:'#566071'}}>{plannerDayLabel(answer.reschedule.sourceDate)} · {displayClockTime(answer.reschedule.targetTime)} · {answer.reschedule.targetGroomer}</span>
+                </div>
+                <div style={{padding:'12px',border:'1px solid #cfe0d4',borderRadius:12,background:'#f1faf3'}}>
+                  <div style={{fontSize:12,color:'#4f7b5e',marginBottom:7}}>PROPOSED MOVE</div>
+                  <strong style={{display:'block',fontSize:14}}>{plannerDayLabel(answer.reschedule.targetDate)}</strong>
+                  <span style={{display:'block',marginTop:4,fontSize:12,color:'#566071'}}>{displayClockTime(answer.reschedule.targetTime)} · {answer.reschedule.targetGroomer}</span>
+                </div>
+                {(answer.reschedule.ruleWarnings || []).length>0 ? (
+                  <div className="schedule-check warning" style={{margin:0}}>
+                    <div className="schedule-check-title">Needs manual review</div>
+                    {(answer.reschedule.ruleWarnings || []).map((warning,index)=><div key={index}>• {warning}</div>)}
+                    <div style={{marginTop:6}}>Betty will not override your standing scheduling rules automatically.</div>
+                  </div>
+                ) : !viewerMode ? (
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:9}}>
+                    <button type="button" className="login-button" disabled={loading} onClick={confirmBettyReschedule}>{loading?'Moving…':'Confirm move'}</button>
+                    <button type="button" className="ghost" disabled={loading} onClick={()=>{const reply='Okay — I did not move it.';setConversation(current=>[...current,{role:'user',text:'Cancel move'},{role:'assistant',text:reply}].slice(-16));setAnswer({mode:'ai',title:'Betty',text:reply,targetDate:'',filters:{},candidates:[],summary:''})}}>Cancel</button>
+                  </div>
+                ) : (
+                  <div className="prototype-note">Viewer mode is read-only, so the move cannot be saved.</div>
+                )}
+              </div>
+            ) : answer.mode==='ai' ? (
               <div style={{display:'grid',gap:8,marginTop:10}}>
                 {(conversation.length?conversation.slice(-8):[{role:'assistant',text:answer.text || 'Betty did not return an answer.'}]).map((message,index)=>(
                   <div key={`${message.role}-${index}`} style={{display:'flex',justifyContent:message.role==='user'?'flex-end':'flex-start'}}>
@@ -5586,9 +5744,9 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
               onChange={e=>setText(e.target.value)}
               onFocus={()=>{ setTimeout(()=>scrollBettyToBottom('smooth'),300) }}
               onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();run()}}}
-              placeholder={loading?'Betty is thinking…':'Message Betty…'}
+              placeholder='Message Betty…'
             />
-            <button disabled={loading || !text.trim()} onClick={()=>run()}>{loading?'…':'Send'}</button>
+            <button disabled={loading || !text.trim()} onClick={()=>run()}>Send</button>
           </div>
         </div>
         <div className="prototype-note" style={{marginTop:4,textAlign:'left'}}>Betty reads your current clients and schedule. Tap X when you want to end and clear this conversation.</div>
@@ -6536,7 +6694,7 @@ export default function App() {
         setSaveMessage(message)
         setScheduleRevision(value=>value+1)
       }}/> }
-      <AssistantSheet open={assistant.open} initial={assistant.initial} dogs={dogs} onClose={()=>setAssistant({open:false,initial:''})} onChoose={viewerMode?viewerNotice:preset=>{ setAssistant({open:false,initial:''}); setAddAppointment({open:true,date:preset.date,preset}) }} onClient={client=>{ setAssistant({open:false,initial:''}); setClientJump(client); setTab('Clients') }} viewerMode={viewerMode}/>
+      <AssistantSheet open={assistant.open} initial={assistant.initial} dogs={dogs} onClose={()=>setAssistant({open:false,initial:''})} onChoose={viewerMode?viewerNotice:preset=>{ setAssistant({open:false,initial:''}); setAddAppointment({open:true,date:preset.date,preset}) }} onClient={client=>{ setAssistant({open:false,initial:''}); setClientJump(client); setTab('Clients') }} onScheduleChanged={message=>{ setSaveMessage(message); setScheduleRevision(value=>value+1) }} viewerMode={viewerMode}/>
     </div>
   )
 }
