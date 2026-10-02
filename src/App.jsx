@@ -4164,7 +4164,7 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false}) {
             <div style={{padding:11,borderRadius:12,background:'#f5f2ff'}}><div style={smallLabel}>Needs reply</div><strong style={{fontSize:19,color:'#5e4aa8'}}>{confirmations['Needs reply']}</strong></div>
             <div style={{padding:11,borderRadius:12,background:'#fff0f0'}}><div style={smallLabel}>Can't make it</div><strong style={{fontSize:19,color:'#a83d3d'}}>{confirmations["Can't make it"]}</strong></div>
           </div>
-          <button type="button" className="ghost" style={{width:'100%',marginTop:10}} onClick={()=>onAsk?.('Who still needs to confirm this week?')}>Ask Planner who still needs confirmation</button>
+          <button type="button" className="ghost" style={{width:'100%',marginTop:10}} onClick={()=>onAsk?.('Who still needs to confirm this week?')}>Ask Betty who still needs confirmation</button>
         </div>
 
         <div style={{...reportCard,marginTop:14}}>
@@ -4185,7 +4185,7 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false}) {
             <span style={{fontSize:11,fontWeight:900,color:'#26345e'}}>Rebook ›</span>
           </button>)}
           {!rebooking.length && <div className="prototype-note">No due or overdue clients currently need rebooking.</div>}
-          {rebooking.length>5 && <button type="button" className="ghost" style={{width:'100%',marginTop:10}} onClick={()=>onAsk?.("Who hasn't been booked back yet?")}>View all with Ask Planner</button>}
+          {rebooking.length>5 && <button type="button" className="ghost" style={{width:'100%',marginTop:10}} onClick={()=>onAsk?.("Who hasn't been booked back yet?")}>View all with Ask Betty</button>}
         </div>
 
         {showPushSetup && <OwnerPushNotifications session={session}/>}
@@ -4193,7 +4193,7 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false}) {
         <div className="menu-list" style={{marginTop:16}}>
           <button><Settings size={19}/><span>Scheduling settings</span><ChevronRight size={17}/></button>
           <button><Route size={19}/><span>Route settings</span><ChevronRight size={17}/></button>
-          <button type="button" onClick={()=>onAsk?.('Show me this week\'s business summary')}><WalletCards size={19}/><span>Ask Planner about the week</span><ChevronRight size={17}/></button>
+          <button type="button" onClick={()=>onAsk?.('Show me this week\'s business summary')}><WalletCards size={19}/><span>Ask Betty about the week</span><ChevronRight size={17}/></button>
           <button type="button" onClick={async()=>{ await supabase?.auth?.signOut?.() }}><LogOut size={19}/><span>Sign out</span><ChevronRight size={17}/></button>
         </div>
       </>}
@@ -4851,36 +4851,168 @@ function plannerDayLabel(dateKey) {
 }
 
 function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=false}) {
-  const [text,setText]=useState(initial||'')
+  const memoryKey='grooming-ask-betty-session-v3'
+  const readMemory=()=>{
+    if(typeof window==='undefined') return null
+    try { return JSON.parse(sessionStorage.getItem(memoryKey) || 'null') } catch { return null }
+  }
+  const initialMemory=readMemory()
+  const [text,setText]=useState(initial||initialMemory?.text||'')
   const [loading,setLoading]=useState(false)
   const [error,setError]=useState('')
-  const [answer,setAnswer]=useState(null)
+  const [answer,setAnswer]=useState(initialMemory?.answer||null)
+  const [conversation,setConversation]=useState(Array.isArray(initialMemory?.conversation)?initialMemory.conversation:[])
+  const sheetRef=useRef(null)
+  const savedScrollRef=useRef(Number(initialMemory?.scrollTop || 0))
+  const shouldAutoScrollRef=useRef(false)
+
+  const scrollBettyToBottom=(behavior='smooth')=>{
+    if(typeof window==='undefined') return
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      const sheet=sheetRef.current
+      if(!sheet) return
+      const top=Math.max(0,sheet.scrollHeight-sheet.clientHeight)
+      try { sheet.scrollTo({top,behavior}) } catch { sheet.scrollTop=top }
+      savedScrollRef.current=top
+    }))
+  }
+
+  const saveMemory=(overrides={})=>{
+    if(typeof window==='undefined') return
+    try {
+      const payload={
+        text,
+        answer,
+        conversation,
+        scrollTop:Number(sheetRef.current?.scrollTop ?? savedScrollRef.current ?? 0),
+        ...overrides
+      }
+      sessionStorage.setItem(memoryKey,JSON.stringify(payload))
+    } catch {}
+  }
 
   useEffect(()=>{
-    if(open){
-      setText(initial||'')
+    if(!open) return
+    const saved=readMemory()
+    if(initial){
+      setText(initial)
       setLoading(false)
       setError('')
       setAnswer(null)
+      savedScrollRef.current=0
+    } else if(saved){
+      setText(String(saved.text || ''))
+      setLoading(false)
+      setError('')
+      setAnswer(saved.answer || null)
+      setConversation(Array.isArray(saved.conversation)?saved.conversation:[])
+      savedScrollRef.current=Number(saved.scrollTop || 0)
+      requestAnimationFrame(()=>requestAnimationFrame(()=>{
+        if(sheetRef.current) sheetRef.current.scrollTop=savedScrollRef.current
+      }))
+    } else {
+      setText('')
+      setLoading(false)
+      setError('')
+      setAnswer(null)
+      setConversation([])
+      savedScrollRef.current=0
     }
   },[open,initial])
+
+  useEffect(()=>{
+    if(!open) return
+    saveMemory()
+    if(shouldAutoScrollRef.current){
+      shouldAutoScrollRef.current=false
+      scrollBettyToBottom('smooth')
+    }
+  },[open,text,answer,conversation])
+
+  useEffect(()=>{
+    if(typeof window==='undefined' || typeof document==='undefined') return
+    const save=()=>saveMemory()
+    const visibility=()=>{ if(document.visibilityState==='hidden') save() }
+    window.addEventListener('pagehide',save)
+    document.addEventListener('visibilitychange',visibility)
+    return()=>{
+      window.removeEventListener('pagehide',save)
+      document.removeEventListener('visibilitychange',visibility)
+    }
+  },[text,answer,conversation])
 
   if(!open)return null
 
   const run = async (query=text) => {
     const prompt = String(query || '').trim()
     if (!prompt || loading) return
-    setText(prompt)
+    const previousAnswer = answer
+    shouldAutoScrollRef.current=true
+    setText('')
     setLoading(true)
     setError('')
     setAnswer(null)
     try {
       if (!supabase) throw new Error('Your schedule connection is not configured.')
       const today = businessDateKey()
-      const filters = plannerQueryFilters(prompt,dogs)
+      let filters = plannerQueryFilters(prompt,dogs)
       const groups = plannerClientGroups(dogs)
 
-      if (filters.priceLookup) {
+      const summarizePlannerAnswer = value => {
+        if (!value || value.mode === 'ai') return null
+        return {
+          mode:value.mode || 'planner',
+          title:value.title || '',
+          targetDate:value.targetDate || '',
+          filters:value.filters || {},
+          summary:value.summary || '',
+          candidates:(value.candidates || []).slice(0,8).map(candidate=>({
+            owner:candidate.owner || '',
+            dogs:(candidate.rows || []).map(row=>String(row?.dog || row?.Dog || '').trim()).filter(Boolean),
+            price:Number(candidate.price || 0) || 0,
+            minutes:Number(candidate.minutes || 0) || 0,
+            groomer:candidate.targetGroomer || '',
+            suggestedTime:candidate.suggestedTime || '',
+            area:candidate.area || '',
+            due:candidate.due?.detail || '',
+            routeLabel:candidate.routeInfo?.label || '',
+            addedMinutes:Number(candidate.routeInfo?.addedMinutes || 0) || 0
+          }))
+        }
+      }
+      const previousPlannerResult = summarizePlannerAnswer(previousAnswer)
+      const priorConversation = conversation.slice(-12)
+
+      let bettyIntent = 'general'
+      try {
+        const routeResponse = await fetch(apiUrl('/api/ask-betty'),{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({
+            mode:'route',
+            message:prompt,
+            context:{conversation:priorConversation,previousPlannerResult}
+          })
+        })
+        const routePayload = await routeResponse.json().catch(()=>({}))
+        if (routeResponse.ok && ['planner_schedule','client_price','confirmations','brief','general'].includes(routePayload?.intent)) {
+          bettyIntent = routePayload.intent
+        }
+      } catch {}
+
+      if (bettyIntent === 'planner_schedule' && previousPlannerResult) {
+        const prior = previousPlannerResult.filters || {}
+        const inherit = key => {
+          if ((filters[key] === '' || filters[key] === 0 || filters[key] === false || filters[key] == null) && prior[key]) filters[key] = prior[key]
+        }
+        ;['date','area','service','minPrice','maxMinutes'].forEach(inherit)
+        if (!filters.groomer && prior.groomer) filters.groomer = prior.groomer
+        if (!filters.routeIntent && prior.routeIntent) filters.routeIntent = true
+        if (!filters.unbookedOnly && prior.unbookedOnly) filters.unbookedOnly = true
+        if (!filters.overdueOnly && prior.overdueOnly) filters.overdueOnly = true
+      }
+
+      if (bettyIntent === 'client_price') {
         const needle = String(filters.lookupName || '').toLowerCase().trim()
         const ranked = groups.map(client=>{
           const owner = client.owner.toLowerCase()
@@ -4915,7 +5047,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
         return
       }
 
-      let targetDate = filters.date
+      let targetDate = filters.date || (bettyIntent === 'planner_schedule' ? previousPlannerResult?.targetDate || '' : '')
       if (!targetDate && filters.routeIntent) targetDate = today
 
       const startWeek = mondayForDate(today)
@@ -4933,7 +5065,156 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
       const planRows = (data || []).flatMap(week=>Array.isArray(week.plan_json)?week.plan_json:[])
       const activeRows = planRows.filter(row=>plannerActiveRow(row,today))
 
-      if (filters.confirmationOnly) {
+      const attentionIntent = bettyIntent === 'brief'
+
+      // Betty decides the intent first. Only purpose-built planner questions use
+      // deterministic planner cards; everything else goes to the conversational AI.
+      if (bettyIntent === 'general') {
+        const clientContext = groups.slice(0,150).map(client=>({
+          owner:client.owner,
+          household:client.household || '',
+          dogs:client.rows.map(row=>({
+            name:String(row?.dog || row?.Dog || '').trim(),
+            area:canonicalAreaLabel(row?.area || row?.Area || ''),
+            groomer:String(row?.groomer || row?.Groomer || '').trim(),
+            service:String(row?.service_pattern || row?.['Service Pattern'] || '').trim(),
+            nextService:String(row?.next_service || row?.['Next Service'] || '').trim(),
+            groomPrice:Number(row?.groom_price || row?.['Groom Price'] || 0) || 0,
+            bathPrice:Number(row?.bath_price || row?.['Bath Price'] || 0) || 0,
+            partialPrice:Number(row?.partial_groom_price || row?.['Partial Groom Price'] || 0) || 0,
+            groomMinutes:Number(row?.groom_minutes || row?.['Groom Minutes'] || 0) || 0,
+            bathMinutes:Number(row?.bath_minutes || row?.['Bath Minutes'] || 0) || 0,
+            partialMinutes:Number(row?.partial_groom_minutes || row?.['Partial Groom Minutes'] || 0) || 0,
+            lastGroom:String(row?.last_groom || row?.['Last Groom'] || '').slice(0,10),
+            lastBath:String(row?.last_bath || row?.['Last Bath'] || '').slice(0,10),
+            frequency:String(row?.frequency || row?.Frequency || '').trim()
+          }))
+        }))
+        const scheduleContext = activeRows.slice(0,250).map(row=>({
+          date:String(row?.Date || '').slice(0,10),
+          time:String(row?.['Start Time'] || row?.['Locked Time'] || '').trim(),
+          groomer:String(row?.Groomer || '').trim(),
+          owner:String(row?.Owner || '').trim(),
+          dogs:String(row?.Dogs || '').trim(),
+          area:String(row?.['Area Cluster'] || row?.Area || '').trim(),
+          price:Number(row?.Price || 0) || 0,
+          confirmation:clientConfirmationStatus(row),
+          status:String(row?.['Appointment Status'] || row?.Status || '').trim()
+        }))
+
+        const now=new Date()
+        const timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local device time'
+        const localDateTime=now.toLocaleString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit',timeZoneName:'short'})
+        const localTime=now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})
+        const response = await fetch(apiUrl('/api/ask-betty'),{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({
+            message:prompt,
+            context:{
+              today,
+              currentLocalDateTime:localDateTime,
+              currentLocalTime:localTime,
+              timeZone,
+              utcOffsetMinutes:-now.getTimezoneOffset(),
+              conversation:priorConversation,
+              previousPlannerResult,
+              responsePreferences:{
+                phoneFriendly:true,
+                concise:true,
+                askOneQuestionAtATime:true,
+                useConversationForFollowUps:true
+              },
+              currentCapabilities:{
+                canReadPlannerData:true,
+                canSuggestAppointments:true,
+                canSaveAppointments:false,
+                canSendCustomerMessages:false,
+                note:'For booking or rescheduling requests, gather only the next missing detail, one question at a time. You may propose a specific appointment, but do not claim it was saved or sent.'
+              },
+              business:'Mobile dog grooming business',
+              groomers:['Jen','Haley'],
+              schedulingRules:{
+                Jen:'Tuesday through Thursday only',
+                Haley:'Monday through Friday; Monday and Friday are Haley-only',
+                note:'Jen-exclusive clients stay with Jen.'
+              },
+              compensationRules:{
+                Haley:'50% commission on her grooming service revenue',
+                Jen:'Owner keeps the remaining 50% of Haley service revenue plus 100% of Jen service revenue',
+                tips:'Do not include tips in commission unless explicitly asked.'
+              },
+              clients:clientContext,
+              upcomingSchedule:scheduleContext
+            }
+          })
+        })
+        const payload = await response.json().catch(()=>({}))
+        if (!response.ok) throw new Error(payload?.error || `Betty could not answer (${response.status}).`)
+        const reply=String(payload?.answer || '').trim() || 'Betty did not return an answer.'
+        const nextConversation=[...priorConversation,{role:'user',text:prompt},{role:'assistant',text:reply}].slice(-16)
+        shouldAutoScrollRef.current=true
+        setConversation(nextConversation)
+        setAnswer({mode:'ai',title:'Betty',text:reply,targetDate:'',filters,candidates:[],summary:''})
+        return
+      }
+
+      if (attentionIntent) {
+        const currentWeekStart = mondayForDate(today)
+        const weekEndDate = new Date(`${currentWeekStart}T12:00:00Z`)
+        weekEndDate.setUTCDate(weekEndDate.getUTCDate()+4)
+        const currentWeekEnd = weekEndDate.toISOString().slice(0,10)
+
+        const confirmationRows = activeRows.filter(row=>{
+          const date = String(row.Date || '').slice(0,10)
+          return date >= currentWeekStart && date <= currentWeekEnd && needsClientConfirmation(row)
+        })
+
+        const bookedKeys = new Set()
+        for (const row of activeRows) {
+          const household = String(row['Household ID'] || '').trim()
+          const owner = String(row.Owner || row.Client || '').trim()
+          if (household) bookedKeys.add(`h:${household}`)
+          if (owner) bookedKeys.add(`o:${owner.toLowerCase()}`)
+        }
+
+        const overdueUnbooked = groups.map(client=>{
+          const ownerKey = `o:${client.owner.toLowerCase()}`
+          const booked = bookedKeys.has(client.key) || bookedKeys.has(ownerKey)
+          if (booked) return null
+          const due = clientDueInfo(client.rows,today)
+          return due.status === 'Overdue' ? {...client,due} : null
+        }).filter(Boolean)
+
+        const todayRows = activeRows.filter(row=>String(row.Date || '').slice(0,10)===today)
+        const incompleteToday = todayRows.filter(row=>String(row?.['Completion Status'] || '').trim().toLowerCase()!=='completed')
+        const todayRevenue = todayRows.reduce((sum,row)=>sum+Number(row.Price || 0),0)
+
+        const tomorrowDate = new Date(`${today}T12:00:00Z`)
+        tomorrowDate.setUTCDate(tomorrowDate.getUTCDate()+1)
+        const tomorrow = tomorrowDate.toISOString().slice(0,10)
+        const tomorrowRows = activeRows.filter(row=>String(row.Date || '').slice(0,10)===tomorrow)
+        const tomorrowUnconfirmed = tomorrowRows.filter(row=>needsClientConfirmation(row))
+
+        const weekRows = activeRows.filter(row=>{
+          const date = String(row.Date || '').slice(0,10)
+          return date >= currentWeekStart && date <= currentWeekEnd
+        })
+        const weekRevenue = weekRows.reduce((sum,row)=>sum+Number(row.Price || 0),0)
+
+        const brief = [
+          {label:'Still needs confirmation',value:confirmationRows.length,detail:confirmationRows.length?`${confirmationRows.length} appointment${confirmationRows.length===1?'':'s'} this week`:'Everyone this week is handled',tone:confirmationRows.length?'warn':'good'},
+          {label:'Overdue + not rebooked',value:overdueUnbooked.length,detail:overdueUnbooked.length?`${overdueUnbooked.length} client${overdueUnbooked.length===1?'':'s'} to contact`:'No overdue unbooked clients',tone:overdueUnbooked.length?'warn':'good'},
+          {label:'Today',value:`${incompleteToday.length}/${todayRows.length}`,detail:`remaining · $${Math.round(todayRevenue)} scheduled`,tone:incompleteToday.length?'normal':'good'},
+          {label:'Tomorrow',value:tomorrowRows.length,detail:tomorrowUnconfirmed.length?`${tomorrowUnconfirmed.length} still unconfirmed`:'all confirmed / no stops',tone:tomorrowUnconfirmed.length?'warn':'normal'},
+          {label:'Week scheduled',value:`$${Math.round(weekRevenue)}`,detail:`${weekRows.length} stop${weekRows.length===1?'':'s'} on the books`,tone:'normal'}
+        ]
+
+        setAnswer({mode:'brief',title:'What needs your attention',targetDate:'',filters,candidates:[],brief,summary:'Here is the business snapshot Betty would check first.'})
+        return
+      }
+
+      if (bettyIntent === 'confirmations') {
         const currentWeekStart = mondayForDate(today)
         const weekEndDate = new Date(`${currentWeekStart}T12:00:00Z`)
         weekEndDate.setUTCDate(weekEndDate.getUTCDate()+4)
@@ -5130,7 +5411,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
       if (filters.service) summaryBits.push(filters.service)
       setAnswer({title,targetDate,filters,candidates,summary:summaryBits.join(' · ')})
     } catch(err) {
-      setError(err?.message || 'Ask Planner could not check your schedule.')
+      setError(err?.message || 'Ask Betty could not check your schedule.')
     } finally {
       setLoading(false)
     }
@@ -5157,7 +5438,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
         groomer,
         time:candidate.suggestedTime || defaultFirstStopTime(groomer),
         fixed:false,
-        note:answer?.filters?.unbookedOnly ? 'Rebooked from Ask Planner' : 'Added from Ask Planner'
+        note:answer?.filters?.unbookedOnly ? 'Rebooked from Ask Betty' : 'Added from Ask Betty'
       })
       return
     }
@@ -5166,6 +5447,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
   }
 
   const quick = [
+    'What needs my attention?',
     'Who should I add Wednesday?',
     'Who is overdue near The Woodlands?',
     "Who hasn't been booked back yet?",
@@ -5173,19 +5455,29 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
   ]
 
   return (
-    <div className="sheet-backdrop" onMouseDown={onClose}>
-      <div className="assistant-sheet" onMouseDown={e=>e.stopPropagation()} style={{maxHeight:'90dvh',overflowY:'auto'}}>
+    <div
+      className="sheet-backdrop"
+      onPointerDown={event=>{ if(event.target===event.currentTarget) onClose?.() }}
+      style={{zIndex:200,pointerEvents:'auto'}}
+    >
+      <div
+        ref={sheetRef}
+        className="assistant-sheet"
+        onPointerDown={event=>event.stopPropagation()}
+        onScroll={event=>{ savedScrollRef.current=event.currentTarget.scrollTop; saveMemory({scrollTop:event.currentTarget.scrollTop}) }}
+        style={{maxHeight:'90dvh',overflowY:'auto',position:'relative',zIndex:201,pointerEvents:'auto',touchAction:'manipulation'}}
+      >
         <div className="sheet-handle"/>
         <div className="assistant-title">
-          <div className="ai-orb"><WandSparkles size={19}/></div>
-          <div><span>Ask Planner</span><strong>What do you want to figure out?</strong></div>
+          <div className="ai-orb" aria-hidden="true">🐾</div>
+          <div><span>🐾 Ask Betty</span><strong>Your AI grooming business assistant</strong></div>
           <button className="icon-btn" onClick={onClose}><X size={18}/></button>
         </div>
         <div className="quick-prompts">
           {quick.map(q=><button key={q} onClick={()=>run(q)}>{q}</button>)}
         </div>
         <div className="ai-input">
-          <Sparkles size={18}/><input value={text} disabled={loading} onChange={e=>setText(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();run()}}} placeholder="Try: I need a $100+ groom Thursday…"/>
+          <input value={text} disabled={loading} onChange={e=>setText(e.target.value)} onFocus={()=>{ setTimeout(()=>scrollBettyToBottom('smooth'),250) }} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();run()}}} placeholder="Ask Betty: who can fill Thursday at 1?"/>
           <button disabled={loading || !text.trim()} onClick={()=>run()}>{loading?'Checking…':'Ask'}</button>
         </div>
 
@@ -5195,7 +5487,27 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
           <div className="ai-result">
             <div className="result-head"><CheckCircle2 size={17}/><strong>{answer.title}</strong></div>
             {answer.summary && <p style={{marginTop:6}}>{answer.summary}</p>}
-            {answer.candidates.length===0 ? (
+            {answer.mode==='ai' ? (
+              <div style={{display:'grid',gap:8,marginTop:10}}>
+                {(conversation.length?conversation.slice(-8):[{role:'assistant',text:answer.text || 'Betty did not return an answer.'}]).map((message,index)=>(
+                  <div key={`${message.role}-${index}`} style={{display:'flex',justifyContent:message.role==='user'?'flex-end':'flex-start'}}>
+                    <div style={{maxWidth:'88%',padding:'10px 12px',border:'1px solid #e6e8ed',borderRadius:12,background:message.role==='user'?'#eef2fb':'#f8f9fb',fontSize:13,lineHeight:1.5,color:'#2f3748',whiteSpace:'pre-wrap'}}>
+                      {message.text}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : answer.mode==='brief' ? (
+              <div style={{display:'grid',gap:8,marginTop:10}}>
+                {(answer.brief || []).map(item=>(
+                  <div key={item.label} style={{display:'grid',gridTemplateColumns:'1fr auto',gap:10,alignItems:'center',padding:'11px 12px',border:'1px solid #e6e8ed',borderRadius:12,background:item.tone==='warn'?'#fff9ec':item.tone==='good'?'#effaf2':'#f8f9fb'}}>
+                    <div><strong style={{display:'block',fontSize:13}}>{item.label}</strong><span style={{fontSize:11,color:'#7b828e'}}>{item.detail}</span></div>
+                    <strong style={{fontSize:18,color:item.tone==='warn'?'#8a651e':item.tone==='good'?'#267447':'#172038'}}>{item.value}</strong>
+                  </div>
+                ))}
+                <div className="prototype-note" style={{marginTop:2}}>Tap another Betty prompt for the actual client list, route fit, pricing, or rebooking suggestions.</div>
+              </div>
+            ) : answer.candidates.length===0 ? (
               <div className="prototype-note">I couldn't find an unbooked client that matches those filters right now. Try widening the area, price, service length, or day.</div>
             ) : (
               <div className="candidate-list">
@@ -5230,14 +5542,14 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
                 })}
               </div>
             )}
-            {answer.candidates.length>0 && answer.targetDate && <div className="prototype-note" style={{marginTop:10}}>Tap a client to open Add Appointment with the day, client, groomer, and suggested time filled in. You can review everything before saving.</div>}
-            {answer.candidates.length>0 && !answer.targetDate && answer.filters?.unbookedOnly && <div className="prototype-note" style={{marginTop:10}}>Tap a client to rebook them. Add Appointment will open with the client already selected; you can change the date, groomer, time, and services before saving.</div>}
-            {answer.candidates.length>0 && !answer.targetDate && answer.mode==='price' && <div className="prototype-note" style={{marginTop:10}}>Tap the client to open their full Client Details.</div>}
+            {answer.mode!=='brief' && answer.mode!=='ai' && answer.candidates.length>0 && answer.targetDate && <div className="prototype-note" style={{marginTop:10}}>Tap a client to open Add Appointment with the day, client, groomer, and suggested time filled in. You can review everything before saving.</div>}
+            {answer.mode!=='brief' && answer.mode!=='ai' && answer.candidates.length>0 && !answer.targetDate && answer.filters?.unbookedOnly && <div className="prototype-note" style={{marginTop:10}}>Tap a client to rebook them. Add Appointment will open with the client already selected; you can change the date, groomer, time, and services before saving.</div>}
+            {answer.mode!=='brief' && answer.mode!=='ai' && answer.candidates.length>0 && !answer.targetDate && answer.mode==='price' && <div className="prototype-note" style={{marginTop:10}}>Tap the client to open their full Client Details.</div>}
             {answer.candidates.length>0 && answer.mode==='confirmation' && <div className="prototype-note" style={{marginTop:10}}>These appointments are not confirmed yet. Use the confirmation control on Week or Today to mark Confirmed, Needs reply, or Can’t make it.</div>}
-            {answer.candidates.length>0 && !answer.targetDate && !answer.filters?.unbookedOnly && answer.mode!=='price' && answer.mode!=='confirmation' && <div className="prototype-note" style={{marginTop:10}}>Tap any client to open their details. Ask with a day, like “Who should I add Thursday?”, to get appointment-ready suggestions.</div>}
+            {answer.mode!=='brief' && answer.mode!=='ai' && answer.candidates.length>0 && !answer.targetDate && !answer.filters?.unbookedOnly && answer.mode!=='price' && answer.mode!=='confirmation' && <div className="prototype-note" style={{marginTop:10}}>Tap any client to open their details. Ask with a day, like “Who should I add Thursday?”, to get appointment-ready suggestions.</div>}
           </div>
         )}
-        <div className="prototype-note" style={{marginTop:12,textAlign:'left'}}>Ask Planner reads your current clients and schedule. For day-specific questions it also uses your saved groomer rules, appointment lengths, and Google route data.</div>
+        <div className="prototype-note" style={{marginTop:12,textAlign:'left'}}>Betty reads your current clients and schedule. Ask “What needs my attention?” for a quick business brief, or ask about confirmations, rebooking, pricing, openings, and route fit.</div>
       </div>
     </div>
   )
@@ -5865,12 +6177,21 @@ export default function App() {
   const [completingId,setCompletingId]=useState('')
   const [confirmingId,setConfirmingId]=useState('')
   const [paymentSavingId,setPaymentSavingId]=useState('')
-  const [assistant,setAssistant]=useState({open:false,initial:''})
+  const [assistant,setAssistant]=useState(()=>{
+    if(typeof window==='undefined') return {open:false,initial:''}
+    try {
+      const saved=JSON.parse(sessionStorage.getItem('grooming-ask-betty-shell-v1') || 'null')
+      return {open:Boolean(saved?.open),initial:''}
+    } catch { return {open:false,initial:''} }
+  })
   const [clientJump,setClientJump]=useState(null)
   const [addAppointment,setAddAppointment]=useState({open:false,date:businessDateKey(),preset:null})
   const [fillOpening,setFillOpening]=useState({open:false,date:businessDateKey(),groomer:'All',appointments:[]})
   const ask=(initial='')=>setAssistant({open:true,initial})
 
+  useEffect(()=>{
+    try { sessionStorage.setItem('grooming-ask-betty-shell-v1',JSON.stringify({open:assistant.open})) } catch {}
+  },[assistant.open])
   useEffect(()=>{ ensureGroomingWebAppMetadata() },[])
   const openRebookForClient = client => {
     const assigned=[...new Set((client?.rows || []).map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))]
@@ -6123,7 +6444,14 @@ export default function App() {
       <header className="topbar">
         <div className="brand-mark">GP</div>
         <div><strong>Grooming Planner</strong><span>{viewerMode ? 'Viewer demo · read only' : 'Mobile business dashboard'}</span></div>
-        <button className="top-ai" onClick={()=>ask()}><Sparkles size={16}/>Ask Planner</button>
+        <button
+          type="button"
+          className="top-ai"
+          onPointerDown={event=>event.stopPropagation()}
+          onTouchStart={event=>event.stopPropagation()}
+          onClick={event=>{event.preventDefault();event.stopPropagation();ask()}}
+          style={{position:'relative',zIndex:80,pointerEvents:'auto',touchAction:'manipulation',WebkitTapHighlightColor:'transparent'}}
+        >🐾 Ask Betty</button>
       </header>
       <main>
         {viewerMode && <div className="viewer-banner"><div><span className="viewer-badge">Viewer</span> <strong>Read-only demo</strong> · Client phone numbers and street addresses are hidden, and changes are blocked.</div><button type="button" onClick={()=>supabase?.auth?.signOut?.()}>Sign out</button></div>}
@@ -6133,8 +6461,15 @@ export default function App() {
         {body}
       </main>
 
-      <button className="floating-ai" onClick={()=>ask()}>
-        <Sparkles size={18}/><span>Ask Planner</span>
+      <button
+        type="button"
+        className="floating-ai"
+        onPointerDown={event=>event.stopPropagation()}
+        onTouchStart={event=>event.stopPropagation()}
+        onClick={event=>{event.preventDefault();event.stopPropagation();ask()}}
+        style={{zIndex:90,pointerEvents:'auto',touchAction:'manipulation',WebkitTapHighlightColor:'transparent'}}
+      >
+        <span>🐾 Ask Betty</span>
       </button>
 
       <nav className="bottom-nav">
