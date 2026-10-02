@@ -1,4 +1,13 @@
 export default async function handler(req, res) {
+  // Allow Grooming Planner's native Capacitor app to call this Vercel endpoint.
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Use POST." });
   }
@@ -6,14 +15,18 @@ export default async function handler(req, res) {
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
-    return res.status(500).json({ error: "OPENAI_API_KEY is not configured." });
+    return res.status(500).json({
+      error: "OPENAI_API_KEY is not configured."
+    });
   }
 
   try {
     const { message, context } = req.body || {};
 
     if (!message || typeof message !== "string") {
-      return res.status(400).json({ error: "A message is required." });
+      return res.status(400).json({
+        error: "A message is required."
+      });
     }
 
     const response = await fetch("https://api.openai.com/v1/responses", {
@@ -67,7 +80,9 @@ ${message}
     if (!response.ok) {
       console.error("OpenAI error:", data);
       return res.status(response.status).json({
-        error: data?.error?.message || "Betty could not reach OpenAI.",
+        error:
+          data?.error?.message ||
+          "Betty could not reach OpenAI."
       });
     }
 
@@ -83,7 +98,7 @@ ${message}
   } catch (error) {
     console.error("Ask Betty error:", error);
     return res.status(500).json({
-      error: "Betty had trouble answering. Please try again.",
+      error: "Betty had trouble answering. Please try again."
     });
   }
 }
