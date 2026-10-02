@@ -430,6 +430,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
   const [showTextMenu,setShowTextMenu] = useState(false)
   const [showLate,setShowLate] = useState(false)
   const [etaLoading,setEtaLoading] = useState(false)
+  const [etaReady,setEtaReady] = useState(null)
   const [communicationError,setCommunicationError] = useState('')
   const [lastContact,setLastContact] = useState(()=>readAppointmentContact(appt))
   const row = appt?.sourceRow || {}
@@ -471,7 +472,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
       if (error?.name !== 'AbortError') setCommunicationError(error?.message || 'Could not share the appointment address.')
     }
   }
-  useEffect(()=>{ setLastContact(readAppointmentContact(appt)); setCommunicationError('') },[appt?.id,appt?.date,appt?.time])
+  useEffect(()=>{ setLastContact(readAppointmentContact(appt)); setCommunicationError(''); setEtaReady(null); setEtaLoading(false) },[appt?.id,appt?.date,appt?.time])
   useEffect(()=>{
     setPaymentMethod(savedPaymentMethod || (['Cash','Check'].includes(groomerPaymentType) ? groomerPaymentType : ''))
     setTipInput(savedTip ? String(savedTip) : '')
@@ -484,12 +485,24 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
   }
   const sendOnMyWay = async () => {
     if (etaLoading) return
+    if (etaReady?.body) {
+      sendAppointmentText(etaReady.body,'On my way')
+      setEtaReady(null)
+      setShowTextMenu(false)
+      return
+    }
     setEtaLoading(true); setCommunicationError('')
     try {
-      const eta = await googleEtaToAppointment(appt,dogs)
+      const eta = await Promise.race([
+        googleEtaToAppointment(appt,dogs),
+        new Promise((_,reject)=>setTimeout(()=>reject(new Error('Google ETA took too long. Check your connection and try again.')),15000))
+      ])
       const arrivalTime = etaArrivalClock(eta?.etaMinutes)
-      sendAppointmentText(onMyWayMessage({owner:appt.owner,arrivalTime}),'On my way')
+      const body=onMyWayMessage({owner:appt.owner,arrivalTime})
+      setEtaReady({arrivalTime,body})
+      setCommunicationError(`ETA ready: about ${arrivalTime}. Tap “Send ETA text” to open the message.`)
     } catch (error) {
+      setEtaReady(null)
       setCommunicationError(error?.message || 'Could not get a live Google ETA.')
     } finally { setEtaLoading(false) }
   }
@@ -556,7 +569,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
                 }}>Confirm</button>
                 {clientConfirmationStatus(row)!=='Confirmed' && onConfirmation && <button type="button" onClick={()=>{onConfirmation(appt,'Confirmed');setShowTextMenu(false)}}>Mark confirmed ✓</button>}
                 <button type="button" onClick={()=>sendAppointmentText(reminderMessage({owner:appt.owner,dogs:appt.dogs,date:appt.date,time:appt.time}),'Reminder')}>Reminder</button>
-                {date===today && <button type="button" disabled={etaLoading} onClick={sendOnMyWay}>{etaLoading?'Getting ETA…':'On my way'}</button>}
+                {date===today && <button type="button" disabled={etaLoading} onClick={sendOnMyWay}>{etaLoading?'Getting ETA…':etaReady?.body?'Send ETA text':'On my way'}</button>}
                 <button type="button" onClick={()=>setShowLate(value=>!value)}>Running late</button>
                 {date===today && <button type="button" onClick={()=>sendAppointmentText(imHereMessage({owner:appt.owner}),"I'm here")}>I'm here</button>}
                 {date===today && <button type="button" onClick={()=>sendAppointmentText(needAccessMessage({owner:appt.owner}),'Need access')}>Need access</button>}
@@ -4766,6 +4779,16 @@ function plannerResolveDate(text,todayKey=businessDateKey()) {
   }
   const iso = lower.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/)
   if (iso) return iso[0]
+  const monthNames={january:0,jan:0,february:1,feb:1,march:2,mar:2,april:3,apr:3,may:4,june:5,jun:5,july:6,jul:6,august:7,aug:7,september:8,sep:8,sept:8,october:9,oct:9,november:10,nov:10,december:11,dec:11}
+  const monthHit=lower.match(/\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|sept|october|oct|november|nov|december|dec)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(20\d{2}))?\b/)
+  if(monthHit){
+    const month=monthNames[monthHit[1]]
+    const day=Number(monthHit[2])
+    let year=Number(monthHit[3] || today.getUTCFullYear())
+    let candidate=new Date(Date.UTC(year,month,day,12))
+    if(!monthHit[3] && candidate < today){ candidate=new Date(Date.UTC(year+1,month,day,12)) }
+    if(candidate.getUTCMonth()===month && candidate.getUTCDate()===day) return candidate.toISOString().slice(0,10)
+  }
   return ''
 }
 
@@ -4867,6 +4890,50 @@ function bettyRescheduleRequest(text) {
   subject = subject.replace(/^(?:the|my)\s+/i,'').replace(/\s+(?:appointment|appt)$/i,'').trim()
   if (!subject) return null
   return {subject,targetDate}
+}
+
+function bettySpecificBookingRequest(text) {
+  const raw=String(text || '').trim()
+  const lower=raw.toLowerCase().replace(/[’]/g,"'")
+  if (!/\b(add|book|schedule)\b/.test(lower)) return null
+  if (/\b(who|which|anyone|somebody|someone|clients?|dogs?)\b/.test(lower) && !/\b(?:add|book|schedule)\s+(?:client\s+)?[a-z]/i.test(raw)) return null
+  const targetDate=plannerResolveDate(lower)
+  if(!targetDate) return null
+  const patterns=[
+    /(?:can\s+you\s+|could\s+you\s+|please\s+)?(?:add|book|schedule)\s+(?:an?\s+appointment\s+for\s+)?(.+?)\s+(?:to|for|on)\s+(?:next\s+)?(?:today|tomorrow|sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat|20\d{2}-\d{2}-\d{2}|(?:january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|sept|october|oct|november|nov|december|dec)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*20\d{2})?)(?:\?|$)/i,
+    /(?:add|book|schedule)\s+(.+?)\s+(?:appointment\s+)?(?:to|for|on)\s+.+$/i
+  ]
+  const hit=patterns.map(pattern=>raw.match(pattern)).find(Boolean)
+  let subject=String(hit?.[1] || '').trim().replace(/^(?:the|my)\s+/i,'').replace(/\s+(?:appointment|appt)$/i,'').trim()
+  if(!subject) return null
+  return {subject,targetDate}
+}
+
+function bettyScheduleLookupRequest(text,todayKey=businessDateKey()) {
+  const lower=String(text || '').toLowerCase().replace(/[’]/g,"'")
+  const asksExisting=/\b(what|which|show|list|tell me|who)\b/.test(lower) && /\b(dogs?|clients?|appointments?|stops?|schedule|booked|on)\b/.test(lower)
+  if(!asksExisting) return null
+  if(/\b(add|fill|opening|should i add|can i add|need to add|move|reschedule|change)\b/.test(lower)) return null
+  const today=new Date(`${todayKey}T12:00:00Z`)
+  const thisMonday=new Date(today); thisMonday.setUTCDate(today.getUTCDate()-((today.getUTCDay()+6)%7))
+  let start='',end='',label=''
+  if(/\bnext week\b/.test(lower)){
+    const d=new Date(thisMonday); d.setUTCDate(d.getUTCDate()+7); start=d.toISOString().slice(0,10)
+    const e=new Date(d); e.setUTCDate(e.getUTCDate()+4); end=e.toISOString().slice(0,10); label='Next week'
+  } else if(/\bthis week\b/.test(lower)){
+    start=thisMonday.toISOString().slice(0,10); const e=new Date(thisMonday); e.setUTCDate(e.getUTCDate()+4); end=e.toISOString().slice(0,10); label='This week'
+  } else {
+    const date=plannerResolveDate(lower,todayKey)
+    if(!date) return null
+    start=end=date; label=plannerDayLabel(date)
+  }
+  return {start,end,label}
+}
+
+function bettyExplicitSuggestionRequest(text,hasPreviousPlannerResult=false) {
+  const lower=String(text || '').toLowerCase().replace(/[’]/g,"'")
+  if(hasPreviousPlannerResult && /\b(instead|what about|which one|another|more|cheaper|closest|pays? the most)\b/.test(lower)) return true
+  return /\b(who|which client|which dog|anyone|someone)\b/.test(lower) && /\b(add|book|schedule|fill|fit|opening|overdue|rebook|not booked|booked back)\b/.test(lower)
 }
 
 function bettyAppointmentMatchScore(row, subject) {
@@ -5002,6 +5069,8 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
       const today = businessDateKey()
       let filters = plannerQueryFilters(prompt,dogs)
       const groups = plannerClientGroups(dogs)
+      const specificBookingRequest=bettySpecificBookingRequest(prompt)
+      const scheduleLookupRequest=bettyScheduleLookupRequest(prompt,today)
 
       // Action requests are handled before the suggestion router so a day name
       // like "Thursday" cannot accidentally turn "move Nikki to Thursday" into
@@ -5091,6 +5160,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
       }
       const previousPlannerResult = summarizePlannerAnswer(previousAnswer)
       const priorConversation = conversation.slice(-12)
+      const explicitSuggestionRequest=bettyExplicitSuggestionRequest(prompt,Boolean(previousPlannerResult))
 
       let bettyIntent = 'general'
       const obviousWeather = /\b(weather|forecast|rain|storm|temperature|temp|heat index|cold front)\b/i.test(prompt)
@@ -5114,6 +5184,8 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
           }
         } catch {}
       }
+      if (specificBookingRequest || scheduleLookupRequest) bettyIntent='general'
+      if (bettyIntent==='planner_schedule' && !explicitSuggestionRequest) bettyIntent='general'
 
       if (bettyIntent === 'planner_schedule' && previousPlannerResult) {
         const prior = previousPlannerResult.filters || {}
@@ -5195,6 +5267,60 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
 
       const planRows = (data || []).flatMap(week=>Array.isArray(week.plan_json)?week.plan_json:[])
       const activeRows = planRows.filter(row=>plannerActiveRow(row,today))
+
+      if (scheduleLookupRequest) {
+        const rows=activeRows.filter(row=>{
+          const date=String(row?.Date || '').slice(0,10)
+          return date>=scheduleLookupRequest.start && date<=scheduleLookupRequest.end
+        }).sort((a,b)=>String(a.Date || '').localeCompare(String(b.Date || '')) || clockMinutesForDisplay(String(a['Start Time'] || a['Locked Time'] || ''))-clockMinutesForDisplay(String(b['Start Time'] || b['Locked Time'] || '')))
+        const items=rows.map(row=>({
+          date:String(row.Date || '').slice(0,10),
+          time:String(row['Start Time'] || row['Locked Time'] || '').trim(),
+          owner:String(row.Owner || '').trim(),
+          dogs:String(row.Dogs || '').trim(),
+          groomer:String(row.Groomer || '').trim(),
+          area:String(row['Area Cluster'] || row.Area || '').trim(),
+          price:Number(row.Price || 0) || 0,
+          confirmation:clientConfirmationStatus(row)
+        }))
+        const reply=items.length ? `${scheduleLookupRequest.label}: ${items.length} appointment${items.length===1?'':'s'} on the schedule.` : `${scheduleLookupRequest.label}: no appointments are currently scheduled.`
+        const nextConversation=[...priorConversation,{role:'user',text:prompt},{role:'assistant',text:reply}].slice(-16)
+        setConversation(nextConversation)
+        setAnswer({mode:'schedule_list',title:scheduleLookupRequest.label,text:reply,scheduleItems:items,targetDate:'',filters:{},candidates:[],summary:''})
+        return
+      }
+
+      if (specificBookingRequest) {
+        const ranked=groups.map(client=>({client,score:bettyAppointmentMatchScore({Owner:client.owner,Dogs:client.rows.map(row=>row?.dog || row?.Dog || '').join(' + ')},specificBookingRequest.subject)})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score)
+        const match=ranked[0]?.client
+        if(!match){
+          const reply=`I couldn't find ${specificBookingRequest.subject} in your client list. Try the owner or dog name exactly as it appears.`
+          const nextConversation=[...priorConversation,{role:'user',text:prompt},{role:'assistant',text:reply}].slice(-16)
+          setConversation(nextConversation); setAnswer({mode:'ai',title:'Betty',text:reply,targetDate:'',filters:{},candidates:[],summary:''}); return
+        }
+        const existing=activeRows.filter(row=>{
+          const h=String(row?.['Household ID'] || '').trim(); const owner=String(row?.Owner || '').trim().toLowerCase()
+          return (match.household && h===match.household) || (!match.household && owner===match.owner.toLowerCase())
+        }).sort((a,b)=>String(a.Date || '').localeCompare(String(b.Date || '')))
+        const assigned=[...new Set(match.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))]
+        const targetDate=specificBookingRequest.targetDate
+        const weekday=new Date(`${targetDate}T12:00:00Z`).getUTCDay()
+        let targetGroomer=assigned.length===1?assigned[0]:(weekday===1 || weekday===5?'Haley':'Jen')
+        if(targetGroomer==='Jen' && ![2,3,4].includes(weekday)) targetGroomer='Haley'
+        const dayAppointments=todayAppointments(planRows,targetDate,'All')
+        const totals=plannerClientTotals(match.rows)
+        const minutes=Math.max(30,Math.round(totals.minutes || 60))
+        const suggestedTime=openingForDuration(dayAppointments,minutes,targetGroomer) || defaultFirstStopTime(targetGroomer)
+        const warnings=schedulingOverrideReasons(targetDate,targetGroomer,assigned)
+        const existingOther=existing.find(row=>String(row.Date || '').slice(0,10)!==targetDate)
+        const proposal=existingOther
+          ? `${match.owner} already has an appointment ${plannerDayLabel(String(existingOther.Date || '').slice(0,10))}. I can set up another appointment for ${plannerDayLabel(targetDate)} at ${displayClockTime(suggestedTime)} with ${targetGroomer}, or you can ask me to move the existing appointment instead.`
+          : `Set up ${match.owner} for ${plannerDayLabel(targetDate)} at ${displayClockTime(suggestedTime)} with ${targetGroomer}?`
+        const nextConversation=[...priorConversation,{role:'user',text:prompt},{role:'assistant',text:proposal}].slice(-16)
+        setConversation(nextConversation)
+        setAnswer({mode:'booking',title:'Add appointment',text:proposal,targetDate,filters:{},candidates:[],summary:'',booking:{clientKey:match.key,owner:match.owner,dogs:match.rows.map(row=>String(row?.dog || row?.Dog || '').trim()).filter(Boolean).join(' + '),targetDate,targetGroomer,suggestedTime,warnings,existingDate:existingOther?String(existingOther.Date || '').slice(0,10):''}})
+        return
+      }
 
       const attentionIntent = bettyIntent === 'brief'
 
@@ -5582,6 +5708,13 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
     }
   }
 
+  const confirmBettyBooking = () => {
+    const booking=answer?.booking
+    if(!booking || viewerMode || (booking.warnings || []).length) return
+    onClose?.()
+    onChoose?.({date:booking.targetDate,clientKey:booking.clientKey,groomer:booking.targetGroomer,time:booking.suggestedTime,fixed:false,note:'Added from Ask Betty'})
+  }
+
   const choose = candidate => {
     if (viewerMode) {
       onClose?.()
@@ -5647,7 +5780,22 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
           <div className="ai-result">
             <div className="result-head"><CheckCircle2 size={17}/><strong>{answer.title}</strong></div>
             {answer.summary && <p style={{marginTop:6}}>{answer.summary}</p>}
-            {answer.mode==='reschedule' ? (
+            {answer.mode==='booking' ? (
+              <div style={{display:'grid',gap:10,marginTop:10}}>
+                <div style={{padding:'12px',border:'1px solid #cfe0d4',borderRadius:12,background:'#f1faf3'}}>
+                  <div style={{fontSize:12,color:'#4f7b5e',marginBottom:7}}>PROPOSED APPOINTMENT</div>
+                  <strong style={{display:'block',fontSize:14}}>{answer.booking.owner} · {answer.booking.dogs}</strong>
+                  <span style={{display:'block',marginTop:4,fontSize:12,color:'#566071'}}>{plannerDayLabel(answer.booking.targetDate)} · {displayClockTime(answer.booking.suggestedTime)} · {answer.booking.targetGroomer}</span>
+                </div>
+                {answer.booking.existingDate && <div className="schedule-check warning" style={{margin:0}}><div className="schedule-check-title">Already on the schedule</div><div>{answer.booking.owner} also has an active appointment {plannerDayLabel(answer.booking.existingDate)}. Use “move” if you meant to replace that appointment.</div></div>}
+                {(answer.booking.warnings || []).length>0 ? <div className="schedule-check warning" style={{margin:0}}>{(answer.booking.warnings || []).map((warning,index)=><div key={index}>• {warning}</div>)}</div> : !viewerMode ? <button type="button" className="login-button" onClick={confirmBettyBooking}>Review appointment</button> : <div className="prototype-note">Viewer mode is read-only.</div>}
+                <div className="prototype-note">Review appointment opens Add Appointment with the client, date, groomer, and suggested time filled in. Nothing is saved until you tap Add appointment.</div>
+              </div>
+            ) : answer.mode==='schedule_list' ? (
+              <div style={{display:'grid',gap:8,marginTop:10}}>
+                {(answer.scheduleItems || []).length===0 ? <div className="prototype-note">No appointments are scheduled for that period.</div> : (answer.scheduleItems || []).map((item,index)=><div key={`${item.date}-${item.time}-${item.owner}-${index}`} style={{padding:'10px 12px',border:'1px solid #e6e8ed',borderRadius:12,background:'#f8f9fb'}}><strong style={{display:'block',fontSize:13}}>{plannerDayLabel(item.date)} · {displayClockTime(item.time)}</strong><span style={{display:'block',marginTop:3,fontSize:12,color:'#566071'}}>{item.owner} · {item.dogs}</span><span style={{display:'block',marginTop:2,fontSize:11,color:'#7b828e'}}>{[item.groomer,item.area,item.confirmation,item.price?`$${Math.round(item.price)}`:''].filter(Boolean).join(' · ')}</span></div>)}
+              </div>
+            ) : answer.mode==='reschedule' ? (
               <div style={{display:'grid',gap:10,marginTop:10}}>
                 <div style={{padding:'12px',border:'1px solid #e6e8ed',borderRadius:12,background:'#f8f9fb'}}>
                   <div style={{fontSize:12,color:'#7b828e',marginBottom:7}}>CURRENT</div>
@@ -5729,11 +5877,11 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
                 })}
               </div>
             )}
-            {answer.mode!=='brief' && answer.mode!=='ai' && answer.candidates.length>0 && answer.targetDate && <div className="prototype-note" style={{marginTop:10}}>Tap a client to open Add Appointment with the day, client, groomer, and suggested time filled in. You can review everything before saving.</div>}
-            {answer.mode!=='brief' && answer.mode!=='ai' && answer.candidates.length>0 && !answer.targetDate && answer.filters?.unbookedOnly && <div className="prototype-note" style={{marginTop:10}}>Tap a client to rebook them. Add Appointment will open with the client already selected; you can change the date, groomer, time, and services before saving.</div>}
-            {answer.mode!=='brief' && answer.mode!=='ai' && answer.candidates.length>0 && !answer.targetDate && answer.mode==='price' && <div className="prototype-note" style={{marginTop:10}}>Tap the client to open their full Client Details.</div>}
+            {!['brief','ai','booking','schedule_list','reschedule'].includes(answer.mode) && answer.candidates.length>0 && answer.targetDate && <div className="prototype-note" style={{marginTop:10}}>Tap a client to open Add Appointment with the day, client, groomer, and suggested time filled in. You can review everything before saving.</div>}
+            {!['brief','ai','booking','schedule_list','reschedule'].includes(answer.mode) && answer.candidates.length>0 && !answer.targetDate && answer.filters?.unbookedOnly && <div className="prototype-note" style={{marginTop:10}}>Tap a client to rebook them. Add Appointment will open with the client already selected; you can change the date, groomer, time, and services before saving.</div>}
+            {answer.mode==='price' && answer.candidates.length>0 && !answer.targetDate && <div className="prototype-note" style={{marginTop:10}}>Tap the client to open their full Client Details.</div>}
             {answer.candidates.length>0 && answer.mode==='confirmation' && <div className="prototype-note" style={{marginTop:10}}>These appointments are not confirmed yet. Use the confirmation control on Week or Today to mark Confirmed, Needs reply, or Can’t make it.</div>}
-            {answer.mode!=='brief' && answer.mode!=='ai' && answer.candidates.length>0 && !answer.targetDate && !answer.filters?.unbookedOnly && answer.mode!=='price' && answer.mode!=='confirmation' && <div className="prototype-note" style={{marginTop:10}}>Tap any client to open their details. Ask with a day, like “Who should I add Thursday?”, to get appointment-ready suggestions.</div>}
+            {!['brief','ai','booking','schedule_list','reschedule','price','confirmation'].includes(answer.mode) && answer.candidates.length>0 && !answer.targetDate && !answer.filters?.unbookedOnly && <div className="prototype-note" style={{marginTop:10}}>Tap any client to open their details. Ask with a day, like “Who should I add Thursday?”, to get appointment-ready suggestions.</div>}
           </div>
         )}
         <div style={{position:'sticky',bottom:0,zIndex:8,background:'linear-gradient(180deg,rgba(255,255,255,0) 0%,#fff 18%,#fff 100%)',padding:'18px 0 max(10px, env(safe-area-inset-bottom))',marginTop:10}}>
