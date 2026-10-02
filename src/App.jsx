@@ -4891,6 +4891,17 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
     } catch {}
   }
 
+  const clearAndClose=()=>{
+    try { sessionStorage.removeItem(memoryKey) } catch {}
+    setText('')
+    setLoading(false)
+    setError('')
+    setAnswer(null)
+    setConversation([])
+    savedScrollRef.current=0
+    onClose?.()
+  }
+
   useEffect(()=>{
     if(!open) return
     const saved=readMemory()
@@ -4984,21 +4995,27 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
       const priorConversation = conversation.slice(-12)
 
       let bettyIntent = 'general'
-      try {
-        const routeResponse = await fetch(apiUrl('/api/ask-betty'),{
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({
-            mode:'route',
-            message:prompt,
-            context:{conversation:priorConversation,previousPlannerResult}
+      const obviousWeather = /\b(weather|forecast|rain|storm|temperature|temp|heat index|cold front)\b/i.test(prompt)
+      const obviousGeneral = /\b(commission|earnings?|make (?:today|tomorrow|this week)|what time|time is it|revenue|sales total|my share|haley(?:'s)? share)\b/i.test(prompt)
+      if (obviousWeather) {
+        bettyIntent = 'weather'
+      } else if (!obviousGeneral) {
+        try {
+          const routeResponse = await fetch(apiUrl('/api/ask-betty'),{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+              mode:'route',
+              message:prompt,
+              context:{conversation:priorConversation,previousPlannerResult}
+            })
           })
-        })
-        const routePayload = await routeResponse.json().catch(()=>({}))
-        if (routeResponse.ok && ['planner_schedule','client_price','confirmations','brief','general'].includes(routePayload?.intent)) {
-          bettyIntent = routePayload.intent
-        }
-      } catch {}
+          const routePayload = await routeResponse.json().catch(()=>({}))
+          if (routeResponse.ok && ['planner_schedule','client_price','confirmations','brief','weather','general'].includes(routePayload?.intent)) {
+            bettyIntent = routePayload.intent
+          }
+        } catch {}
+      }
 
       if (bettyIntent === 'planner_schedule' && previousPlannerResult) {
         const prior = previousPlannerResult.filters || {}
@@ -5010,6 +5027,22 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
         if (!filters.routeIntent && prior.routeIntent) filters.routeIntent = true
         if (!filters.unbookedOnly && prior.unbookedOnly) filters.unbookedOnly = true
         if (!filters.overdueOnly && prior.overdueOnly) filters.overdueOnly = true
+      }
+
+      if (bettyIntent === 'weather') {
+        const response = await fetch(apiUrl('/api/ask-betty'),{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({mode:'weather',message:prompt})
+        })
+        const payload = await response.json().catch(()=>({}))
+        if (!response.ok) throw new Error(payload?.error || `Betty could not check the weather (${response.status}).`)
+        const reply=String(payload?.answer || '').trim() || 'Betty could not return the weather.'
+        const nextConversation=[...priorConversation,{role:'user',text:prompt},{role:'assistant',text:reply}].slice(-16)
+        shouldAutoScrollRef.current=true
+        setConversation(nextConversation)
+        setAnswer({mode:'ai',title:'Betty',text:reply,targetDate:'',filters:{},candidates:[],summary:''})
+        return
       }
 
       if (bettyIntent === 'client_price') {
@@ -5070,7 +5103,8 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
       // Betty decides the intent first. Only purpose-built planner questions use
       // deterministic planner cards; everything else goes to the conversational AI.
       if (bettyIntent === 'general') {
-        const clientContext = groups.slice(0,150).map(client=>({
+        const needsClientDetails = /\b(client|dog|price|cost|book|schedule|appointment|overdue|due|rebook|area|service|groom|bath|partial|route|opening|fill|confirm)\b/i.test(prompt)
+        const clientContext = (needsClientDetails ? groups.slice(0,120) : []).map(client=>({
           owner:client.owner,
           household:client.household || '',
           dogs:client.rows.map(row=>({
@@ -5090,7 +5124,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
             frequency:String(row?.frequency || row?.Frequency || '').trim()
           }))
         }))
-        const scheduleContext = activeRows.slice(0,250).map(row=>({
+        const scheduleContext = activeRows.slice(0,140).map(row=>({
           date:String(row?.Date || '').slice(0,10),
           time:String(row?.['Start Time'] || row?.['Locked Time'] || '').trim(),
           groomer:String(row?.Groomer || '').trim(),
@@ -5471,17 +5505,12 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
         <div className="assistant-title">
           <div className="ai-orb" aria-hidden="true">🐾</div>
           <div><span>🐾 Ask Betty</span><strong>Your AI grooming business assistant</strong></div>
-          <button className="icon-btn" onClick={onClose}><X size={18}/></button>
+          <button className="icon-btn" onClick={clearAndClose} aria-label="Close and clear Betty conversation"><X size={18}/></button>
         </div>
         <div className="quick-prompts">
           {quick.map(q=><button key={q} onClick={()=>run(q)}>{q}</button>)}
         </div>
-        <div className="ai-input">
-          <input value={text} disabled={loading} onChange={e=>setText(e.target.value)} onFocus={()=>{ setTimeout(()=>scrollBettyToBottom('smooth'),250) }} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();run()}}} placeholder="Ask Betty: who can fill Thursday at 1?"/>
-          <button disabled={loading || !text.trim()} onClick={()=>run()}>{loading?'Checking…':'Ask'}</button>
-        </div>
-
-        {loading && <div className="prototype-note" style={{marginTop:12}}>Checking clients, future bookings, schedule openings, and Google route fit…</div>}
+        {loading && <div className="prototype-note" style={{marginTop:12}}>🐾 Betty is thinking…</div>}
         {error && <div className="login-message" role="alert" style={{marginTop:12}}>{error}</div>}
         {answer && !loading && (
           <div className="ai-result">
@@ -5549,7 +5578,20 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,viewerMode=
             {answer.mode!=='brief' && answer.mode!=='ai' && answer.candidates.length>0 && !answer.targetDate && !answer.filters?.unbookedOnly && answer.mode!=='price' && answer.mode!=='confirmation' && <div className="prototype-note" style={{marginTop:10}}>Tap any client to open their details. Ask with a day, like “Who should I add Thursday?”, to get appointment-ready suggestions.</div>}
           </div>
         )}
-        <div className="prototype-note" style={{marginTop:12,textAlign:'left'}}>Betty reads your current clients and schedule. Ask “What needs my attention?” for a quick business brief, or ask about confirmations, rebooking, pricing, openings, and route fit.</div>
+        <div style={{position:'sticky',bottom:0,zIndex:8,background:'linear-gradient(180deg,rgba(255,255,255,0) 0%,#fff 18%,#fff 100%)',padding:'18px 0 max(10px, env(safe-area-inset-bottom))',marginTop:10}}>
+          <div className="ai-input" style={{margin:0,boxShadow:'0 -8px 20px rgba(23,32,56,.05)'}}>
+            <input
+              value={text}
+              disabled={loading}
+              onChange={e=>setText(e.target.value)}
+              onFocus={()=>{ setTimeout(()=>scrollBettyToBottom('smooth'),300) }}
+              onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();run()}}}
+              placeholder={loading?'Betty is thinking…':'Message Betty…'}
+            />
+            <button disabled={loading || !text.trim()} onClick={()=>run()}>{loading?'…':'Send'}</button>
+          </div>
+        </div>
+        <div className="prototype-note" style={{marginTop:4,textAlign:'left'}}>Betty reads your current clients and schedule. Tap X when you want to end and clear this conversation.</div>
       </div>
     </div>
   )
