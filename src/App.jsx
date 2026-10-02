@@ -332,10 +332,22 @@ function contactLabel(record) {
   return `Last text: ${type} · ${when}`
 }
 
-function currentPosition() {
+function currentPosition(timeoutMs=7000) {
   return new Promise((resolve,reject)=>{
     if (!navigator.geolocation) return reject(new Error('Location is not available on this device.'))
-    navigator.geolocation.getCurrentPosition(resolve,()=>reject(new Error('Allow location access to get a live Google ETA.')),{enableHighAccuracy:true,timeout:10000,maximumAge:60000})
+    let settled = false
+    const finish = fn => value => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      fn(value)
+    }
+    const timer = setTimeout(()=>finish(reject)(new Error('Location took too long. Check iPhone Location Services for Grooming Planner and try again.')),timeoutMs)
+    navigator.geolocation.getCurrentPosition(
+      finish(resolve),
+      finish(()=>reject(new Error('Allow location access for Grooming Planner to calculate a live ETA.'))),
+      {enableHighAccuracy:true,timeout:Math.max(3000,timeoutMs-500),maximumAge:60000}
+    )
   })
 }
 
@@ -343,19 +355,30 @@ async function googleEtaToAppointment(appt,dogs) {
   const lookup = clientAddressLookup(dogs || [])
   const address = appointmentAddress(appt,lookup)
   if (!address) throw new Error(`Add a street address for ${appt?.owner || 'this client'} first.`)
-  const position = await currentPosition()
-  const response = await fetch(apiUrl('/api/google-route'),{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      mode:'eta',
-      origin:{latitude:position.coords.latitude,longitude:position.coords.longitude},
-      destination:{address,owner:appt?.owner || 'Client'}
+  const position = await currentPosition(7000)
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+  const abortTimer = controller ? setTimeout(()=>controller.abort(),8000) : null
+  try {
+    const response = await fetch(apiUrl('/api/google-route'),{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      signal:controller?.signal,
+      body:JSON.stringify({
+        mode:'eta',
+        origin:{latitude:position.coords.latitude,longitude:position.coords.longitude},
+        destination:{address,owner:appt?.owner || 'Client'}
+      })
     })
-  })
-  const payload = await response.json().catch(()=>({}))
-  if (!response.ok) throw new Error(payload?.error || `Google ETA failed (${response.status}).`)
-  return payload
+    const payload = await response.json().catch(()=>({}))
+    if (!response.ok) throw new Error(payload?.error || `Google ETA failed (${response.status}).`)
+    if (!Number.isFinite(Number(payload?.etaMinutes))) throw new Error('Google did not return an ETA. Try again in a moment.')
+    return payload
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('Google ETA took too long. Check your connection and try again.')
+    throw error
+  } finally {
+    if (abortTimer) clearTimeout(abortTimer)
+  }
 }
 
 function etaArrivalClock(minutes) {
@@ -485,26 +508,22 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
   }
   const sendOnMyWay = async () => {
     if (etaLoading) return
-    if (etaReady?.body) {
-      sendAppointmentText(etaReady.body,'On my way')
-      setEtaReady(null)
-      setShowTextMenu(false)
-      return
-    }
     setEtaLoading(true); setCommunicationError('')
     try {
-      const eta = await Promise.race([
-        googleEtaToAppointment(appt,dogs),
-        new Promise((_,reject)=>setTimeout(()=>reject(new Error('Google ETA took too long. Check your connection and try again.')),15000))
-      ])
+      const eta = await googleEtaToAppointment(appt,dogs)
       const arrivalTime = etaArrivalClock(eta?.etaMinutes)
-      const body=onMyWayMessage({owner:appt.owner,arrivalTime})
+      const body = onMyWayMessage({owner:appt.owner,arrivalTime})
       setEtaReady({arrivalTime,body})
-      setCommunicationError(`ETA ready: about ${arrivalTime}. Tap “Send ETA text” to open the message.`)
+      setLastContact(saveAppointmentContact(appt,'On my way'))
+      setShowTextMenu(false)
+      setCommunicationError('')
+      openSms(appt.phone,body)
     } catch (error) {
       setEtaReady(null)
       setCommunicationError(error?.message || 'Could not get a live Google ETA.')
-    } finally { setEtaLoading(false) }
+    } finally {
+      setEtaLoading(false)
+    }
   }
   return (
     <div className={cardClass} style={{cursor:onOpen?'pointer':'default'}} onClick={onOpen} role={onOpen?'button':undefined} tabIndex={onOpen?0:undefined}
@@ -569,7 +588,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
                 }}>Confirm</button>
                 {clientConfirmationStatus(row)!=='Confirmed' && onConfirmation && <button type="button" onClick={()=>{onConfirmation(appt,'Confirmed');setShowTextMenu(false)}}>Mark confirmed ✓</button>}
                 <button type="button" onClick={()=>sendAppointmentText(reminderMessage({owner:appt.owner,dogs:appt.dogs,date:appt.date,time:appt.time}),'Reminder')}>Reminder</button>
-                {date===today && <button type="button" disabled={etaLoading} onClick={sendOnMyWay}>{etaLoading?'Getting ETA…':etaReady?.body?'Send ETA text':'On my way'}</button>}
+                {date===today && <button type="button" disabled={etaLoading} onClick={sendOnMyWay}>{etaLoading?'Getting ETA…':'On my way'}</button>}
                 <button type="button" onClick={()=>setShowLate(value=>!value)}>Running late</button>
                 {date===today && <button type="button" onClick={()=>sendAppointmentText(imHereMessage({owner:appt.owner}),"I'm here")}>I'm here</button>}
                 {date===today && <button type="button" onClick={()=>sendAppointmentText(needAccessMessage({owner:appt.owner}),'Need access')}>Need access</button>}
@@ -6812,12 +6831,14 @@ export default function App() {
       <button
         type="button"
         className="floating-ai"
+        aria-label="Ask Betty"
+        title="Ask Betty"
         onPointerDown={event=>event.stopPropagation()}
         onTouchStart={event=>event.stopPropagation()}
         onClick={event=>{event.preventDefault();event.stopPropagation();ask()}}
-        style={{zIndex:90,pointerEvents:'auto',touchAction:'manipulation',WebkitTapHighlightColor:'transparent'}}
+        style={{zIndex:90,pointerEvents:'auto',touchAction:'manipulation',WebkitTapHighlightColor:'transparent',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,lineHeight:1,color:'#fff'}}
       >
-        <span>🐾 Ask Betty</span>
+        🐾
       </button>
 
       <nav className="bottom-nav">
