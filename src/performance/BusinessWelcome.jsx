@@ -23,7 +23,7 @@ export default function BusinessWelcome() {
   <form className="login-form" onSubmit={save}><fieldset disabled={saving} style={{border:0,padding:0,margin:0,minWidth:0,display:'grid',gap:16}}>
    <label>Business name<input required maxLength={100} autoComplete="organization" value={draft.businessName} onChange={e=>patch({businessName:e.target.value})}/></label>
    <label>Business time zone<select value={draft.timeZone} onChange={e=>patch({timeZone:e.target.value})}>{[...new Set([draft.timeZone,...zones])].map(zone=><option key={zone}>{zone}</option>)}</select></label>
-   <h2>Your groomers</h2>
+   <h2>Your groomers</h2><p className="settings-help">After saving, open More → Schedule settings → Team to email each groomer their own login invitation.</p>
    {draft.groomers.map((g,index)=><div className="groomer-card" key={g.id}>
     <label>Groomer {index+1} name<input required maxLength={50} value={g.name} onChange={e=>groomer(g.id,{name:e.target.value})}/></label>
     <div><strong>Working days</strong><div className="workdays" role="group" aria-label={`Groomer ${index+1} working days`}>{[1,2,3,4,5,6,0].map(day=><button type="button" key={day} aria-pressed={g.workDays.includes(day)} onClick={()=>groomer(g.id,{workDays:g.workDays.includes(day)?g.workDays.filter(d=>d!==day):[...g.workDays,day]})}>{days[day]}</button>)}</div></div>
