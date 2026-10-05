@@ -94,6 +94,9 @@ export default async function handler(req, res) {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({
           model: "gpt-5-mini",
+          // Intent classification needs only a small JSON answer. Keep the
+          // full answer request's reasoning setting unchanged.
+          reasoning: { effort: "minimal" },
           instructions: `
 You are the intent router for Betty, an AI assistant inside a mobile dog grooming planner.
 Return ONLY a compact JSON object with one key named intent.
