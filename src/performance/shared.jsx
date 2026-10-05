@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, getBusinessContext } from './businessConfig.js';
 import { supabase } from "../supabase.js";
 import { Capacitor } from '@capacitor/core';
 import { ChevronRight, MapPin, Route, WalletCards, MessageCircle, Share2 } from 'lucide-react';
@@ -9,6 +10,13 @@ function apiUrl(path) {
   const clean = String(path || '')
   return Capacitor.isNativePlatform() ? `${API_ORIGIN}${clean}` : clean
 }
+
+async function apiFetch(path, options={}) {
+  const {data} = await supabase?.auth.getSession() || {data:{}}
+  const token = data?.session?.access_token
+  return fetch(apiUrl(path),{...options,headers:{...options.headers,...(token ? {Authorization:`Bearer ${token}`} : {})}})
+}
+
 
 function dismissFormKeyboard() {
   if (typeof document === 'undefined') return
@@ -162,17 +170,10 @@ function paymentPreferenceKey(household,owner) {
 }
 
 function paymentMethodDetails(method) {
-  switch (String(method || '').trim()) {
-    case 'Venmo': return 'Venmo: https://venmo.com/peanut5862'
-    case 'PayPal': return 'PayPal: https://www.paypal.com/paypalme/jkopald?country.x=US&locale.x=en_US'
-    case 'Cash App': return 'Cash App: https://cash.app/$Peanut02'
-    case 'Zelle': return 'Zelle: Jennifer Griffin · 832-691-7871'
-    case 'Apple Pay': return 'Apple Pay: 832-691-7871'
-    case 'Cash/Check': return 'Cash or check is perfect. Thank you!'
-    case 'Cash': return 'Cash is perfect. Thank you!'
-    case 'Check': return 'A check is perfect. Thank you!'
-    default: return ''
-  }
+  const key=String(method || '').trim()
+  const saved=businessSettings().paymentInstructions?.[key]
+  if(saved) return saved
+  return {'Cash/Check':'Cash or check is perfect. Thank you!','Cash':'Cash is perfect. Thank you!','Check':'A check is perfect. Thank you!'}[key] || ''
 }
 
 async function preferredPaymentForAppointment(appt) {
@@ -207,7 +208,7 @@ function appointmentContactKey(appt) {
   const owner = String(appt?.owner || row?.Owner || '').trim()
   const date = String(appt?.date || row?.Date || '').slice(0,10)
   const time = String(appt?.time || row?.['Start Time'] || row?.['Locked Time'] || '').trim()
-  return `grooming-contact-v1:${week}:${household || owner}:${date}:${time}`
+  return `grooming-contact-v1:${getBusinessContext().businessId}:${week}:${household || owner}:${date}:${time}`
 }
 
 function readAppointmentContact(appt) {
@@ -263,7 +264,7 @@ async function googleEtaToAppointment(appt,dogs) {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
   const abortTimer = controller ? setTimeout(()=>controller.abort(),8000) : null
   try {
-    const response = await fetch(apiUrl('/api/google-route'),{
+    const response = await apiFetch('/api/google-route',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       signal:controller?.signal,
@@ -626,7 +627,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
 
 function businessDateKey(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone:'America/Chicago', year:'numeric', month:'2-digit', day:'2-digit'
+    timeZone:businessSettings().timeZone || 'America/Chicago', year:'numeric', month:'2-digit', day:'2-digit'
   }).formatToParts(now)
   const part = type => parts.find(value => value.type === type).value
   return `${part('year')}-${part('month')}-${part('day')}`
@@ -799,16 +800,16 @@ function serviceDefaultsForDog(row, service) {
 }
 
 function defaultFirstStopTime(groomer) {
-  return groomer === 'Jen' ? '09:00' : '08:30'
+  return groomerConfig(groomer)?.startTime || '09:00'
 }
 
 function schedulingOverrideReasons(date,groomer,assignedGroomers=[]) {
   const reasons = []
   if (/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
     const weekday = new Date(`${date}T12:00:00Z`).getUTCDay()
-    if (groomer === 'Jen' && ![2,3,4].includes(weekday)) reasons.push('Jen normally works Tuesday through Thursday.')
+    if (!groomerWorksOn(groomer,date)) reasons.push(`${groomer || 'This groomer'} does not normally work on this day.`)
   }
-  const assigned = [...new Set((assignedGroomers || []).filter(name=>name==='Jen' || name==='Haley'))]
+  const assigned = [...new Set((assignedGroomers || []).filter(name=>groomerNames().includes(name)))]
   if (assigned.length === 1 && groomer && groomer !== assigned[0]) reasons.push(`This household is normally assigned to ${assigned[0]}.`)
   return reasons
 }
@@ -827,9 +828,10 @@ function appointmentDurationMinutes(appt) {
 }
 
 function openingForDuration(appointments, duration, groomer) {
-  const startOfDay = groomer === 'Jen' ? 9 * 60 : 8 * 60 + 30
-  const endOfDay = 17 * 60 + 30
-  const buffer = 15
+  const profile = groomerConfig(groomer || firstGroomer())
+  const startOfDay = clockMinutesForDisplay(profile?.startTime || '09:00')
+  const endOfDay = clockMinutesForDisplay(profile?.endTime || '17:30')
+  const buffer = businessSettings().bufferMinutes
   const occupied = (appointments || [])
     .filter(appt => !groomer || appt.groomer === groomer)
     .map(appt => {
@@ -842,7 +844,7 @@ function openingForDuration(appointments, duration, groomer) {
 
   let cursor = startOfDay
   for (const slot of occupied) {
-    if (slot.start - cursor >= duration) return fillClockValue(cursor)
+    if (slot.start - cursor >= duration + buffer) return fillClockValue(cursor)
     cursor = Math.max(cursor,slot.end + buffer)
   }
   if (endOfDay - cursor >= duration) return fillClockValue(cursor)
@@ -1008,5 +1010,5 @@ function plannerActiveRow(row,todayKey=businessDateKey()) {
   return true
 }
 
-export { API_ORIGIN, apiUrl, dismissFormKeyboard, Stat, clientConfirmationStatus, confirmationTone, needsClientConfirmation, normalizedPhone, clientContactLookupCache, clientContactLookup, phoneForScheduleRow, arrivalWindowLabel, messageDateLabel, naturalPetNames, confirmationMessage, reminderMessage, runningLateMessage, onMyWayMessage, imHereMessage, needAccessMessage, finishedReadyMessage, paymentPreferenceKey, paymentMethodDetails, preferredPaymentForAppointment, paymentReminderMessage, appointmentContactKey, readAppointmentContact, saveAppointmentContact, contactLabel, currentPosition, googleEtaToAppointment, etaArrivalClock, openSms, openCall, googleMapsAddressUrl, shareAppointmentAddress, ApptCard, businessDateKey, mondayForDate, todayAppointments, clockMinutesForDisplay, displayClockTime, compareAppointmentTimes, routeValue, routeKey, fullClientAddress, clientAddressLookupCache, clientAddressLookup, appointmentAddress, serviceDefaultsForDog, defaultFirstStopTime, schedulingOverrideReasons, fillClockValue, appointmentDurationMinutes, openingForDuration, canonicalServiceLabel, appointmentServiceOptions, dogDueInfo, clientDueInfo, canonicalAreaLabel, completionBlockReason, appointmentTimeInput, scheduleRowDuration, plannerClientGroups, plannerActiveRow }
+export { API_ORIGIN, apiUrl, apiFetch, dismissFormKeyboard, Stat, clientConfirmationStatus, confirmationTone, needsClientConfirmation, normalizedPhone, clientContactLookupCache, clientContactLookup, phoneForScheduleRow, arrivalWindowLabel, messageDateLabel, naturalPetNames, confirmationMessage, reminderMessage, runningLateMessage, onMyWayMessage, imHereMessage, needAccessMessage, finishedReadyMessage, paymentPreferenceKey, paymentMethodDetails, preferredPaymentForAppointment, paymentReminderMessage, appointmentContactKey, readAppointmentContact, saveAppointmentContact, contactLabel, currentPosition, googleEtaToAppointment, etaArrivalClock, openSms, openCall, googleMapsAddressUrl, shareAppointmentAddress, ApptCard, businessDateKey, mondayForDate, todayAppointments, clockMinutesForDisplay, displayClockTime, compareAppointmentTimes, routeValue, routeKey, fullClientAddress, clientAddressLookupCache, clientAddressLookup, appointmentAddress, serviceDefaultsForDog, defaultFirstStopTime, schedulingOverrideReasons, fillClockValue, appointmentDurationMinutes, openingForDuration, canonicalServiceLabel, appointmentServiceOptions, dogDueInfo, clientDueInfo, canonicalAreaLabel, completionBlockReason, appointmentTimeInput, scheduleRowDuration, plannerClientGroups, plannerActiveRow }
 

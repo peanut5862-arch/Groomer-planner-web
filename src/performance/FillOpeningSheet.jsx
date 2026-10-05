@@ -1,7 +1,8 @@
+import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
 import React, { useEffect, useState } from 'react';
 import { supabase } from "../supabase.js";
 import { X } from 'lucide-react';
-import { apiUrl, clockMinutesForDisplay, displayClockTime, compareAppointmentTimes, fullClientAddress, clientAddressLookup, appointmentAddress, defaultFirstStopTime, appointmentDurationMinutes, businessDateKey, mondayForDate, serviceDefaultsForDog, openingForDuration, canonicalServiceLabel, appointmentServiceOptions, clientDueInfo, canonicalAreaLabel } from './shared.jsx'
+import { apiUrl, clockMinutesForDisplay, displayClockTime, compareAppointmentTimes, fullClientAddress, clientAddressLookup, appointmentAddress, defaultFirstStopTime, appointmentDurationMinutes, businessDateKey, mondayForDate, serviceDefaultsForDog, openingForDuration, canonicalServiceLabel, appointmentServiceOptions, clientDueInfo, canonicalAreaLabel , apiFetch } from './shared.jsx'
 
 function FillOpeningGoogleResults({candidates,dateKey,dayAppointments,dogs,onChoose}) {
   const [routeData,setRouteData] = useState({})
@@ -31,13 +32,13 @@ function FillOpeningGoogleResults({candidates,dateKey,dayAppointments,dogs,onCho
     const fetchRoute = async (stops,groomer) => {
       if (!stops.length) return {totalMinutes:0,totalMiles:0,legs:[]}
       const routeSignature = stops.map(stop=>`${stop.id}:${stop.address}:${stop.time}`).join('|')
-      const cacheKey = `fill-opening-google-v1:${groomer}:${dateKey}:${routeSignature}`
+      const cacheKey = `${getBusinessContext().businessId}:${getBusinessContext().revision}:fill-opening-google-v1:${groomer}:${dateKey}:${routeSignature}`
       try {
         const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null')
         if (cached?.payload && Number(cached?.savedAt) > Date.now() - cacheMs) return cached.payload
       } catch {}
 
-      const response = await fetch(apiUrl('/api/google-route'),{
+      const response = await apiFetch('/api/google-route',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({stops,groomer})
@@ -150,6 +151,8 @@ function FillOpeningGoogleResults({candidates,dateKey,dayAppointments,dogs,onCho
             }
           }
 
+          const driveLimit=Number(businessSettings().route.maxAddedDriveMinutes || 0)
+          if(driveLimit && addedMinutes>driveLimit)risks.push(`Exceeds your ${driveLimit} minute extra driving limit`)
           const routeRisk = risks.length > 0
           let googlePoints = addedMinutes <= 10 ? 52 : addedMinutes <= 20 ? 40 : addedMinutes <= 30 ? 28 : addedMinutes <= 45 ? 14 : addedMinutes <= 60 ? 0 : -22
           if (routeRisk) googlePoints -= 65
@@ -325,9 +328,9 @@ function FillOpeningSheet({open,dateKey,preferredGroomer,dayAppointments,dogs,on
   const weekday = new Date(`${dateKey}T12:00:00Z`).getUTCDay()
   const dayAreas = [...new Set((dayAppointments || []).map(appt=>canonicalAreaLabel(appt.area)).filter(Boolean))]
   const dayCounts = (dayAppointments || []).reduce((acc,appt)=>{
-    if (appt.groomer === 'Jen' || appt.groomer === 'Haley') acc[appt.groomer] += 1
+    if (groomerNames(true).includes(appt.groomer)) acc[appt.groomer] = (acc[appt.groomer] || 0)+1
     return acc
-  },{Jen:0,Haley:0})
+  },{})
 
   const latestServiceDate = rows => {
     const dates = (rows || []).flatMap(row => [
@@ -350,17 +353,10 @@ function FillOpeningSheet({open,dateKey,preferredGroomer,dayAppointments,dogs,on
       if (daysSinceService >= 0 && daysSinceService < 14) return null
     }
 
-    const assigned = [...new Set(client.rows.map(groomerOf).filter(name=>name==='Jen' || name==='Haley'))]
+    const assigned = [...new Set(client.rows.map(groomerOf).filter(name=>groomerNames(true).includes(name)))]
     const exclusive = assigned.length === 1 ? assigned[0] : ''
-    let targetGroomer = ['Jen','Haley'].includes(preferredGroomer) ? preferredGroomer : ''
-    if (!targetGroomer) {
-      if (weekday === 1 || weekday === 5) targetGroomer = 'Haley'
-      else if (exclusive) targetGroomer = exclusive
-      else targetGroomer = dayCounts.Jen <= dayCounts.Haley ? 'Jen' : 'Haley'
-    }
-    if ((weekday === 1 || weekday === 5) && targetGroomer !== 'Haley') return null
-    if (targetGroomer === 'Jen' && ![2,3,4].includes(weekday)) return null
-    if (exclusive && exclusive !== targetGroomer) return null
+    const targetGroomer = chooseGroomer(dateKey,{preferred:preferredGroomer,assigned,counts:dayCounts})
+    if (!targetGroomer || (exclusive && exclusive!==targetGroomer)) return null
 
     const defaults = client.rows.reduce((acc,row)=>{
       let service = canonicalServiceLabel(row?.service_pattern || row?.['Service Pattern'] || '')

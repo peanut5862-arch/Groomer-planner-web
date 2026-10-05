@@ -1,11 +1,17 @@
-import React, { useEffect, useState } from 'react';
+import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
+import { usePlannerWeekStart } from './plannerWeek.js'
 import { supabase } from "../supabase.js";
 import { ChevronLeft, ChevronRight, Route, Settings, WalletCards, LogOut } from 'lucide-react';
-import { clientConfirmationStatus, businessDateKey, mondayForDate, clientDueInfo, plannerClientGroups, plannerActiveRow } from './shared.jsx'
+import { clientConfirmationStatus, businessDateKey, mondayForDate, clientDueInfo, plannerClientGroups, plannerActiveRow , apiFetch } from './shared.jsx'
 
-function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false}) {
+const BusinessSettings=lazy(()=>import('./BusinessSettings.jsx'))
+
+function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettingsSaved}) {
+  const business=useBusinessContext()
+  const [settingsTab,setSettingsTab]=useState(null)
   const today = businessDateKey()
-  const [weekStart,setWeekStart] = useState(()=>mondayForDate(businessDateKey()))
+  const [weekStart,setWeekStart] = usePlannerWeekStart()
   const [weekRecord,setWeekRecord] = useState(null)
   const [futureWeeks,setFutureWeeks] = useState([])
   const [loading,setLoading] = useState(true)
@@ -20,7 +26,7 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false}) {
   }
   const endKey = (()=>{
     const date = new Date(`${weekStart}T12:00:00Z`)
-    date.setUTCDate(date.getUTCDate()+4)
+    date.setUTCDate(date.getUTCDate()+6)
     return date.toISOString().slice(0,10)
   })()
 
@@ -97,15 +103,16 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false}) {
   const cancelledCount = rows.filter(row=>rowState(row).cancelled).length
   const noShowCount = rows.filter(row=>rowState(row).noShow).length
 
-  const groomerTotals = ['Jen','Haley'].map(name=>{
+  const groomerTotals = groomerNames(true).map(name=>{
     const groomerRows = bookedRows.filter(row=>String(row?.Groomer || '').trim()===name)
     const done = groomerRows.filter(row=>rowState(row).completed)
     const completedService = done.reduce((sum,row)=>sum+priced(row),0)
     const tips = done.filter(isPaidRow).reduce((sum,row)=>sum+tipForRow(row),0)
-    const commission = name==='Haley' ? completedService * 0.5 : 0
-    const payout = name==='Haley' ? commission + tips : 0
+    const rate=Number(groomerConfig(name)?.commissionPercent || 0)
+    const commission = done.reduce((sum,row)=>sum+priced(row)*Number(row['Commission Percent'] ?? rate)/100,0)
+    const payout = commission + tips
     return {
-      name,
+      name,rate,
       appointments:groomerRows.length,
       scheduled:groomerRows.reduce((sum,row)=>sum+priced(row),0),
       completed:completedService,
@@ -114,7 +121,7 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false}) {
       payout
     }
   })
-  const haleyTotals = groomerTotals.find(item=>item.name==='Haley') || {commission:0,tips:0,payout:0}
+  const teamTotals=groomerTotals.reduce((sum,item)=>({commission:sum.commission+item.commission,payout:sum.payout+item.payout,ownerShare:sum.ownerShare+item.completed-item.commission}),{commission:0,payout:0,ownerShare:0})
 
   const confirmations = openRows.reduce((acc,row)=>{
     const status = clientConfirmationStatus(row)
@@ -135,8 +142,8 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false}) {
     if(bookedKeys.has(client.key) || bookedKeys.has(ownerKey)) return null
     const due=clientDueInfo(client.rows,today)
     if(!['Overdue','Due today','Due this week','Due soon'].includes(due.status)) return null
-    const assigned=[...new Set(client.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))]
-    return {...client,due,groomer:assigned.length===1?assigned[0]:'Jen'}
+    const assigned=[...new Set(client.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>groomerNames(true).includes(name)))]
+    return {...client,due,groomer:assigned.length===1?assigned[0]:firstGroomer()}
   }).filter(Boolean).sort((a,b)=>a.due.rank-b.due.rank || (a.due.dueDate || '').localeCompare(b.due.dueDate || '') || a.owner.localeCompare(b.owner))
 
   const reportCard = {background:'#fff',border:'1px solid #e4e7ec',borderRadius:18,padding:16,boxShadow:'0 8px 24px rgba(23,32,56,.04)'}
@@ -172,8 +179,8 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false}) {
           <div style={{...reportCard,background:'#f5f2ff'}}><div style={smallLabel}>Total received</div><div style={metricValue}>{money(totalReceived)}</div><div style={{fontSize:11,color:'#66579a',marginTop:5}}>service + tips</div></div>
           <div style={reportCard}><div style={smallLabel}>Remaining</div><div style={metricValue}>{money(remainingRevenue)}</div><div style={{fontSize:11,color:'#7b828e',marginTop:5}}>scheduled, not completed</div></div>
           <div style={reportCard}><div style={smallLabel}>Dogs</div><div style={metricValue}>{dogCount}</div><div style={{fontSize:11,color:'#7b828e',marginTop:5}}>across {bookedRows.length} stops</div></div>
-          <div style={{...reportCard,background:'#eef7ff'}}><div style={smallLabel}>Haley payout</div><div style={metricValue}>{money(haleyTotals.payout)}</div><div style={{fontSize:11,color:'#52657a',marginTop:5}}>50% commission + 100% tips</div></div>
-          <div style={{...reportCard,background:'#fff4ed'}}><div style={smallLabel}>Your share from Haley</div><div style={metricValue}>{money(haleyTotals.commission)}</div><div style={{fontSize:11,color:'#8a5a3b',marginTop:5}}>your 50% of Haley's completed service revenue</div></div>
+          <div style={{...reportCard,background:'#eef7ff'}}><div style={smallLabel}>Team payout</div><div style={metricValue}>{money(teamTotals.payout)}</div><div style={{fontSize:11,color:'#52657a',marginTop:5}}>service commission + received tips</div></div>
+          <div style={{...reportCard,background:'#fff4ed'}}><div style={smallLabel}>Service revenue after commission</div><div style={metricValue}>{money(teamTotals.ownerShare)}</div><div style={{fontSize:11,color:'#8a5a3b',marginTop:5}}>completed service revenue less team commission</div></div>
         </div>
 
         {!weekRecord && <div className="prototype-note" style={{marginTop:12}}>No saved schedule exists for this week yet.</div>}
@@ -185,12 +192,12 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false}) {
               <div>
                 <strong style={{fontSize:14,color:'#172038'}}>{item.name}</strong>
                 <div style={{fontSize:11,color:'#7b828e',marginTop:3}}>{item.appointments} appointment{item.appointments===1?'':'s'}</div>
-                {item.name==='Haley' && <div style={{fontSize:10.5,color:'#52657a',marginTop:4}}>50% service commission · keeps 100% of tips</div>}
+                {item.rate>0 && <div style={{fontSize:10.5,color:'#52657a',marginTop:4}}>{item.rate}% service commission · keeps 100% of tips</div>}
               </div>
               <div style={{textAlign:'right'}}>
                 <strong style={{fontSize:16,color:'#172038'}}>{money(item.scheduled)}</strong>
                 <div style={{fontSize:10,color:'#6b7280',marginTop:2}}>{money(item.completed)} completed</div>
-                {item.name==='Haley' && <div style={{fontSize:10,color:'#267447',marginTop:3,fontWeight:800}}>{money(item.commission)} commission + {money(item.tips)} tips = {money(item.payout)} pay</div>}
+                {item.rate>0 && <div style={{fontSize:10,color:'#267447',marginTop:3,fontWeight:800}}>{money(item.commission)} commission + {money(item.tips)} tips = {money(item.payout)} pay</div>}
               </div>
             </div>)}
           </div>
@@ -231,12 +238,13 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false}) {
         {showPushSetup && <OwnerPushNotifications session={session}/>}
 
         <div className="menu-list" style={{marginTop:16}}>
-          <button><Settings size={19}/><span>Scheduling settings</span><ChevronRight size={17}/></button>
-          <button><Route size={19}/><span>Route settings</span><ChevronRight size={17}/></button>
+          <button type="button" onClick={()=>setSettingsTab('schedule')}><Settings size={19}/><span>Scheduling settings</span><ChevronRight size={17}/></button>
+          <button type="button" onClick={()=>setSettingsTab('route')}><Route size={19}/><span>Route settings</span><ChevronRight size={17}/></button>
           <button type="button" onClick={()=>onAsk?.('Show me this week\'s business summary')}><WalletCards size={19}/><span>Ask Betty about the week</span><ChevronRight size={17}/></button>
           <button type="button" onClick={async()=>{ await supabase?.auth?.signOut?.() }}><LogOut size={19}/><span>Sign out</span><ChevronRight size={17}/></button>
         </div>
       </>}
+      {settingsTab&&<Suspense fallback={<div role="status" className="prototype-note">Opening settings…</div>}><BusinessSettings initialTab={settingsTab} onClose={()=>setSettingsTab(null)} onSaved={onSettingsSaved}/></Suspense>}
     </section>
   )
 }
@@ -275,7 +283,7 @@ function OwnerPushNotifications({session}) {
         // A browser can still hold a valid push subscription even if an earlier
         // server save failed. Re-sync it on load so ON means the phone is actually
         // registered in Supabase, not merely that iOS granted permission.
-        const response=await fetch('/api/push-subscribe',{
+        const response=await apiFetch('/api/push-subscribe',{
           method:'POST',
           headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`},
           body:JSON.stringify({subscription:subscription.toJSON()})
@@ -306,7 +314,7 @@ function OwnerPushNotifications({session}) {
       if(!subscription){
         subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:base64UrlToUint8Array(publicKey)})
       }
-      const response=await fetch('/api/push-subscribe',{
+      const response=await apiFetch('/api/push-subscribe',{
         method:'POST',
         headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`},
         body:JSON.stringify({subscription:subscription.toJSON()})
@@ -323,8 +331,8 @@ function OwnerPushNotifications({session}) {
     <div style={{background:'#fff',border:'1px solid #e4e7ec',borderRadius:18,padding:16,marginTop:14,boxShadow:'0 8px 24px rgba(23,32,56,.04)'}}>
       <div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'flex-start'}}>
         <div>
-          <strong style={{display:'block',fontSize:14,color:'#172038'}}>Haley finish notifications</strong>
-          <span style={{display:'block',fontSize:11,color:'#7b828e',marginTop:4,lineHeight:1.45}}>Get a phone notification as soon as Haley taps Finished, even when you are not watching the planner.</span>
+          <strong style={{display:'block',fontSize:14,color:'#172038'}}>Groomer finish notifications</strong>
+          <span style={{display:'block',fontSize:11,color:'#7b828e',marginTop:4,lineHeight:1.45}}>Get a phone notification when a groomer taps Finished, even when you are not watching the planner.</span>
         </div>
         <span style={{fontSize:10,fontWeight:900,padding:'5px 8px',borderRadius:999,background:state.enabled?'#edf7ef':'#f2f3f5',color:state.enabled?'#267447':'#67707d',whiteSpace:'nowrap'}}>{state.enabled?'ON':'OFF'}</span>
       </div>

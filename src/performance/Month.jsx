@@ -1,3 +1,4 @@
+import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from "../supabase.js";
 import { ChevronLeft, ChevronRight } from 'lucide-react';
@@ -10,7 +11,8 @@ function monthGrid(monthKey) {
   const end = new Date(`${mondayForDate(last.toISOString().slice(0,10))}T12:00:00Z`)
   const days = []
   for (let week = new Date(start); week <= end; week.setUTCDate(week.getUTCDate()+7)) {
-    for (let offset=0; offset<5; offset++) {
+    for (const weekday of calendarWorkDays()) {
+      const offset=weekday===0?6:weekday-1
       const day = new Date(week)
       day.setUTCDate(day.getUTCDate()+offset)
       days.push(day.toISOString().slice(0,10))
@@ -86,7 +88,7 @@ function Month({onOpen,revision,dogs}) {
         </div>
       </div>
       <div className="segmented" aria-label="Filter by groomer">
-        {['All','Jen','Haley'].map(name=><button key={name} className={groomer===name?'active':''}
+        {['All',...groomerNames(true)].map(name=><button key={name} className={groomer===name?'active':''}
           aria-pressed={groomer===name} onClick={()=>setGroomer(name)}>{name}</button>)}
       </div>
       <div className="section-title">
@@ -96,8 +98,8 @@ function Month({onOpen,revision,dogs}) {
       {loading && <div className="prototype-note" role="status">Loading your month…</div>}
       {error && <div className="login-message" role="alert">{error}</div>}
       {ready && <>
-        <div className="calendar">
-          {['Mon','Tue','Wed','Thu','Fri'].map(day=><div className="dow" key={day}>{day}</div>)}
+        <div className="calendar" style={{gridTemplateColumns:`repeat(${calendarWorkDays().length},minmax(0,1fr))`}}>
+          {calendarWorkDays().map(day=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day]).map(day=><div className="dow" key={day}>{day}</div>)}
           {days.map(day=>{
             const inMonth = day.startsWith(month)
             const appointments = inMonth ? appointmentsOn(day) : []

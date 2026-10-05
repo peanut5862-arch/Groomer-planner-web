@@ -1,8 +1,9 @@
+import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { createBettyRequestPlan } from './bettyRequests.js'
 import { supabase } from "../supabase.js";
 import { X, CheckCircle2 } from 'lucide-react';
-import { businessDateKey, canonicalServiceLabel, appointmentServiceOptions, serviceDefaultsForDog, canonicalAreaLabel, apiUrl, clientConfirmationStatus, needsClientConfirmation, mondayForDate, todayAppointments, clockMinutesForDisplay, displayClockTime, compareAppointmentTimes, fullClientAddress, clientAddressLookup, appointmentAddress, defaultFirstStopTime, schedulingOverrideReasons, appointmentDurationMinutes, openingForDuration, clientDueInfo, appointmentTimeInput, scheduleRowDuration, plannerClientGroups, plannerActiveRow } from './shared.jsx'
+import { businessDateKey, canonicalServiceLabel, appointmentServiceOptions, serviceDefaultsForDog, canonicalAreaLabel, apiUrl, clientConfirmationStatus, needsClientConfirmation, mondayForDate, todayAppointments, clockMinutesForDisplay, displayClockTime, compareAppointmentTimes, fullClientAddress, clientAddressLookup, appointmentAddress, defaultFirstStopTime, schedulingOverrideReasons, appointmentDurationMinutes, openingForDuration, clientDueInfo, appointmentTimeInput, scheduleRowDuration, plannerClientGroups, plannerActiveRow , apiFetch } from './shared.jsx'
 
 function plannerResolveDate(text,todayKey=businessDateKey()) {
   const lower = String(text || '').toLowerCase()
@@ -62,7 +63,7 @@ function plannerClientTotals(rows) {
 function plannerQueryFilters(text,dogs) {
   const lower = String(text || '').toLowerCase().replace(/[’]/g,"'")
   const date = plannerResolveDate(lower)
-  const groomer = /\bhaley\b/.test(lower) ? 'Haley' : /\bjen\b/.test(lower) ? 'Jen' : ''
+  const groomer = groomerNames(true).sort((a,b)=>b.length-a.length).find(name=>` ${lower.replace(/[^\p{L}\p{N}]+/gu,' ')} `.includes(` ${name.toLowerCase()} `)) || ''
   const priceMatch = lower.match(/\$\s*(\d+(?:\.\d+)?)\s*\+|(?:at least|over|more than)\s*\$?\s*(\d+(?:\.\d+)?)/)
   const minPrice = Number(priceMatch?.[1] || priceMatch?.[2] || 0)
   const hourMatch = lower.match(/(\d+(?:\.\d+)?)\s*(?:hour|hr)s?\b/)
@@ -109,7 +110,7 @@ function plannerNextBookableDate(groomer,fromKey=businessDateKey()) {
   const date = new Date(`${fromKey}T12:00:00Z`)
   for (let i=0;i<14;i+=1) {
     const day = date.getUTCDay()
-    if (groomer === 'Jen' ? [2,3,4].includes(day) : [1,2,3,4,5].includes(day)) return date.toISOString().slice(0,10)
+    if (groomerWorksOn(groomer,date.toISOString().slice(0,10))) return date.toISOString().slice(0,10)
     date.setUTCDate(date.getUTCDate()+1)
   }
   return fromKey
@@ -165,9 +166,9 @@ function bettyScheduleLookupRequest(text,todayKey=businessDateKey()) {
   let start='',end='',label=''
   if(/\bnext week\b/.test(lower)){
     const d=new Date(thisMonday); d.setUTCDate(d.getUTCDate()+7); start=d.toISOString().slice(0,10)
-    const e=new Date(d); e.setUTCDate(e.getUTCDate()+4); end=e.toISOString().slice(0,10); label='Next week'
+    const e=new Date(d); e.setUTCDate(e.getUTCDate()+6); end=e.toISOString().slice(0,10); label='Next week'
   } else if(/\bthis week\b/.test(lower)){
-    start=thisMonday.toISOString().slice(0,10); const e=new Date(thisMonday); e.setUTCDate(e.getUTCDate()+4); end=e.toISOString().slice(0,10); label='This week'
+    start=thisMonday.toISOString().slice(0,10); const e=new Date(thisMonday); e.setUTCDate(e.getUTCDate()+6); end=e.toISOString().slice(0,10); label='This week'
   } else {
     const date=plannerResolveDate(lower,todayKey)
     if(!date) return null
@@ -198,7 +199,7 @@ function bettyAppointmentMatchScore(row, subject) {
 }
 
 function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleChanged,viewerMode=false}) {
-  const memoryKey='grooming-ask-betty-session-v3'
+  const memoryKey=`grooming-ask-betty-session-v3:${getBusinessContext().businessId}`
   const readMemory=()=>{
     if(typeof window==='undefined') return null
     try { return JSON.parse(sessionStorage.getItem(memoryKey) || 'null') } catch { return null }
@@ -357,7 +358,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
         const row=best.row
         const sourceDate=String(row.Date || '').slice(0,10)
         const targetDate=rescheduleRequest.targetDate
-        const targetGroomer=String(row.Groomer || '').trim() || 'Haley'
+        const targetGroomer=String(row.Groomer || '').trim() || firstGroomer()
         const targetTime=appointmentTimeInput(String(row['Start Time'] || row['Locked Time'] || '')) || defaultFirstStopTime(targetGroomer)
         const household=String(row['Household ID'] || '').trim().toLowerCase()
         const owner=String(row.Owner || '').trim()
@@ -366,7 +367,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
           const clientOwner=String(client?.owner || client?.Owner || '').trim().toLowerCase()
           return (household && clientHousehold===household) || (!household && clientOwner===owner.toLowerCase())
         })
-        const assignedGroomers=[...new Set(clientRows.map(client=>String(client?.groomer || client?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))]
+        const assignedGroomers=[...new Set(clientRows.map(client=>String(client?.groomer || client?.Groomer || '').trim()).filter(name=>groomerNames(true).includes(name)))]
         const ruleWarnings=schedulingOverrideReasons(targetDate,targetGroomer,assignedGroomers)
         const proposal=`${owner} is currently ${plannerDayLabel(sourceDate)} at ${displayClockTime(targetTime)} with ${targetGroomer}. Move ${owner} to ${plannerDayLabel(targetDate)} at ${displayClockTime(targetTime)} with ${targetGroomer}?`
         const nextConversation=[...conversation.slice(-12),{role:'user',text:prompt},{role:'assistant',text:proposal}].slice(-16)
@@ -427,7 +428,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
             .gte('week_start',startWeek).lte('week_start',endWeek).order('week_start',{ascending:true})
         },
         routeRequest: async () => {
-          const routeResponse = await fetch(apiUrl('/api/ask-betty'),{
+          const routeResponse = await apiFetch('/api/ask-betty',{
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
@@ -457,7 +458,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
       }
 
       if (bettyIntent === 'weather') {
-        const response = await fetch(apiUrl('/api/ask-betty'),{
+        const response = await apiFetch('/api/ask-betty',{
           method:'POST',
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify({mode:'weather',message:prompt})
@@ -550,11 +551,10 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
           const h=String(row?.['Household ID'] || '').trim(); const owner=String(row?.Owner || '').trim().toLowerCase()
           return (match.household && h===match.household) || (!match.household && owner===match.owner.toLowerCase())
         }).sort((a,b)=>String(a.Date || '').localeCompare(String(b.Date || '')))
-        const assigned=[...new Set(match.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))]
+        const assigned=[...new Set(match.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>groomerNames(true).includes(name)))]
         const targetDate=specificBookingRequest.targetDate
         const weekday=new Date(`${targetDate}T12:00:00Z`).getUTCDay()
-        let targetGroomer=assigned.length===1?assigned[0]:(weekday===1 || weekday===5?'Haley':'Jen')
-        if(targetGroomer==='Jen' && ![2,3,4].includes(weekday)) targetGroomer='Haley'
+        const targetGroomer=chooseGroomer(targetDate || businessDateKey(),{assigned}) || assigned[0] || firstGroomer()
         const dayAppointments=todayAppointments(planRows,targetDate,'All')
         const totals=plannerClientTotals(match.rows)
         const minutes=Math.max(30,Math.round(totals.minutes || 60))
@@ -610,9 +610,9 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
 
         const now=new Date()
         const timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local device time'
-        const localDateTime=now.toLocaleString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit',timeZoneName:'short'})
+        const localDateTime=now.toLocaleString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit',timeZone:businessSettings().timeZone,timeZoneName:'short'})
         const localTime=now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})
-        const response = await fetch(apiUrl('/api/ask-betty'),{
+        const response = await apiFetch('/api/ask-betty',{
           method:'POST',
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify({
@@ -638,18 +638,11 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
                 canSendCustomerMessages:false,
                 note:'For booking or rescheduling requests, gather only the next missing detail, one question at a time. You may propose a specific appointment, but do not claim it was saved or sent.'
               },
-              business:'Mobile dog grooming business',
-              groomers:['Jen','Haley'],
-              schedulingRules:{
-                Jen:'Tuesday through Thursday only',
-                Haley:'Monday through Friday; Monday and Friday are Haley-only',
-                note:'Jen-exclusive clients stay with Jen.'
-              },
-              compensationRules:{
-                Haley:'50% commission on her grooming service revenue',
-                Jen:'Owner keeps the remaining 50% of Haley service revenue plus 100% of Jen service revenue',
-                tips:'Do not include tips in commission unless explicitly asked.'
-              },
+              business:businessSettings().businessName,
+              groomers:groomerNames(),
+              schedulingRules:businessSettings().groomers.map(g=>({name:g.name,active:g.active,workDays:g.workDays,startTime:g.startTime,endTime:g.endTime})),
+              appointmentGapMinutes:businessSettings().bufferMinutes,
+              compensationRules:businessSettings().groomers.map(g=>({name:g.name,commissionPercent:g.commissionPercent,tips:'Keeps all received tips; tips are separate from service commission.'})),
               clients:clientContext,
               upcomingSchedule:scheduleContext
             }
@@ -668,7 +661,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
       if (attentionIntent) {
         const currentWeekStart = mondayForDate(today)
         const weekEndDate = new Date(`${currentWeekStart}T12:00:00Z`)
-        weekEndDate.setUTCDate(weekEndDate.getUTCDate()+4)
+        weekEndDate.setUTCDate(weekEndDate.getUTCDate()+6)
         const currentWeekEnd = weekEndDate.toISOString().slice(0,10)
 
         const confirmationRows = activeRows.filter(row=>{
@@ -723,7 +716,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
       if (bettyIntent === 'confirmations') {
         const currentWeekStart = mondayForDate(today)
         const weekEndDate = new Date(`${currentWeekStart}T12:00:00Z`)
-        weekEndDate.setUTCDate(weekEndDate.getUTCDate()+4)
+        weekEndDate.setUTCDate(weekEndDate.getUTCDate()+6)
         const currentWeekEnd = weekEndDate.toISOString().slice(0,10)
         const rowsNeeding = activeRows.filter(row=>{
           const date = String(row.Date || '').slice(0,10)
@@ -756,9 +749,9 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
       const dayAppointments = targetDate ? todayAppointments(planRows,targetDate,'All') : []
       const weekday = targetDate ? new Date(`${targetDate}T12:00:00Z`).getUTCDay() : null
       const dayCounts = dayAppointments.reduce((acc,appt)=>{
-        if (appt.groomer==='Jen' || appt.groomer==='Haley') acc[appt.groomer] += 1
+        if (groomerNames(true).includes(appt.groomer)) acc[appt.groomer] = (acc[appt.groomer] || 0)+1
         return acc
-      },{Jen:0,Haley:0})
+      },{})
       const dayAreas = [...new Set(dayAppointments.map(appt=>canonicalAreaLabel(appt.area)).filter(Boolean))]
       const targetDay = new Date(`${targetDate || today}T12:00:00Z`)
 
@@ -782,21 +775,10 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
           if (daysSince >= 0 && daysSince < 14) return null
         }
 
-        const assigned = [...new Set(client.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))]
+        const assigned = [...new Set(client.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>groomerNames(true).includes(name)))]
         const exclusive = assigned.length===1 ? assigned[0] : ''
-        let targetGroomer = filters.groomer
-        if (!targetGroomer && targetDate) {
-          if (weekday===1 || weekday===5) targetGroomer='Haley'
-          else if (exclusive) targetGroomer=exclusive
-          else targetGroomer = dayCounts.Jen <= dayCounts.Haley ? 'Jen' : 'Haley'
-        }
-        if (!targetGroomer && exclusive) targetGroomer = exclusive
-        if (!targetGroomer) targetGroomer = 'Jen'
-        if (targetDate) {
-          if ((weekday===1 || weekday===5) && targetGroomer!=='Haley') return null
-          if (targetGroomer==='Jen' && ![2,3,4].includes(weekday)) return null
-          if (exclusive && exclusive!==targetGroomer) return null
-        } else if (filters.groomer && exclusive && exclusive!==filters.groomer) return null
+        const targetGroomer = targetDate ? chooseGroomer(targetDate,{preferred:filters.groomer,assigned,counts:dayCounts}) : filters.groomer || exclusive || firstGroomer()
+        if (!targetGroomer || (exclusive && exclusive!==targetGroomer)) return null
 
         const totals = plannerClientTotals(client.rows)
         const price = Math.round(totals.price || 0)
@@ -832,12 +814,12 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
         const fetchRoute = async (stops,groomer) => {
           if (!stops.length) return {totalMinutes:0,totalMiles:0,legs:[]}
           const signature = stops.map(stop=>`${stop.id}:${stop.address}:${stop.time}`).join('|')
-          const cacheKey = `ask-planner-route-v1:${targetDate}:${groomer}:${signature}`
+          const cacheKey = `${getBusinessContext().businessId}:${getBusinessContext().revision}:ask-planner-route-v1:${targetDate}:${groomer}:${signature}`
           try {
             const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null')
             if (cached?.payload && Number(cached.savedAt) > Date.now()-cacheMs) return cached.payload
           } catch {}
-          const response = await fetch(apiUrl('/api/google-route'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stops,groomer})})
+          const response = await apiFetch('/api/google-route',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stops,groomer})})
           const payload = await response.json().catch(()=>({}))
           if (!response.ok) throw new Error(payload?.error || `Google route check failed (${response.status}).`)
           try { localStorage.setItem(cacheKey,JSON.stringify({savedAt:Date.now(),payload})) } catch {}
@@ -891,6 +873,8 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
               const arrival = candidateMinutes + Number(candidate.minutes || 0) + Number(legOut?.minutes || 0)
               if (Number.isFinite(followingStart) && arrival > followingStart + 30) risks.push(`${Math.ceil(arrival-(followingStart+30))} min past ${following.owner}'s window`)
             }
+            const driveLimit=Number(businessSettings().route.maxAddedDriveMinutes || 0)
+            if(driveLimit && addedMinutes>driveLimit)risks.push(`Exceeds your ${driveLimit} minute extra driving limit`)
             const routeRisk = risks.length>0
             let routePoints = addedMinutes<=10?55:addedMinutes<=20?42:addedMinutes<=30?28:addedMinutes<=45?12:addedMinutes<=60?0:-20
             if (routeRisk) routePoints -= 65
@@ -975,7 +959,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
       return
     }
     if (answer?.targetDate || answer?.filters?.unbookedOnly) {
-      const groomer = candidate.targetGroomer || 'Jen'
+      const groomer = candidate.targetGroomer || firstGroomer()
       const date = answer?.targetDate || plannerNextBookableDate(groomer)
       onClose?.()
       onChoose?.({
