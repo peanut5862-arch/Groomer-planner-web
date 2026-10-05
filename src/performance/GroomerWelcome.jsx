@@ -1,0 +1,11 @@
+import React,{useRef,useState} from 'react'
+import {supabase} from '../supabase.js'
+import {setBusinessContext} from './businessConfig.js'
+import {PasswordField} from './LoginScreen.jsx'
+export default function GroomerWelcome({business}){
+ const [password,setPassword]=useState(''),[confirmation,setConfirmation]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');const lock=useRef(false)
+ const accept=async event=>{event.preventDefault();if(lock.current)return;setError('');if(password.length<8){setError('Use at least 8 characters.');return}if(password!==confirmation){setError('Your passwords do not match.');return}lock.current=true;setBusy(true)
+  try{const {error:passwordError}=await supabase.auth.updateUser({password});if(passwordError)throw passwordError;const {data,error}=await supabase.rpc('accept_groomer_invite',{p_id:business.invitationId});if(error)throw error;if(data?.role!=='groomer'||data?.businessId!==business.businessId||data?.accountId!==business.accountId)throw Error('Your team access could not be confirmed. Please try again.');setPassword('');setConfirmation('');setBusinessContext(data)}catch(e){setError(e.message||'Could not finish setup.')}finally{lock.current=false;setBusy(false)}
+ }
+ return <div className="login-shell"><div className="login-card"><div className="login-brand">HB</div><div className="eyebrow">Your groomer invitation</div><h1>Join {business.settings.businessName}</h1><p>You’re invited as {business.groomer}. Choose your password to open your assigned schedule and routes.</p><form className="login-form" onSubmit={accept}><PasswordField label="Password" autoComplete="new-password" minLength={8} required disabled={busy} value={password} onChange={e=>setPassword(e.target.value)}/><PasswordField label="Confirm password" autoComplete="new-password" required disabled={busy} value={confirmation} onChange={e=>setConfirmation(e.target.value)}/>{error&&<p className="login-message" role="alert">{error}</p>}<button className="login-button" disabled={busy}>{busy?'Joining your team…':'Accept invitation and open schedule'}</button></form><button type="button" className="text-btn" disabled={busy} onClick={()=>supabase.auth.signOut({scope:'local'}).catch(e=>setError(e.message))}>Sign out</button></div></div>
+}
