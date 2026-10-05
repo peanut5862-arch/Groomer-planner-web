@@ -45,6 +45,10 @@ function activeRow(row){
 }
 
 export default async function handler(req,res){
+  res.setHeader('Access-Control-Allow-Origin','*')
+  res.setHeader('Access-Control-Allow-Methods','POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization')
+  if(req.method==='OPTIONS')return res.status(204).end()
   if(req.method!=='POST'){
     res.setHeader('Allow','POST')
     return send(res,405,{error:'Use POST to send a finish notification.'})
@@ -63,11 +67,10 @@ export default async function handler(req,res){
     const user=userData?.user
     if(userError || !user) return send(res,401,{error:'Your sign-in session could not be verified.'})
 
-    const email=String(user.email || '').trim().toLowerCase()
-    const {data:groomerRows,error:groomerError}=await admin.from('grooming_groomers').select('groomer').eq('email',email).limit(1)
-    if(groomerError) throw groomerError
-    const groomer=String(groomerRows?.[0]?.groomer || '').trim()
-    if(!groomer) return send(res,403,{error:'This account is not a groomer account.'})
+    const {data:member,error:memberError}=await admin.from('planner_members').select('business_id,role,groomer').eq('user_id',user.id).maybeSingle()
+    if(memberError)throw memberError
+    const groomer=member?.role==='groomer' ? member.groomer : ''
+    if(!groomer)return send(res,403,{error:'This account is not a groomer account.'})
 
     const body=typeof req.body==='string' ? JSON.parse(req.body || '{}') : (req.body || {})
     const eventId=String(body.eventId || '').trim()
@@ -75,14 +78,14 @@ export default async function handler(req,res){
 
     const {data:eventRows,error:eventError}=await admin.from('groomer_finish_events')
       .select('id,groomer,week_start,row_index,owner,dogs,appointment_date,appointment_time,payment_received_type,push_sent_at')
-      .eq('id',eventId).limit(1)
+      .eq('business_id',member.business_id).eq('id',eventId).limit(1)
     if(eventError) throw eventError
     const event=eventRows?.[0]
     if(!event || event.groomer!==groomer) return send(res,403,{error:'This finish event does not belong to your groomer account.'})
     if(event.push_sent_at) return send(res,200,{ok:true,sent:0,alreadySent:true})
 
     let next=null
-    const {data:weekRows,error:weekError}=await admin.from('weekly_drafts').select('plan_json').eq('week_start',event.week_start).limit(1)
+    const {data:weekRows,error:weekError}=await admin.from('weekly_drafts').select('plan_json').eq('business_id',member.business_id).eq('week_start',event.week_start).limit(1)
     if(weekError) throw weekError
     const plan=Array.isArray(weekRows?.[0]?.plan_json) ? weekRows[0].plan_json : []
     const currentTime=clockMinutes(event.appointment_time)
@@ -96,7 +99,7 @@ export default async function handler(req,res){
     webpush.setVapidDetails(subject,publicKey,privateKey)
 
     const {data:subscriptions,error:subscriptionError}=await admin.from('push_subscriptions')
-      .select('id,subscription').eq('enabled',true)
+      .select('id,subscription').eq('business_id',member.business_id).eq('enabled',true)
     if(subscriptionError) throw subscriptionError
 
     const dogText=String(event.dogs || '').trim()
@@ -142,14 +145,14 @@ export default async function handler(req,res){
     if(stale.length){
       await admin.from('push_subscriptions')
         .update({enabled:false,updated_at:new Date().toISOString()})
-        .in('id',stale)
+        .eq('business_id',member.business_id).in('id',stale)
     }
 
     if(sent>0){
       const {error:markError}=await admin
         .from('groomer_finish_events')
         .update({push_sent_at:new Date().toISOString()})
-        .eq('id',event.id)
+        .eq('business_id',member.business_id).eq('id',event.id)
 
       if(markError) throw markError
 
