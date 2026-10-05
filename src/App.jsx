@@ -5,6 +5,9 @@ import { AppLauncher } from '@capacitor/app-launcher';
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Ellipsis, Home, MapPin, Plus, Route, Sparkles, Users, WalletCards, LogOut } from 'lucide-react';
 import { Stat, ApptCard, businessDateKey, mondayForDate, todayAppointments, clockMinutesForDisplay, apiUrl, displayClockTime, compareAppointmentTimes, clientAddressLookup, appointmentAddress, clientConfirmationStatus, needsClientConfirmation, phoneForScheduleRow, googleMapsAddressUrl, dismissFormKeyboard, defaultFirstStopTime, completionBlockReason , apiFetch } from './performance/shared.jsx'
 import { createLazyFeature, DeferredSheet } from './performance/DeferredFeature.jsx'
+import LoginScreen from './performance/LoginScreen.jsx'
+import {needsBusinessSetup} from './performance/customerAuth.js'
+const BusinessWelcome = createLazyFeature(() => import('./performance/BusinessWelcome.jsx'), {sheet:false})
 import { usePlannerWeekStart } from './performance/plannerWeek.js'
 const Month = createLazyFeature(() => import('./performance/Month.jsx'), { sheet: false })
 const Clients = createLazyFeature(() => import('./performance/Clients.jsx'), { sheet: false })
@@ -1103,80 +1106,6 @@ function GroomerPortal({session,groomer}) {
   )
 }
 
-function LoginScreen({ onSignedIn }) {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState('')
-
-  const signIn = async (event) => {
-    event.preventDefault()
-    setMessage('')
-
-    if (!supabase) {
-      setMessage('Supabase is not configured yet.')
-      return
-    }
-
-    setLoading(true)
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password
-    })
-    setLoading(false)
-
-    if (error) {
-      setMessage(error.message)
-      return
-    }
-
-    onSignedIn(data.session)
-  }
-
-  return (
-    <div className="login-shell">
-      <div className="login-card">
-        <div className="login-brand">HB</div>
-        <div className="eyebrow">Private business dashboard</div>
-        <h1>Hey Betty</h1>
-        <p className="login-copy">
-          Sign in to access clients, routes, appointments and planning tools.
-        </p>
-
-        <form className="login-form" onSubmit={signIn}>
-          <label>
-            Email
-            <input
-              type="email"
-              value={email}
-              onChange={event => setEmail(event.target.value)}
-              autoComplete="email"
-              required
-            />
-          </label>
-
-          <label>
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={event => setPassword(event.target.value)}
-              autoComplete="current-password"
-              required
-            />
-          </label>
-
-          {message && <div className="login-message">{message}</div>}
-
-          <button className="login-button" type="submit" disabled={loading}>
-            {loading ? 'Signing in…' : 'Sign in'}
-          </button>
-        </form>
-      </div>
-    </div>
-  )
-}
-
 const plannerThemeCss = `
   :root{
     --gp-navy:#17223f;
@@ -1671,6 +1600,8 @@ function PlannerApp({ onReady }) {
   }
 
   if (accessError) return <div className="login-shell"><div className="login-message" role="alert">{accessError}</div><button onClick={()=>supabase.auth.signOut()}>Sign out and try again</button></div>
+
+  if (needsBusinessSetup(business)) return <BusinessWelcome key={business.businessId}/>
 
   if (groomerMode) {
     return <GroomerPortal session={session} groomer={groomerName}/>
