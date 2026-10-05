@@ -1,11 +1,25 @@
 {
   "id": "/",
-  "name": "Grooming Planner",
-  "short_name": "Grooming",
+  "name": "Hey Betty",
+  "short_name": "Hey Betty",
   "description": "Private mobile dog-grooming schedule and route planner.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f7f4ef",
-  "theme_color": "#17223f"
+  "theme_color": "#17223f",
+  "icons": [
+    {
+      "src": "/hey-betty-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/hey-betty-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
 }

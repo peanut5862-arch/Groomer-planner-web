@@ -896,7 +896,7 @@ function ensureGroomingWebAppMetadata() {
     meta.content = content
   }
   ensureMeta('apple-mobile-web-app-capable','yes')
-  ensureMeta('apple-mobile-web-app-title','Grooming Planner')
+  ensureMeta('apple-mobile-web-app-title','Hey Betty')
   ensureMeta('theme-color','#17223f')
 }
 
@@ -1127,7 +1127,7 @@ function GroomerPortal({session,groomer}) {
   return (
     <div className="app-shell">
       <style>{plannerThemeCss}</style>
-      <header className="topbar"><div className="brand-mark">GP</div><div><strong>Grooming Planner</strong><span>{groomer} · Groomer mode</span></div></header>
+      <header className="topbar"><div className="brand-mark">HB</div><div><strong>Hey Betty</strong><span>{groomer} · Groomer mode</span></div></header>
       <main>{notice&&<div className="prototype-note" style={{marginBottom:14}}>{notice} <button className="text-btn" onClick={()=>setNotice('')}>Dismiss</button></div>}{body}</main>
       <nav className="bottom-nav">{nav.map(([name,Icon])=><button key={name} className={tab===name?'active':''} onClick={()=>setTab(name)}><Icon size={20}/><span>{name}</span></button>)}</nav>
     </div>
@@ -1167,9 +1167,9 @@ function LoginScreen({ onSignedIn }) {
   return (
     <div className="login-shell">
       <div className="login-card">
-        <div className="login-brand">GP</div>
+        <div className="login-brand">HB</div>
         <div className="eyebrow">Private business dashboard</div>
-        <h1>Grooming Planner</h1>
+        <h1>Hey Betty</h1>
         <p className="login-copy">
           Sign in to access clients, routes, appointments and planning tools.
         </p>
@@ -1381,7 +1381,56 @@ const plannerThemeCss = `
   }
 `
 
+function OpeningScreen({ ready, onFinished }) {
+  const [imageReady, setImageReady] = useState(false)
+  const [imageFailed, setImageFailed] = useState(false)
+  const [displayed, setDisplayed] = useState(false)
+  const [leaving, setLeaving] = useState(false)
+
+  useEffect(() => {
+    // A missing image must never prevent the app from opening.
+    const timer = window.setTimeout(() => setImageReady(true), 2500)
+    return () => window.clearTimeout(timer)
+  }, [])
+  useEffect(() => {
+    if (!imageReady) return
+    const timer = window.setTimeout(() => setDisplayed(true), 2000)
+    return () => window.clearTimeout(timer)
+  }, [imageReady])
+  useEffect(() => {
+    if (!ready || !displayed) return
+    setLeaving(true)
+    const timer = window.setTimeout(onFinished, 220)
+    return () => window.clearTimeout(timer)
+  }, [ready, displayed, onFinished])
+
+  return (
+    <div className="betty-opening" role="status" aria-label="Opening Hey Betty" aria-busy="true">
+      <style>{`
+        .betty-opening { position:fixed; inset:0; z-index:1000; display:grid; place-items:center; background:#f9f6f0; padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); opacity:${leaving ? 0 : 1}; transition:opacity 220ms ease-out; pointer-events:auto; }
+        .betty-opening img { display:block; width:100%; height:100%; min-height:0; max-height:100%; object-fit:contain; }
+        @media (prefers-reduced-motion:reduce) { .betty-opening { transition:none; } }
+      `}</style>
+      {imageFailed
+        ? <h1 style={{color:'#17213a'}}>Hey Betty</h1>
+        : <img src={`${import.meta.env.BASE_URL}hey-betty-opening.jpg`} alt="Betty the shaggy Irish wolfhound. Hey Betty — Your grooming day, organized." onLoad={() => setImageReady(true)} onError={() => {setImageFailed(true);setDisplayed(true)}}/>}
+    </div>
+  )
+}
+
 export default function App() {
+  const [ready, setReady] = useState(false)
+  const [opening, setOpening] = useState(true)
+  const finishOpening = React.useCallback(() => setOpening(false), [])
+  return <>
+    <div style={{visibility:opening && !ready ? 'hidden' : undefined}} aria-hidden={opening || undefined}>
+      <PlannerApp onReady={setReady}/>
+    </div>
+    {opening && <OpeningScreen ready={ready} onFinished={finishOpening}/>}
+  </>
+}
+
+function PlannerApp({ onReady }) {
   const [session, setSession] = useState(null)
   const [authReady, setAuthReady] = useState(false)
   const [accessMode,setAccessMode] = useState('editor')
@@ -1628,12 +1677,12 @@ export default function App() {
     }
   }, [session,scheduleRevision,groomerMode])
 
+  useEffect(() => {
+    if (authReady && (!session || accessReady)) onReady(true)
+  }, [authReady, session, accessReady, onReady])
+
   if (!authReady || (session && !accessReady)) {
-    return (
-      <div className="login-shell">
-        <div className="login-card">Loading…</div>
-      </div>
-    )
+    return <div className="login-shell" role="status" aria-label="Opening Hey Betty" aria-busy="true"/>
   }
 
   if (!session) {
@@ -1663,8 +1712,8 @@ export default function App() {
     <div className="app-shell">
       <style>{plannerThemeCss}</style>
       <header className="topbar">
-        <div className="brand-mark">GP</div>
-        <div><strong>Grooming Planner</strong><span>{viewerMode ? 'Viewer demo · read only' : 'Mobile business dashboard'}</span></div>
+        <div className="brand-mark">HB</div>
+        <div><strong>Hey Betty</strong><span>{viewerMode ? 'Viewer demo · read only' : 'Mobile business dashboard'}</span></div>
         <button
           type="button"
           className="top-ai"
