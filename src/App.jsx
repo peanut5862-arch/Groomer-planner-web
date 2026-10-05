@@ -123,7 +123,9 @@ async function openExternalUrl(url) {
 }
 
 function Today({onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppointment,completingId,confirmingId,paymentSavingId,revision,dogs,viewerMode=false}) {
+  const business = useBusinessContext()
   const [groomer,setGroomer] = useState('All')
+  useEffect(() => { if (groomer !== 'All' && !groomerNames().includes(groomer)) setGroomer('All') }, [business.revision,groomer])
   const [dateKey,setDateKey] = useState(() => businessDateKey())
   const [result,setResult] = useState(null)
   const [loading,setLoading] = useState(true)
@@ -194,7 +196,7 @@ function Today({onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppointme
       </div>
 
       <div className="segmented" aria-label="Filter by groomer">
-        {['All',...groomerNames(true)].map(name=>(
+        {['All',...groomerNames()].map(name=>(
           <button key={name} className={groomer===name?'active':''}
             aria-pressed={groomer===name} onClick={()=>setGroomer(name)}>{name}</button>
         ))}
@@ -527,7 +529,9 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
 }
 
 function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppointment,onFillOpening,completingId,confirmingId,paymentSavingId,revision,dogs,viewerMode=false}) {
+  const business = useBusinessContext()
   const [groomer,setGroomer]=useState('All')
+  useEffect(() => { if (groomer !== 'All' && !groomerNames().includes(groomer)) setGroomer('All') }, [business.revision,groomer])
   const [weekStart,setWeekStart]=usePlannerWeekStart({dateObject:true})
   const [weekRecord,setWeekRecord]=useState(null)
   const [loading,setLoading]=useState(true)
@@ -715,7 +719,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
       </div>
 
       <div className="segmented">
-        {['All',...groomerNames(true)].map(x=>(
+        {['All',...groomerNames()].map(x=>(
           <button
             key={x}
             className={`${groomer===x?'active ':''}${x==='Jen'?'seg-jen':x==='Haley'?'seg-haley':'seg-all'}`}
