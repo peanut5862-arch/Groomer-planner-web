@@ -10,6 +10,7 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
  const [draft,setDraft]=useState(()=>structuredClone(business.settings))
  const [saving,setSaving]=useState(false),[error,setError]=useState(''),[loading,setLoading]=useState(true)
  useEffect(()=>{let live=true;supabase.rpc('get_business_context').then(({data,error})=>{if(!live)return;if(error)setError(error.message);else if(data?.businessId){setBusinessContext(data);setDraft(structuredClone(data.settings))}setLoading(false)}).catch(e=>{if(live){setError(e.message);setLoading(false)}});return()=>{live=false}},[])
+ const [deleteId,setDeleteId]=useState(null)
  const editable=business.role==='owner'
  const patch=values=>{setError('');setDraft(s=>({...s,...values}))}
  const changeGroomer=(id,values)=>{setError('');setDraft(s=>({...s,groomers:s.groomers.map(g=>g.id===id?{...g,...values}:g)}))}
@@ -52,6 +53,7 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}><label>Start time<input type="time" value={g.startTime} onChange={e=>changeGroomer(g.id,{startTime:e.target.value})}/></label><label>End time<input type="time" value={g.endTime} onChange={e=>changeGroomer(g.id,{endTime:e.target.value})}/></label></div>
      <label>Service commission (%)<input type="number" min={0} max={100} step="0.1" value={g.commissionPercent} onChange={e=>changeGroomer(g.id,{commissionPercent:Number(e.target.value)})}/></label>
      <p className="settings-help">Tips are separate. Changing this rate applies to future completions; past pay stays the same.</p>
+     {deleteId===g.id ? <div role="group" aria-label="Confirm groomer deletion"><p>Delete {g.name||'this groomer'}? This takes effect when you save settings. Groomers with clients, appointments, staff access, or history must be archived instead.</p><button type="button" className="ghost" onClick={()=>setDeleteId(null)}>Keep groomer</button><button type="button" className="ghost" onClick={()=>{patch({groomers:draft.groomers.filter(item=>item.id!==g.id)});setDeleteId(null)}}>Yes, delete groomer</button></div> : <button type="button" className="ghost" disabled={draft.groomers.length===1} onClick={()=>setDeleteId(g.id)}>Delete groomer</button>}
     </div>)}
     <button type="button" className="ghost" onClick={()=>patch({groomers:[...draft.groomers,{id:crypto.randomUUID(),name:'',active:true,workDays:[1,2,3,4,5],startTime:'09:00',endTime:'17:30',homeAddress:'',commissionPercent:0}]})}><Plus size={16}/> Add groomer</button>
    </>}

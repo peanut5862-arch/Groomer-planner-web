@@ -28,8 +28,10 @@ function moveMonth(monthKey,offset) {
 }
 
 function Month({onOpen,revision,dogs}) {
+  const business = useBusinessContext()
   const [month,setMonth] = useState(()=>businessDateKey().slice(0,7))
   const [groomer,setGroomer] = useState('All')
+  useEffect(() => { if (groomer !== 'All' && !groomerNames().includes(groomer)) setGroomer('All') }, [business.revision,groomer])
   const [selected,setSelected] = useState(()=>businessDateKey())
   const [result,setResult] = useState(null)
   const [loading,setLoading] = useState(true)
@@ -88,7 +90,7 @@ function Month({onOpen,revision,dogs}) {
         </div>
       </div>
       <div className="segmented" aria-label="Filter by groomer">
-        {['All',...groomerNames(true)].map(name=><button key={name} className={groomer===name?'active':''}
+        {['All',...groomerNames()].map(name=><button key={name} className={groomer===name?'active':''}
           aria-pressed={groomer===name} onClick={()=>setGroomer(name)}>{name}</button>)}
       </div>
       <div className="section-title">

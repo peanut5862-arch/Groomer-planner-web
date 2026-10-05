@@ -2,6 +2,7 @@ import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWor
 import React, { useEffect, useRef, useState } from 'react';
 import { createBettyRequestPlan } from './bettyRequests.js'
 import { plannerWeekForDate } from './plannerWeek.js'
+import {travelFollowup,matchingTravelClients,calculateTravelEta} from './bettyTravel.js'
 import { supabase } from "../supabase.js";
 import { X, CheckCircle2 } from 'lucide-react';
 import { businessDateKey, canonicalServiceLabel, appointmentServiceOptions, serviceDefaultsForDog, canonicalAreaLabel, apiUrl, clientConfirmationStatus, needsClientConfirmation, mondayForDate, todayAppointments, clockMinutesForDisplay, displayClockTime, compareAppointmentTimes, fullClientAddress, clientAddressLookup, appointmentAddress, defaultFirstStopTime, schedulingOverrideReasons, appointmentDurationMinutes, openingForDuration, clientDueInfo, appointmentTimeInput, scheduleRowDuration, plannerClientGroups, plannerActiveRow , apiFetch } from './shared.jsx'
@@ -331,6 +332,32 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
       const today = businessDateKey()
       let filters = plannerQueryFilters(prompt,dogs)
       const groups = plannerClientGroups(dogs)
+      const travel = travelFollowup(prompt,previousAnswer?.travel,conversation)
+      if (travel) {
+        const matches=matchingTravelClients(groups,travel.subject)
+        let reply, pendingTravel=null
+        if(!matches.length) reply=`I couldn't find ${travel.subject} in Clients. Try the owner or dog name exactly as saved.`
+        else if(matches.length>1) reply=`I found more than one matching client: ${matches.map(g=>g.owner).join(', ')}. Ask for the drive time using the full owner name.`
+        else {
+          const client=matches[0]
+          if(!travel.originText) {
+            reply=`I found ${client.owner}. Should I calculate the drive from your current location, leaving now? Reply “Yes” or enter “From” followed by a starting street address.`
+            pendingTravel={subject:client.owner}
+          } else {
+            pendingTravel={subject:client.owner}
+            const address=client.rows.map(fullClientAddress).find(Boolean) || ''
+            try {
+              const eta=await calculateTravelEta({address,owner:client.owner,originText:travel.originText})
+              const miles=Number.isFinite(eta.miles)?` (${eta.miles.toFixed(1)} miles)`:''
+              reply=`Google estimates about ${Math.max(1,Math.round(eta.etaMinutes))} minutes${miles} to ${client.owner}, leaving now from ${travel.originText==='current location'?'your current location':travel.originText}. This uses current traffic; travel time for a future appointment may differ.`
+              pendingTravel=null
+            } catch(e) {reply=`I couldn't calculate that drive time. ${e.message}`}
+          }
+        }
+        setConversation(current=>[...current,{role:'user',text:prompt},{role:'assistant',text:reply}].slice(-16))
+        setAnswer({mode:'ai',title:'Betty',text:reply,travel:pendingTravel,targetDate:'',filters:{},candidates:[],summary:''})
+        return
+      }
       const specificBookingRequest=bettySpecificBookingRequest(prompt)
       const scheduleLookupRequest=bettyScheduleLookupRequest(prompt,today)
 
@@ -471,6 +498,8 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
         if (!filters.unbookedOnly && prior.unbookedOnly) filters.unbookedOnly = true
         if (!filters.overdueOnly && prior.overdueOnly) filters.overdueOnly = true
       }
+
+      if (bettyIntent==='weather' && !obviousWeather && !/weather|forecast|rain|temperature/i.test(String(priorConversation.at(-1)?.text || ''))) bettyIntent='general'
 
       if (bettyIntent === 'weather') {
         const response = await apiFetch('/api/ask-betty',{
