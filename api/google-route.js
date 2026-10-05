@@ -1,3 +1,4 @@
+import {requireBusiness,routeHome} from '../server/business.js'
 function send(res, status, payload) {
   res.status(status)
   res.setHeader('Cache-Control', 'no-store')
@@ -36,7 +37,7 @@ export default async function handler(req, res) {
   // Allow the Capacitor iPhone app to call this Vercel function.
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
   if (req.method === 'OPTIONS') return res.status(204).end()
 
   if (req.method !== 'POST') {
@@ -44,6 +45,8 @@ export default async function handler(req, res) {
     return send(res, 405, {error:'Use POST for route calculations.'})
   }
 
+  let business
+  try {business=await requireBusiness(req)} catch(error) {return send(res,error.status || 500,{error:error.message})}
   const apiKey = process.env.GOOGLE_MAPS_API_KEY
   if (!apiKey) return send(res, 500, {error:'GOOGLE_MAPS_API_KEY is not configured in Vercel.'})
 
@@ -66,6 +69,7 @@ export default async function handler(req, res) {
           origin:{location:{latLng:{latitude,longitude}}},
           destination:{address},
           travelMode:'DRIVE',
+          routeModifiers:{avoidTolls:Boolean(business.settings?.route?.avoidTolls)},
           routingPreference:'TRAFFIC_AWARE',
           computeAlternativeRoutes:false,
           languageCode:'en-US',
@@ -93,16 +97,8 @@ export default async function handler(req, res) {
   }
 
   const groomer = String(req.body?.groomer || '').trim()
-  if (!['Jen','Haley'].includes(groomer)) {
-    return send(res, 400, {error:'Choose Jen or Haley so the correct home base can be used.'})
-  }
-
-  const homeAddress = groomer === 'Jen'
-    ? String(process.env.JEN_HOME_ADDRESS || '').trim()
-    : String(process.env.HALEY_HOME_ADDRESS || '').trim()
-  if (!homeAddress) {
-    return send(res, 500, {error:`${groomer === 'Jen' ? 'JEN_HOME_ADDRESS' : 'HALEY_HOME_ADDRESS'} is not configured in Vercel.`})
-  }
+  let homeAddress
+  try {homeAddress=routeHome(business,groomer)} catch(error) {return send(res,error.status || 400,{error:error.message})}
 
   const clientStops = (Array.isArray(req.body?.stops) ? req.body.stops : []).map(cleanStop)
   if (clientStops.length < 1) return send(res, 400, {error:'At least one client address is required.'})
@@ -127,6 +123,7 @@ export default async function handler(req, res) {
           origin:{address:origin.address},
           destination:{address:destination.address},
           travelMode:'DRIVE',
+          routeModifiers:{avoidTolls:Boolean(business.settings?.route?.avoidTolls)},
           routingPreference:'TRAFFIC_AWARE',
           computeAlternativeRoutes:false,
           languageCode:'en-US',

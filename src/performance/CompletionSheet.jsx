@@ -1,7 +1,8 @@
+import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
 import React, { useEffect, useState } from 'react';
 import { supabase } from "../supabase.js";
 import { X, MessageCircle, Share2 } from 'lucide-react';
-import { messageDateLabel, arrivalWindowLabel, canonicalServiceLabel, appointmentServiceOptions, appointmentTimeInput, apiUrl, clientConfirmationStatus, phoneForScheduleRow, confirmationMessage, reminderMessage, runningLateMessage, onMyWayMessage, imHereMessage, needAccessMessage, finishedReadyMessage, preferredPaymentForAppointment, paymentReminderMessage, readAppointmentContact, saveAppointmentContact, contactLabel, googleEtaToAppointment, etaArrivalClock, openSms, openCall, shareAppointmentAddress, businessDateKey, mondayForDate, clockMinutesForDisplay, displayClockTime, clientAddressLookup, appointmentAddress, schedulingOverrideReasons, completionBlockReason, scheduleRowDuration } from './shared.jsx'
+import { messageDateLabel, arrivalWindowLabel, canonicalServiceLabel, appointmentServiceOptions, appointmentTimeInput, apiUrl, clientConfirmationStatus, phoneForScheduleRow, confirmationMessage, reminderMessage, runningLateMessage, onMyWayMessage, imHereMessage, needAccessMessage, finishedReadyMessage, preferredPaymentForAppointment, paymentReminderMessage, readAppointmentContact, saveAppointmentContact, contactLabel, googleEtaToAppointment, etaArrivalClock, openSms, openCall, shareAppointmentAddress, businessDateKey, mondayForDate, clockMinutesForDisplay, displayClockTime, clientAddressLookup, appointmentAddress, schedulingOverrideReasons, completionBlockReason, scheduleRowDuration , apiFetch } from './shared.jsx'
 
 // The original viewer sheet referenced Clients' private textDate helper.
 // Keep the identical date format available in this sheet's own module.
@@ -42,8 +43,8 @@ function formatAppointmentDogServices(items) {
 function rescheduleValidation(date,time,groomer,today) {
   if (!date || date<today) return 'Choose today or a future date.'
   const day = new Date(`${date}T12:00:00Z`).getUTCDay()
-  if (![1,2,3,4,5].includes(day)) return 'Choose Monday through Friday.'
-  if (!['Jen','Haley'].includes(groomer)) return 'Choose a groomer.'
+  if (!groomerWorksOn(groomer,date)) return 'The selected groomer is not working that day.'
+  if (!groomerNames().includes(groomer)) return 'Choose a groomer.'
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return 'Choose a valid arrival time.'
   return ''
 }
@@ -116,9 +117,9 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
   const serviceMinutesTotal = serviceRows.reduce((sum,item)=>{ const n=serviceMinutesFor(item.name,item.service); return sum+(Number.isFinite(n)?n:0) },0)
   const missingServicePrice = serviceRows.some(item=>!Number.isFinite(servicePriceFor(item.name,item.service)))
   const missingServiceMinutes = serviceRows.some(item=>!Number.isFinite(serviceMinutesFor(item.name,item.service)))
-  const restrictions = householdDogs.map(dog=>String(dog.groomer || dog.Groomer || '').trim()).filter(name=>['Jen','Haley'].includes(name))
+  const restrictions = householdDogs.map(dog=>String(dog.groomer || dog.Groomer || '').trim()).filter(name=>groomerNames().includes(name))
   const assignedGroomers = [...new Set(restrictions)]
-  const groomers = ['Jen','Haley']
+  const groomers = groomerNames()
   const editOverrideReasons = schedulingOverrideReasons(originalDate,editGroomer,assignedGroomers)
   const rescheduleOverrideReasons = schedulingOverrideReasons(targetDate,targetGroomer,assignedGroomers)
   const close = () => { if (!savingRef.current) onClose() }
@@ -190,7 +191,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
     const date = mode==='reschedule' ? targetDate : originalDate
     const time = mode==='reschedule' ? targetTime : editTime
     const groomer = mode==='reschedule' ? targetGroomer : editGroomer
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time) || !['Jen','Haley'].includes(groomer)) return
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time) || !groomerNames().includes(groomer)) return
     let cancelledCheck = false
     const timer = setTimeout(async()=>{
       setScheduleCheck({loading:true,severity:'ok',messages:[]})
@@ -238,14 +239,14 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
         const candidateIndex = routeRows.findIndex(item=>item.id===candidateId)
         if (candidateIndex>=0 && routeRows.every(item=>item.address)) {
           const signature = routeRows.map(stop=>`${stop.id}:${stop.address}:${stop.time}`).join('|')
-          const cacheKey = `edit-route-check-v1:${date}:${groomer}:${signature}`
+          const cacheKey = `${getBusinessContext().businessId}:${getBusinessContext().revision}:edit-route-check-v1:${date}:${groomer}:${signature}`
           let routePayload = null
           try {
             const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null')
             if (cached?.payload && Number(cached.savedAt) > Date.now()-15*60*1000) routePayload = cached.payload
           } catch {}
           if (!routePayload) {
-            const response = await fetch(apiUrl('/api/google-route'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({groomer,stops:routeRows.map(({row,...stop})=>stop)})})
+            const response = await apiFetch('/api/google-route',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({groomer,stops:routeRows.map(({row,...stop})=>stop)})})
             const payload = await response.json().catch(()=>({}))
             if (response.ok) {
               routePayload = payload
@@ -288,13 +289,13 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
     if (savingRef.current || completed || moved || missed) return
     if (mode==='edit') {
       if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(editTime)) { setError('Choose a valid arrival time.'); return }
-      if (!groomers.includes(editGroomer)) { setError('Choose Jen or Haley.'); return }
+      if (!groomers.includes(editGroomer)) { setError('Choose a groomer.'); return }
       if (editOverrideReasons.length && !manualOverride) { setError('Turn on Manual override to save outside the normal groomer rules.'); return }
     }
     if (mode==='reschedule') {
       const message=rescheduleValidation(targetDate,targetTime,targetGroomer,businessDateKey())
       if(message){setError(message);return}
-      if(!groomers.includes(targetGroomer)){setError('Choose Jen or Haley.');return}
+      if(!groomers.includes(targetGroomer)){setError('Choose a groomer.');return}
       if (rescheduleOverrideReasons.length && !manualOverride) { setError('Turn on Manual override to save outside the normal groomer rules.'); return }
     }
     if (mode==='services' && (!serviceRows.length || serviceRows.some(item=>!item.name || !appointmentServiceOptions.includes(item.service)))) {

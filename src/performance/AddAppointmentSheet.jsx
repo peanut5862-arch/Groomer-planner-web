@@ -1,3 +1,4 @@
+import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from "../supabase.js";
 import { X } from 'lucide-react';
@@ -7,7 +8,7 @@ function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
   const [date,setDate] = useState(dateKey || businessDateKey())
   const [clientKey,setClientKey] = useState('')
   const [selectedDogs,setSelectedDogs] = useState({})
-  const [groomer,setGroomer] = useState('Jen')
+  const [groomer,setGroomer] = useState(firstGroomer)
   const [time,setTime] = useState('09:00')
   const [fixed,setFixed] = useState(false)
   const [note,setNote] = useState('')
@@ -39,7 +40,7 @@ function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
     setDate(dateKey || businessDateKey())
     setClientKey(preset?.clientKey || '')
     setSelectedDogs({})
-    const initialGroomer = ['Jen','Haley'].includes(preset?.groomer) ? preset.groomer : 'Jen'
+    const initialGroomer = groomerNames().includes(preset?.groomer) ? preset.groomer : firstGroomer()
     setGroomer(initialGroomer)
     setTime(/^([01]\d|2[0-3]):[0-5]\d$/.test(String(preset?.time || '')) ? preset.time : defaultFirstStopTime(initialGroomer))
     setFixed(Boolean(preset?.fixed))
@@ -61,8 +62,8 @@ function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
     }
     setSelectedDogs(initial)
     const preferred = client.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).find(Boolean)
-    if (['Jen','Haley'].includes(preset?.groomer)) setGroomer(preset.groomer)
-    else if (preferred === 'Jen' || preferred === 'Haley') {
+    if (groomerNames().includes(preset?.groomer)) setGroomer(preset.groomer)
+    else if (groomerNames().includes(preferred)) {
       const previousDefault = defaultFirstStopTime(groomer)
       setGroomer(preferred)
       if (time === previousDefault) setTime(defaultFirstStopTime(preferred))
@@ -81,7 +82,7 @@ function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
     return acc
   },{price:0,minutes:0})
 
-  const assignedGroomers = client ? [...new Set(client.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))] : []
+  const assignedGroomers = client ? [...new Set(client.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>groomerNames(true).includes(name)))] : []
   const overrideReasons = schedulingOverrideReasons(date,groomer,assignedGroomers)
 
   const save = async () => {
@@ -91,7 +92,6 @@ function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { setMessage('Choose an appointment date.'); return }
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) { setMessage('Choose a valid appointment time.'); return }
     const weekday = new Date(`${date}T12:00:00Z`).getUTCDay()
-    if (![1,2,3,4,5].includes(weekday)) { setMessage('Choose Monday through Friday.'); return }
     if (overrideReasons.length && !manualOverride) { setMessage('Turn on Manual override to schedule outside the normal groomer rules.'); return }
     setSaving(true)
     setMessage('')
@@ -174,7 +174,7 @@ function AddAppointmentSheet({open,dateKey,dogs,preset,onClose,onSaved}) {
                 setGroomer(next)
                 if (time === previousDefault) setTime(defaultFirstStopTime(next))
               }}>
-                <option>Jen</option><option>Haley</option>
+                {groomerNames().map(name=><option key={name}>{name}</option>)}
               </select>
             </label>
             <label className="field-label">Start time

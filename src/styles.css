@@ -56,9 +56,9 @@ h2,h3,p{margin:0}
 .meta{display:flex;flex-wrap:wrap;gap:9px;margin-top:7px;color:#7b828e;font-size:10.5px}
 .meta span{display:flex;align-items:center;gap:3px}
 .chev{color:#b0b4bc;align-self:center}
-.segmented{display:flex;background:#ece9e3;padding:4px;border-radius:12px;margin-bottom:14px}
+.segmented{display:flex;overflow-x:auto;background:#ece9e3;padding:4px;border-radius:12px;margin-bottom:14px}
 .segmented.wide{margin-bottom:18px}
-.segmented button{flex:1;border:0;background:transparent;padding:8px 10px;border-radius:9px;color:#6f7681;font-size:12px;font-weight:700}
+.segmented button{flex:1;min-width:max-content;border:0;background:transparent;padding:8px 10px;border-radius:9px;color:#6f7681;font-size:12px;font-weight:700}
 .segmented button.active{background:#fff;color:#17213a;box-shadow:0 2px 8px rgba(30,36,50,.06)}
 .day-block{margin-bottom:20px}
 .day-head{margin-bottom:8px}

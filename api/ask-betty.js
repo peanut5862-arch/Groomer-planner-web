@@ -1,3 +1,4 @@
+import {requireBusiness} from '../server/business.js'
 function weatherCodeLabel(code) {
   const labels = {
     0: "clear sky", 1: "mainly clear", 2: "partly cloudy", 3: "overcast",
@@ -71,13 +72,14 @@ async function liveWeatherAnswer(message) {
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Use POST." });
 
   const apiKey = process.env.OPENAI_API_KEY;
   try {
+    const business=await requireBusiness(req);
     const { message, context, mode } = req.body || {};
     if (!message || typeof message !== "string") return res.status(400).json({ error: "A message is required." });
 
@@ -123,7 +125,7 @@ Important:
 - If the user says 'Which one pays the most?' after a prior candidate list, classify general so Betty can compare the prior result.
 Use conversation and previousPlannerResult to resolve follow-ups.
           `,
-          input: `CONTEXT:\n${JSON.stringify(context || {}, null, 2)}\n\nUSER MESSAGE:\n${message}`,
+          input: `CONTEXT:\n${JSON.stringify({...context,businessSettings:{businessName:business.settings.businessName,timeZone:business.settings.timeZone,bufferMinutes:business.settings.bufferMinutes,groomers:business.settings.groomers.map(({name,active,workDays,startTime,endTime,commissionPercent})=>({name,active,workDays,startTime,endTime,commissionPercent}))}}, null, 2)}\n\nUSER MESSAGE:\n${message}`,
         }),
       });
       const routingData = await routingResponse.json();
@@ -145,16 +147,16 @@ Use conversation and previousPlannerResult to resolve follow-ups.
         model: "gpt-5-mini",
         instructions: `
 You are Betty, the AI grooming business assistant inside Grooming Planner.
-Help Jen run her mobile dog grooming business.
-Be friendly, concise, practical, and conversational. Keep phone answers short unless Jen asks for detail.
+Help the signed-in business owner run their grooming business.
+Be friendly, concise, practical, and conversational. Keep phone answers short unless the user asks for detail.
 Use prior conversation and previousPlannerResult to understand follow-up questions.
-When comparing a prior planner candidate list, answer directly from that list instead of asking Jen to repeat it.
-For Haley earnings, Haley receives 50% of ALL service revenue from every service she personally performs, including Groom, Bath Only, Partial Groom, and any other service type. Do not ask whether baths or partials count. Tips are excluded from commission unless Jen explicitly asks to include them. Use the supplied schedule and saved appointment prices.
+When comparing a prior planner candidate list, answer directly from that list instead of asking the user to repeat it.
+Use the supplied business settings for groomer workdays, hours and commission rates. Commission applies to service revenue; tips are separate. Use saved Commission Percent snapshots for completed appointments when available. Never assume particular groomer names or commission rates.
 Only claim you can perform an action when currentCapabilities explicitly says that action is available. If saving appointments, rescheduling, notes, or sending customer messages is not enabled, do not offer to do it.
 Use the business context supplied with each request when relevant. Never invent client information, appointments, prices, payments, routes, or other business data that is not in the supplied context.
 If the user asks you to actually change an appointment, contact a customer, take a payment action, or make another business change, explain what you intend to do and require confirmation before the change is performed.
         `,
-        input: `BUSINESS CONTEXT:\n${JSON.stringify(context || {}, null, 2)}\n\nJEN'S MESSAGE:\n${message}`,
+        input: `BUSINESS CONTEXT:\n${JSON.stringify({...context,businessSettings:{businessName:business.settings.businessName,timeZone:business.settings.timeZone,bufferMinutes:business.settings.bufferMinutes,groomers:business.settings.groomers.map(({name,active,workDays,startTime,endTime,commissionPercent})=>({name,active,workDays,startTime,endTime,commissionPercent}))}}, null, 2)}\n\nUSER'S MESSAGE:\n${message}`,
       }),
     });
 
@@ -167,6 +169,6 @@ If the user asks you to actually change an appointment, contact a customer, take
     return res.status(200).json({ answer });
   } catch (error) {
     console.error("Ask Betty error:", error);
-    return res.status(500).json({ error: error?.message || "Betty had trouble answering. Please try again." });
+    return res.status(error.status || 500).json({ error: error?.message || "Betty had trouble answering. Please try again." });
   }
 }

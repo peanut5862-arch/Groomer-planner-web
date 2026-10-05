@@ -20,6 +20,10 @@ function adminClient(){
 }
 
 export default async function handler(req,res){
+  res.setHeader('Access-Control-Allow-Origin','*')
+  res.setHeader('Access-Control-Allow-Methods','POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization')
+  if(req.method==='OPTIONS')return res.status(204).end()
   if(req.method!=='POST'){
     res.setHeader('Allow','POST')
     return send(res,405,{error:'Use POST to register this phone.'})
@@ -34,16 +38,9 @@ export default async function handler(req,res){
     const user=userData?.user
     if(userError || !user) return send(res,401,{error:'Your sign-in session could not be verified.'})
 
-    const email=String(user.email || '').trim().toLowerCase()
-    const [viewerResult,groomerResult]=await Promise.all([
-      admin.from('grooming_viewers').select('email').eq('email',email).limit(1),
-      admin.from('grooming_groomers').select('email').eq('email',email).limit(1)
-    ])
-    if(viewerResult.error) throw viewerResult.error
-    if(groomerResult.error) throw groomerResult.error
-    if(viewerResult.data?.length || groomerResult.data?.length){
-      return send(res,403,{error:'Only the owner/editor account can receive owner finish notifications.'})
-    }
+    const {data:member,error:memberError}=await admin.from('planner_members').select('business_id,role').eq('user_id',user.id).maybeSingle()
+    if(memberError)throw memberError
+    if(!member || !['owner','editor'].includes(member.role))return send(res,403,{error:'Only the owner/editor account can receive finish notifications.'})
 
     const subscription=typeof req.body==='string' ? JSON.parse(req.body || '{}')?.subscription : req.body?.subscription
     const endpoint=String(subscription?.endpoint || '').trim()
@@ -53,6 +50,7 @@ export default async function handler(req,res){
 
     const {error:saveError}=await admin.from('push_subscriptions').upsert({
       user_id:user.id,
+      business_id:member.business_id,
       endpoint,
       subscription,
       enabled:true,
