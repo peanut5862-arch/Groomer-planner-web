@@ -1,9 +1,11 @@
+import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './performance/businessConfig.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from './supabase.js';
 import { AppLauncher } from '@capacitor/app-launcher';
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Ellipsis, Home, MapPin, Plus, Route, Sparkles, Users, WalletCards, LogOut } from 'lucide-react';
-import { Stat, ApptCard, businessDateKey, mondayForDate, todayAppointments, clockMinutesForDisplay, apiUrl, displayClockTime, compareAppointmentTimes, clientAddressLookup, appointmentAddress, clientConfirmationStatus, needsClientConfirmation, phoneForScheduleRow, googleMapsAddressUrl, dismissFormKeyboard, defaultFirstStopTime, completionBlockReason } from './performance/shared.jsx'
+import { Stat, ApptCard, businessDateKey, mondayForDate, todayAppointments, clockMinutesForDisplay, apiUrl, displayClockTime, compareAppointmentTimes, clientAddressLookup, appointmentAddress, clientConfirmationStatus, needsClientConfirmation, phoneForScheduleRow, googleMapsAddressUrl, dismissFormKeyboard, defaultFirstStopTime, completionBlockReason , apiFetch } from './performance/shared.jsx'
 import { createLazyFeature, DeferredSheet } from './performance/DeferredFeature.jsx'
+import { usePlannerWeekStart } from './performance/plannerWeek.js'
 const Month = createLazyFeature(() => import('./performance/Month.jsx'), { sheet: false })
 const Clients = createLazyFeature(() => import('./performance/Clients.jsx'), { sheet: false })
 const More = createLazyFeature(() => import('./performance/More.jsx'), { sheet: false })
@@ -92,36 +94,6 @@ function useRememberScrollPosition(key, waitForSection = false) {
   }, [key, waitForSection])
 }
 
-const demoDays = [
-  { day:'Mon', date:29, groomer:'Haley', appointments:[
-    { time:'8:30', owner:'Leslie Dunn', dogs:'Gus', area:'The Woodlands', price:120, drive:18, status:'confirmed' },
-    { time:'10:30', owner:'Tammy', dogs:'Gus + Jax', area:'Spring', price:165, drive:21, status:'confirmed' },
-    { time:'1:15', owner:'Danielle Russell', dogs:'Bella', area:'Spring', price:110, drive:14, status:'confirmed' },
-  ]},
-  { day:'Tue', date:30, groomer:'Jen', appointments:[
-    { time:'8:30', owner:'Amber', dogs:'Oakley + Indy', area:'The Woodlands', price:170, drive:16, status:'confirmed' },
-    { time:'11:00', owner:'Nikki', dogs:'Lulu', area:'The Woodlands', price:95, drive:12, status:'pending' },
-    { time:'1:00', owner:'Betty', dogs:'Tux', area:'Conroe', price:90, drive:24, status:'confirmed' },
-  ]},
-  { day:'Wed', date:1, groomer:'Jen', appointments:[
-    { time:'8:30', owner:'Leah', dogs:'Beau', area:'Spring', price:120, drive:19, status:'locked' },
-    { time:'10:40', owner:'Misty', dogs:'3 dogs', area:'Spring', price:210, drive:13, status:'confirmed' },
-  ]},
-  { day:'Thu', date:2, groomer:'Haley', appointments:[
-    { time:'9:00', owner:'Susan Hensley', dogs:'Peanut', area:'Tomball', price:95, drive:22, status:'confirmed' },
-    { time:'11:15', owner:'Sheri Rose', dogs:'Ruby', area:'Tomball', price:105, drive:11, status:'confirmed' },
-  ]},
-  { day:'Fri', date:3, groomer:'Haley', appointments:[
-    { time:'8:30', owner:'Carol Kovacich', dogs:'Charlotte + Summer', area:'Woodforest', price:160, drive:26, status:'confirmed' },
-  ]},
-]
-
-const fillCandidates = [
-  { owner:'Nikki', dogs:'Lulu', area:'The Woodlands', due:'2 days overdue', minutes:90, price:95, drive:9 },
-  { owner:'Kristen Neal', dogs:'Max', area:'The Woodlands', due:'Due Friday', minutes:75, price:105, drive:12 },
-  { owner:'Diddy', dogs:'Diddy', area:'The Woodlands', due:'Due this week', minutes:90, price:115, drive:14 },
-]
-
 async function openExternalUrl(url) {
   const clean = String(url || '').trim()
   if (!clean) return
@@ -204,7 +176,7 @@ function Today({onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppointme
   const missingPrices = useMemo(()=>appointments.some(appt => !Number.isFinite(appt.price)),[appointments])
   const completed = useMemo(()=>appointments.filter(appt => appt.completed).length,[appointments])
   const dateLabel = new Date(`${dateKey}T12:00:00Z`).toLocaleDateString('en-US', {
-    timeZone:'America/Chicago',weekday:'long',month:'short',day:'numeric',year:'numeric'
+    timeZone:businessSettings().timeZone,weekday:'long',month:'short',day:'numeric',year:'numeric'
   })
 
   return (
@@ -222,7 +194,7 @@ function Today({onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppointme
       </div>
 
       <div className="segmented" aria-label="Filter by groomer">
-        {['All','Jen','Haley'].map(name=>(
+        {['All',...groomerNames(true)].map(name=>(
           <button key={name} className={groomer===name?'active':''}
             aria-pressed={groomer===name} onClick={()=>setGroomer(name)}>{name}</button>
         ))}
@@ -236,7 +208,7 @@ function Today({onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppointme
       {ready && record && (
         <>
           <div className="eyebrow" style={{margin:'16px 0 12px'}}>
-            {record.status === 'confirmed' ? 'Confirmed week' : 'Draft week'} · {groomer === 'All' ? 'Both groomers' : groomer}
+            {record.status === 'confirmed' ? 'Confirmed week' : 'Draft week'} · {groomer === 'All' ? 'All groomers' : groomer}
           </div>
           <div className="stats-row">
             <Stat label="Stops" value={appointments.length}/>
@@ -309,11 +281,11 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
     window:appointmentWindowText(appt?.time)
   }))
   const missing = stops.filter(stop=>!stop.address)
-  const validGroomer = ['Jen','Haley'].includes(routeGroomer)
+  const validGroomer = groomerNames().includes(routeGroomer)
   const canCheck = !mixedGroomers && validGroomer && stops.length >= 1 && missing.length === 0 && !loading
   const signature = stops.map(stop=>`${stop.id}:${stop.address}:${stop.time}`).join('|') + `:${routeGroomer}`
 
-  const cacheKey = `grooming-route-v2:${signature}`
+  const cacheKey = `${getBusinessContext().businessId}:${getBusinessContext().revision}:grooming-route-v2:${signature}`
   const cacheMs = 15 * 60 * 1000
   const isToday = String(dateKey || '') === businessDateKey()
   const firstLeg = result?.legs?.[0]
@@ -362,11 +334,11 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
 
   const checkTraffic = async ({force=false}={}) => {
     if (mixedGroomers) {
-      setError('Choose Jen or Haley above so the app calculates one van route at a time.')
+      setError('Choose a groomer above so the app calculates one van route at a time.')
       return
     }
     if (!validGroomer) {
-      setError('Choose Jen or Haley so the app knows which home base to use.')
+      setError('Choose a groomer so the app knows which home base to use.')
       return
     }
     if (!stops.length) {
@@ -393,7 +365,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
     setLoading(true)
     setError('')
     try {
-      const response = await fetch(apiUrl('/api/google-route'),{
+      const response = await apiFetch('/api/google-route',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({stops,groomer:routeGroomer})
@@ -467,8 +439,8 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
         )}
       </div>
 
-      {mixedGroomers && <div style={{fontSize:11,color:'#7b828e',marginTop:8}}>Choose Jen or Haley above to calculate one route at a time.</div>}
-      {!mixedGroomers && !validGroomer && <div style={{fontSize:11,color:'#7b828e',marginTop:8}}>Choose Jen or Haley so the correct home base is used.</div>}
+      {mixedGroomers && <div style={{fontSize:11,color:'#7b828e',marginTop:8}}>Choose a groomer above to calculate one route at a time.</div>}
+      {!mixedGroomers && !validGroomer && <div style={{fontSize:11,color:'#7b828e',marginTop:8}}>Choose a groomer so the correct home base is used.</div>}
       {!mixedGroomers && validGroomer && missing.length > 0 && <div style={{fontSize:11,color:'#9a5d19',marginTop:8}}>Missing address: {missing.map(stop=>stop.owner).join(', ')}</div>}
       {error && <div className="login-message" role="alert" style={{marginTop:8}}>{error}</div>}
 
@@ -556,14 +528,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
 
 function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppointment,onFillOpening,completingId,confirmingId,paymentSavingId,revision,dogs,viewerMode=false}) {
   const [groomer,setGroomer]=useState('All')
-  const [weekStart,setWeekStart]=useState(() => {
-    const now = new Date()
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const weekday = d.getDay()
-    const delta = weekday === 0 ? -6 : 1 - weekday
-    d.setDate(d.getDate() + delta)
-    return d
-  })
+  const [weekStart,setWeekStart]=usePlannerWeekStart({dateObject:true})
   const [weekRecord,setWeekRecord]=useState(null)
   const [loading,setLoading]=useState(true)
   const [error,setError]=useState('')
@@ -697,7 +662,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
       }
     }),[rawRows,dogs,weekStart])
 
-  const days = useMemo(()=>Array.from({length:5},(_,i)=>addDays(weekStart,i)),[weekStart])
+  const days = useMemo(()=>calendarWorkDays().map(day=>addDays(weekStart,day===0?6:day-1)),[weekStart])
   const activeWeekAppointments = useMemo(()=>appointments.filter(appt => !appt.inactive),[appointments])
   const groomerAppointments = useMemo(()=>
     groomer === 'All'
@@ -750,7 +715,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
       </div>
 
       <div className="segmented">
-        {['All','Jen','Haley'].map(x=>(
+        {['All',...groomerNames(true)].map(x=>(
           <button
             key={x}
             className={`${groomer===x?'active ':''}${x==='Jen'?'seg-jen':x==='Haley'?'seg-haley':'seg-all'}`}
@@ -764,7 +729,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
       {!loading && !error && weekRecord && (
         <>
           <div className="eyebrow" style={{margin:'16px 0 12px'}}>
-            {statusLabel} · {groomer === 'All' ? 'Both groomers' : groomer}
+            {statusLabel} · {groomer === 'All' ? 'All groomers' : groomer}
           </div>
           <div className="stats-row">
             <Stat label="Stops" value={groomerAppointments.length}/>
@@ -993,7 +958,7 @@ function GroomerStopCard({appt,onFinish,finishing}) {
 
 function GroomerPortal({session,groomer}) {
   const [tab,setTab]=useState('Today')
-  const [weekStart,setWeekStart]=useState(()=>mondayForDate(businessDateKey()))
+  const [weekStart,setWeekStart]=usePlannerWeekStart()
   const [record,setRecord]=useState(null)
   const [loading,setLoading]=useState(true)
   const [error,setError]=useState('')
@@ -1061,7 +1026,7 @@ function GroomerPortal({session,groomer}) {
       })
       if(finishError) throw finishError
       if(['finished','already_finished'].includes(data?.status) && data?.event_id){
-        const response=await fetch('/api/send-groomer-finished',{
+        const response=await apiFetch('/api/send-groomer-finished',{
           method:'POST',
           headers:{'Content-Type':'application/json','Authorization':`Bearer ${session?.access_token || ''}`},
           body:JSON.stringify({eventId:data.event_id})
@@ -1097,7 +1062,7 @@ function GroomerPortal({session,groomer}) {
   }else{
     const weekEnd=addDays(parseLocalDate(activeWeek) || new Date(`${activeWeek}T12:00:00`),4)
     const weekStartDate=parseLocalDate(activeWeek) || new Date(`${activeWeek}T12:00:00`)
-    const weekDays=Array.from({length:5},(_,i)=>addDays(weekStartDate,i))
+    const weekDays=calendarWorkDays().map(day=>addDays(weekStartDate,day===0?6:day-1))
     const jumpToDay=dateKey=>{
       const target=dayRefs.current[dateKey]
       if(target) target.scrollIntoView({behavior:'smooth',block:'start'})
@@ -1128,7 +1093,7 @@ function GroomerPortal({session,groomer}) {
     <div className="app-shell">
       <style>{plannerThemeCss}</style>
       <header className="topbar"><div className="brand-mark">HB</div><div><strong>Hey Betty</strong><span>{groomer} · Groomer mode</span></div></header>
-      <main>{notice&&<div className="prototype-note" style={{marginBottom:14}}>{notice} <button className="text-btn" onClick={()=>setNotice('')}>Dismiss</button></div>}{body}</main>
+      <main key={business.businessId}>{notice&&<div className="prototype-note" style={{marginBottom:14}}>{notice} <button className="text-btn" onClick={()=>setNotice('')}>Dismiss</button></div>}{body}</main>
       <nav className="bottom-nav">{nav.map(([name,Icon])=><button key={name} className={tab===name?'active':''} onClick={()=>setTab(name)}><Icon size={20}/><span>{name}</span></button>)}</nav>
     </div>
   )
@@ -1257,7 +1222,7 @@ const plannerThemeCss = `
   .confirmation-filter button{border:1px solid #dfe2e7;background:#fff;color:#5d6572;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:800;}
   .confirmation-filter button.active{background:#17223f;color:#fff;border-color:#17223f;}
   .confirmation-filter button.attention.active{background:#fff7e8;color:#76551b;border-color:#e6c981;}
-  .week-day-jump{position:sticky;top:86px;z-index:18;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin:12px -4px 6px;padding:7px;background:rgba(247,244,239,.96);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid #e6e1d9;border-radius:15px;box-shadow:0 6px 16px rgba(23,34,63,.08);}
+  .week-day-jump{position:sticky;top:86px;z-index:18;display:grid;grid-template-columns:repeat(auto-fit,minmax(38px,1fr));gap:6px;margin:12px -4px 6px;padding:7px;background:rgba(247,244,239,.96);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid #e6e1d9;border-radius:15px;box-shadow:0 6px 16px rgba(23,34,63,.08);}
   .week-day-jump button{min-width:0;border:1px solid #dfe2e7;background:#fff;color:#455064;border-radius:11px;padding:7px 3px 6px;font:inherit;text-align:center;}
   .week-day-jump button span{display:block;font-size:11px;font-weight:900;white-space:nowrap;}
   .week-day-jump button small{display:block;margin-top:2px;font-size:8.5px;font-weight:800;color:#8a8f99;white-space:nowrap;}
@@ -1435,6 +1400,8 @@ function PlannerApp({ onReady }) {
   const [authReady, setAuthReady] = useState(false)
   const [accessMode,setAccessMode] = useState('editor')
   const [accessReady,setAccessReady] = useState(false)
+  const [accessError,setAccessError] = useState('')
+  const business = useBusinessContext()
   const [dogs, setDogs] = useState([])
   const [dataLoading, setDataLoading] = useState(false)
   const [dataError, setDataError] = useState('')
@@ -1464,12 +1431,12 @@ function PlannerApp({ onReady }) {
   },[assistant.open])
   useEffect(()=>{ ensureGroomingWebAppMetadata() },[])
   const openRebookForClient = client => {
-    const assigned=[...new Set((client?.rows || []).map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>name==='Jen' || name==='Haley'))]
-    const groomer=assigned.length===1?assigned[0]:'Jen'
+    const assigned=[...new Set((client?.rows || []).map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>groomerNames(true).includes(name)))]
+    const groomer=assigned.length===1?assigned[0]:firstGroomer()
     let date=new Date(`${businessDateKey()}T12:00:00Z`)
     for(let i=0;i<8;i+=1){
       const weekday=date.getUTCDay()
-      const allowed=groomer==='Jen'?[2,3,4].includes(weekday):[1,2,3,4,5].includes(weekday)
+      const allowed=groomerWorksOn(groomer,date.toISOString().slice(0,10))
       if(allowed) break
       date.setUTCDate(date.getUTCDate()+1)
     }
@@ -1621,29 +1588,39 @@ function PlannerApp({ onReady }) {
   }, [])
 
   useEffect(() => {
-    if (!session || !supabase) {
-      setAccessMode('editor')
-      setAccessReady(true)
-      return
-    }
     let cancelled=false
+    setBusinessContext(null)
+    setDogs([])
+    setEditing(null)
+    setClientJump(null)
+    setAddAppointment({open:false,date:businessDateKey(),preset:null})
+    setFillOpening({open:false,date:businessDateKey(),groomer:'All',appointments:[]})
+    setAssistant({open:false,initial:''})
+    setSaveMessage('')
+    setAccessError('')
+    if (!session || !supabase) { setAccessReady(true); return }
     setAccessReady(false)
-    supabase.rpc('get_grooming_access').then(({data,error})=>{
+    supabase.rpc('get_business_context').then(({data,error})=>{
       if(cancelled) return
-      const next = !error && typeof data === 'string' ? data : 'editor'
-      setAccessMode(next === 'viewer' || next.startsWith('groomer:') ? next : 'editor')
+      if(error || !data?.businessId || !['owner','editor','viewer','groomer'].includes(data.role)) {
+        setAccessError(error?.message || 'Your business could not be opened. Please try signing in again.')
+        setAccessMode('unassigned')
+      } else {
+        setBusinessContext(data)
+        setAccessMode(data.role==='groomer' ? `groomer:${data.groomer}` : data.role==='viewer' ? 'viewer' : 'editor')
+      }
       setAccessReady(true)
-    })
+    }).catch(err=>{if(!cancelled){setAccessError(err.message);setAccessReady(true)}})
     return ()=>{cancelled=true}
-  },[session])
+  },[session?.user?.id])
 
   const viewerMode = accessMode === 'viewer'
   const groomerMode = accessMode.startsWith('groomer:')
-  const groomerName = groomerMode ? (accessMode.split(':')[1] || 'Haley') : ''
+  const groomerName = groomerMode ? accessMode.slice('groomer:'.length) : ''
   const viewerNotice = () => setSaveMessage('Viewer mode is read-only. No client or schedule changes were made.')
 
   useEffect(() => {
-    if (!session || !supabase || groomerMode) {
+    if (!session || !supabase || !accessReady || !business.businessId || groomerMode) {
       setDogs([])
       return
     }
@@ -1675,19 +1652,21 @@ function PlannerApp({ onReady }) {
     return () => {
       cancelled = true
     }
-  }, [session,scheduleRevision,groomerMode])
+  }, [session?.user?.id,scheduleRevision,groomerMode,accessReady,business.businessId,business.revision])
 
   useEffect(() => {
     if (authReady && (!session || accessReady)) onReady(true)
   }, [authReady, session, accessReady, onReady])
 
-  if (!authReady || (session && !accessReady)) {
+  if (!authReady || (session && (!accessReady || (!accessError && business.accountId!==session.user.id)))) {
     return <div className="login-shell" role="status" aria-label="Opening Hey Betty" aria-busy="true"/>
   }
 
   if (!session) {
     return <LoginScreen onSignedIn={setSession} />
   }
+
+  if (accessError) return <div className="login-shell"><div className="login-message" role="alert">{accessError}</div><button onClick={()=>supabase.auth.signOut()}>Sign out and try again</button></div>
 
   if (groomerMode) {
     return <GroomerPortal session={session} groomer={groomerName}/>
@@ -1697,13 +1676,13 @@ function PlannerApp({ onReady }) {
   if (tab === 'Today') {
     body = <Today dogs={dogs} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onPayment={viewerMode?viewerNotice:savePaymentFromSchedule} onAddAppointment={viewerMode?viewerNotice:date=>setAddAppointment({open:true,date,preset:null})} completingId={completingId} confirmingId={confirmingId} paymentSavingId={paymentSavingId} revision={scheduleRevision} viewerMode={viewerMode}/>
   } else if (tab === 'Week') {
-    body = <Week dogs={dogs} onAsk={ask} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onPayment={viewerMode?viewerNotice:savePaymentFromSchedule} onAddAppointment={viewerMode?viewerNotice:(date,selectedGroomer)=>setAddAppointment({open:true,date,preset:['Jen','Haley'].includes(selectedGroomer)?{groomer:selectedGroomer}:null})} onFillOpening={viewerMode?viewerNotice:payload=>setFillOpening({open:true,date:payload.date,groomer:payload.groomer,appointments:payload.appointments || []})} completingId={completingId} confirmingId={confirmingId} paymentSavingId={paymentSavingId} revision={scheduleRevision} viewerMode={viewerMode}/>
+    body = <Week dogs={dogs} onAsk={ask} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onPayment={viewerMode?viewerNotice:savePaymentFromSchedule} onAddAppointment={viewerMode?viewerNotice:(date,selectedGroomer)=>setAddAppointment({open:true,date,preset:groomerNames().includes(selectedGroomer)?{groomer:selectedGroomer}:null})} onFillOpening={viewerMode?viewerNotice:payload=>setFillOpening({open:true,date:payload.date,groomer:payload.groomer,appointments:payload.appointments || []})} completingId={completingId} confirmingId={confirmingId} paymentSavingId={paymentSavingId} revision={scheduleRevision} viewerMode={viewerMode}/>
   } else if (tab === 'Month') {
     body = <Month dogs={dogs} onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Clients') {
     body = <Clients userId={session?.user?.id || ''} dogs={dogs} loading={dataLoading} error={dataError} onOpen={setEditing} revision={scheduleRevision} openClient={clientJump} onOpenClientHandled={()=>setClientJump(null)} onRebook={viewerMode?viewerNotice:openRebookForClient} onDataChanged={message=>{ setSaveMessage(message); setScheduleRevision(value=>value+1) }} viewerMode={viewerMode}/>
   } else {
-    body = <More dogs={dogs} revision={scheduleRevision} onAsk={ask} onRebook={viewerMode?viewerNotice:openRebookForClient} session={session} showPushSetup={!viewerMode}/>
+    body = <More dogs={dogs} revision={scheduleRevision} onAsk={ask} onRebook={viewerMode?viewerNotice:openRebookForClient} session={session} showPushSetup={!viewerMode} onSettingsSaved={()=>setScheduleRevision(value=>value+1)}/>
   }
 
   const nav=[['Today',Home],['Week',CalendarDays],['Month',Clock3],['Clients',Users],['More',Ellipsis]]
@@ -1713,7 +1692,7 @@ function PlannerApp({ onReady }) {
       <style>{plannerThemeCss}</style>
       <header className="topbar">
         <div className="brand-mark">HB</div>
-        <div><strong>Hey Betty</strong><span>{viewerMode ? 'Viewer demo · read only' : 'Mobile business dashboard'}</span></div>
+        <div><strong>Hey Betty</strong><span>{viewerMode ? 'Viewer demo · read only' : business.settings.businessName}</span></div>
         <button
           type="button"
           className="top-ai"
@@ -1723,7 +1702,7 @@ function PlannerApp({ onReady }) {
           style={{position:'relative',zIndex:80,pointerEvents:'auto',touchAction:'manipulation',WebkitTapHighlightColor:'transparent'}}
         >🐾 Ask Betty</button>
       </header>
-      <main>
+      <main key={business.businessId}>
         {viewerMode && <div className="viewer-banner"><div><span className="viewer-badge">Viewer</span> <strong>Read-only demo</strong> · Client phone numbers and street addresses are hidden, and changes are blocked.</div><button type="button" onClick={()=>supabase?.auth?.signOut?.()}>Sign out</button></div>}
         {saveMessage && <div className="prototype-note" role="status" style={{marginBottom:16}}>
           {saveMessage} <button className="text-btn" onClick={()=>setSaveMessage('')}>Dismiss</button>
