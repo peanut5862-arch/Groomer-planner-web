@@ -1,0 +1,17 @@
+import React,{useEffect,useRef,useState} from 'react'
+import {supabase} from '../supabase.js'
+import {apiFetch} from './shared.jsx'
+export default function GroomerInvites({business,unsaved=false}){
+ const [records,setRecords]=useState({invitations:[],members:[]}),[emails,setEmails]=useState({}),[busy,setBusy]=useState(''),[error,setError]=useState(''),[message,setMessage]=useState(''),[loading,setLoading]=useState(true)
+ const lock=useRef(false),mounted=useRef(true)
+ const load=async()=>{const {data,error}=await supabase.rpc('list_groomer_invites');if(error)throw error;if(mounted.current)setRecords(data||{invitations:[],members:[]})}
+ useEffect(()=>{mounted.current=true;load().catch(e=>{if(mounted.current)setError(e.message)}).finally(()=>{if(mounted.current)setLoading(false)});return()=>{mounted.current=false}},[business.businessId])
+ const act=async(key,fn)=>{if(lock.current)return;lock.current=true;setBusy(key);setError('');setMessage('');try{const text=await fn();setMessage(text);await load()}catch(e){setError(e.message||'Could not update invitations.')}finally{lock.current=false;if(mounted.current)setBusy('')}}
+ const send=(g,email)=>act(g.id,async()=>{const response=await apiFetch('/api/invite-groomer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({groomerId:g.id,email})});const data=await response.json();if(!response.ok)throw Error(data.error||'Could not send invitation.');return data.message})
+ return <section aria-label="Groomer invitations"><h3>Invite your groomers</h3><p className="settings-help">Each groomer gets their own login for their assigned appointments and routes. They choose their password from the email. Invitations expire after 7 days.</p>{unsaved&&<p role="status">Save your settings first, then reopen Team to send invitations.</p>}
+ {loading&&<p>Loading team access…</p>}
+ {business.settings.groomers.map(g=>{const members=records.members.filter(m=>m.groomer===g.name),pending=records.invitations.filter(i=>i.groomerId===g.id&&!i.acceptedAt&&!i.cancelledAt);return <div className="settings-card" key={g.id}><h4>{g.name}</h4>{members.map(m=><p key={m.email}>Connected: {m.email}</p>)}{pending.map(i=><div key={i.id}><p>{i.email} · {new Date(i.expiresAt)<new Date()?'Expired':i.sentAt?'Invitation sent':'Email not confirmed sent'}</p><button type="button" className="ghost" disabled={Boolean(busy)||unsaved||g.active===false} onClick={()=>send(g,i.email)}>{busy===g.id?'Sending…':'Resend invitation'}</button> <button type="button" className="text-btn" disabled={Boolean(busy)} onClick={()=>act(i.id,async()=>{const {error}=await supabase.rpc('cancel_groomer_invite',{p_id:i.id});if(error)throw error;return 'Invitation cancelled.'})}>Cancel invitation</button></div>)}
+ {!members.length&&!pending.length&&g.active!==false&&<><label>{g.name} email<input type="email" autoComplete="off" value={emails[g.id]||''} maxLength={254} disabled={Boolean(busy)||unsaved||loading} onChange={e=>setEmails({...emails,[g.id]:e.target.value})}/></label><button type="button" className="ghost" disabled={Boolean(busy)||unsaved||loading||!emails[g.id]?.trim()} onClick={()=>send(g,emails[g.id])}>{busy===g.id?'Sending…':'Send invitation'}</button></>}
+ {g.active===false&&<p className="settings-help">Activate and save this groomer before inviting them.</p>}</div>})}
+ {message&&<p role="status">{message}</p>}{error&&<div role="alert" className="login-message">{error}</div>}</section>
+}
