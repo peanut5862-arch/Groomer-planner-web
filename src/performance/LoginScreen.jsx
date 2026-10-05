@@ -1,6 +1,11 @@
-import React,{useEffect,useState,useRef} from 'react'
+import React,{useEffect,useState,useRef,useId} from 'react'
+import {Eye,EyeOff} from 'lucide-react'
 import {supabase} from '../supabase.js'
 import {createCustomerAccount,resendConfirmation,CUSTOMER_SIGNUP_READY} from './customerAuth.js'
+function PasswordField({label,...props}) {
+ const [visible,setVisible]=useState(false),id=useId()
+ return <div><label htmlFor={id}>{label}</label><div style={{position:'relative'}}><input {...props} id={id} type={visible?'text':'password'} style={{width:'100%',paddingRight:52}}/><button type="button" aria-label={`${visible?'Hide':'Show'} ${label.toLowerCase()}`} aria-pressed={visible} disabled={props.disabled} onClick={()=>setVisible(v=>!v)} style={{position:'absolute',right:4,top:'50%',transform:'translateY(-50%)',width:44,height:44,display:'grid',placeItems:'center',border:0,background:'transparent',color:'#34415f',cursor:'pointer'}}>{visible?<EyeOff size={20}/>:<Eye size={20}/>}</button></div></div>
+}
 export default function LoginScreen({onSignedIn,registrationReady=CUSTOMER_SIGNUP_READY}) {
  const [mode,setMode]=useState('signin'),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[confirmation,setConfirmation]=useState('')
  const [loading,setLoading]=useState(false),[message,setMessage]=useState(''),[cooldown,setCooldown]=useState(0)
@@ -37,8 +42,8 @@ export default function LoginScreen({onSignedIn,registrationReady=CUSTOMER_SIGNU
   {mode==='signup'&&!registrationReady&&<div className="login-message" role="status">Customer registration is coming soon. Please check back shortly.</div>}
   {mode!=='confirm' ? <form className="login-form" onSubmit={submit}>
    <label>Email<input type="email" autoComplete="email" required value={email} disabled={loading||(mode==='signup'&&!registrationReady)} onChange={e=>setEmail(e.target.value)}/></label>
-   <label>Password<input type="password" autoComplete={mode==='signup'?'new-password':'current-password'} minLength={mode==='signup'?8:undefined} required value={password} disabled={loading||(mode==='signup'&&!registrationReady)} onChange={e=>setPassword(e.target.value)}/></label>
-   {mode==='signup'&&<><p className="settings-help">Use at least 8 characters.</p><label>Confirm password<input type="password" autoComplete="new-password" required value={confirmation} disabled={loading||(mode==='signup'&&!registrationReady)} onChange={e=>setConfirmation(e.target.value)}/></label></>}
+   <PasswordField key={mode} label="Password" autoComplete={mode==='signup'?'new-password':'current-password'} minLength={mode==='signup'?8:undefined} required value={password} disabled={loading||(mode==='signup'&&!registrationReady)} onChange={e=>setPassword(e.target.value)}/>
+   {mode==='signup'&&<><p className="settings-help">Use at least 8 characters.</p><PasswordField label="Confirm password" autoComplete="new-password" required value={confirmation} disabled={loading||(mode==='signup'&&!registrationReady)} onChange={e=>setConfirmation(e.target.value)}/></>}
    {message&&<div className="login-message" role="status">{message}</div>}
    <button className="login-button" type="submit" disabled={loading||(mode==='signup'&&!registrationReady)}>{mode==='signup'&&!registrationReady?'Registration opens soon':loading?(mode==='signup'?'Creating account…':'Signing in…'):(mode==='signup'?'Create account':'Sign in')}</button>
   </form> : <><div className="login-message" role="status">{message}</div><button className="login-button" type="button" disabled={loading||cooldown>0} onClick={resend}>{loading?'Sending…':cooldown?`Resend email in ${cooldown}s`:'Resend confirmation email'}</button></>}
