@@ -1,4 +1,5 @@
 import React,{useEffect,useState} from 'react'
+import GroomerInvites from './GroomerInvites.jsx'
 import {X,Plus} from 'lucide-react'
 import {supabase} from '../supabase.js'
 import {useBusinessContext,setBusinessContext,validateBusinessSettings} from './businessConfig.js'
@@ -32,9 +33,10 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
   <form className="sheet business-settings" aria-label="Business settings" onClick={e=>e.stopPropagation()} onSubmit={save} style={{maxHeight:'92dvh',overflowY:'auto',paddingBottom:24}}>
    <style>{`.business-settings .sheet-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.business-settings label{display:grid;gap:7px;margin:12px 0;font-weight:700;color:#34415f}.business-settings input,.business-settings select,.business-settings textarea{width:100%;box-sizing:border-box;border:1px solid #dcdfe5;border-radius:12px;padding:12px;background:white;color:#172038;font:inherit}.business-settings .settings-card{padding:15px;border:1px solid #e1e4e9;border-radius:16px;margin:12px 0}.business-settings .settings-days{display:flex;flex-wrap:wrap;gap:6px}.business-settings .settings-days button{padding:9px;border:1px solid #cdd4e0;border-radius:10px;background:#fff;color:#34415f}.business-settings .settings-days button[aria-pressed=true]{background:#17223f;color:#fff}.business-settings .check-label{display:flex;align-items:center;gap:10px}.business-settings .check-label input{width:20px}.business-settings .settings-help{font-size:12px;line-height:1.5;color:#727b89}.business-settings .settings-actions{display:flex;gap:10px;position:sticky;bottom:-24px;background:#faf9f6;padding:14px 0}.business-settings .settings-actions button{flex:1}`}</style>
    <div className="sheet-head"><div><div className="eyebrow">{business.settings.businessName}</div><h2>Your business settings</h2></div><button type="button" className="icon-btn" aria-label="Close settings" disabled={saving} onClick={onClose}><X size={20}/></button></div>
-   <div className="segmented">{[['business','Business'],['schedule','Schedule'],['route','Routes']].map(([key,label])=><button key={key} type="button" className={tab===key?'active':''} onClick={()=>setTab(key)}>{label}</button>)}</div>
+   <div className="segmented">{[['business','Business'],['schedule','Schedule'],['route','Routes'],['team','Team']].map(([key,label])=><button key={key} type="button" className={tab===key?'active':''} onClick={()=>setTab(key)}>{label}</button>)}</div>
    {!editable&&<p className="settings-help">Only your business owner can change these settings.</p>}
    <fieldset disabled={!editable||saving||loading} style={{border:0,padding:0,margin:0}}>
+   {tab==='team'&&editable&&<GroomerInvites business={business} unsaved={JSON.stringify(draft)!==JSON.stringify(business.settings)}/>}
    {tab==='business'&&<>
     <label>Business name<input value={draft.businessName} maxLength={100} onChange={e=>patch({businessName:e.target.value})}/></label>
     <label>Time zone<select value={draft.timeZone} onChange={e=>patch({timeZone:e.target.value})}>{[...new Set([draft.timeZone,...zones])].map(zone=><option key={zone}>{zone}</option>)}</select></label>
