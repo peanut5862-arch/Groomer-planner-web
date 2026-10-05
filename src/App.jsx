@@ -7,6 +7,7 @@ import { Stat, ApptCard, businessDateKey, mondayForDate, todayAppointments, cloc
 import { createLazyFeature, DeferredSheet } from './performance/DeferredFeature.jsx'
 import LoginScreen from './performance/LoginScreen.jsx'
 import {needsBusinessSetup} from './performance/customerAuth.js'
+const GroomerWelcome = createLazyFeature(() => import('./performance/GroomerWelcome.jsx'), {sheet:false})
 const BusinessWelcome = createLazyFeature(() => import('./performance/BusinessWelcome.jsx'), {sheet:false})
 import { usePlannerWeekStart } from './performance/plannerWeek.js'
 const Month = createLazyFeature(() => import('./performance/Month.jsx'), { sheet: false })
@@ -1618,6 +1619,8 @@ function PlannerApp({ onReady }) {
   }
 
   if (accessError) return <div className="login-shell"><div className="login-message" role="alert">{accessError}</div><button onClick={()=>supabase.auth.signOut()}>Sign out and try again</button></div>
+
+  if (business.needsGroomerSetup) return <GroomerWelcome business={business}/>
 
   if (needsBusinessSetup(business)) return <BusinessWelcome key={business.businessId}/>
 
