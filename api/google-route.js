@@ -55,7 +55,9 @@ export default async function handler(req, res) {
     const longitude = Number(req.body?.origin?.longitude)
     const address = String(req.body?.destination?.address || '').trim()
     const owner = String(req.body?.destination?.owner || 'Client').trim()
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return send(res,400,{error:'A current location is required for live ETA.'})
+    const originAddress=String(req.body?.origin?.address || '').trim()
+    const validCoordinates=typeof req.body?.origin?.latitude==='number' && typeof req.body?.origin?.longitude==='number' && Number.isFinite(latitude) && Number.isFinite(longitude) && Math.abs(latitude)<=90 && Math.abs(longitude)<=180
+    if ((!originAddress && !validCoordinates) || originAddress.length>500) return send(res,400,{error:'A valid current location or starting street address is required for live ETA.'})
     if (!address) return send(res,400,{error:'The client needs a street address for live ETA.'})
     try {
       const googleResponse = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
@@ -66,7 +68,7 @@ export default async function handler(req, res) {
           'X-Goog-FieldMask':'routes.duration,routes.staticDuration,routes.distanceMeters'
         },
         body:JSON.stringify({
-          origin:{location:{latLng:{latitude,longitude}}},
+          origin:originAddress?{address:originAddress}:{location:{latLng:{latitude,longitude}}},
           destination:{address},
           travelMode:'DRIVE',
           routeModifiers:{avoidTolls:Boolean(business.settings?.route?.avoidTolls)},
@@ -80,6 +82,7 @@ export default async function handler(req, res) {
       if (!googleResponse.ok) throw new Error(body?.error?.message || `Google Routes returned ${googleResponse.status}.`)
       const route = body?.routes?.[0]
       if (!route) throw new Error(`Google could not find a driving route to ${owner}.`)
+      if (!/^([0-9.]+)s$/.test(String(route.duration || ''))) throw new Error('Google did not return a driving duration.')
       const seconds = secondsFromGoogleDuration(route.duration)
       const staticSeconds = secondsFromGoogleDuration(route.staticDuration)
       const distanceMeters = Number(route.distanceMeters || 0)
