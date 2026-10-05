@@ -1,5 +1,5 @@
-// Enable after custom SMTP is connected and a confirmation email is verified.
-export const CUSTOMER_SIGNUP_READY = false
+// Custom SMTP and customer confirmation verified before enabling registration.
+export const CUSTOMER_SIGNUP_READY = true
 export const CONFIRMATION_URL = 'https://groomer-planner-web.vercel.app/'
 export function needsBusinessSetup(business) {
   return business?.role === 'owner' && Boolean(business.businessId) &&
