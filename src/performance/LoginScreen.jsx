@@ -2,7 +2,7 @@ import React,{useEffect,useState,useRef,useId} from 'react'
 import {Eye,EyeOff} from 'lucide-react'
 import {supabase} from '../supabase.js'
 import {createCustomerAccount,resendConfirmation,CUSTOMER_SIGNUP_READY} from './customerAuth.js'
-function PasswordField({label,...props}) {
+export function PasswordField({label,...props}) {
  const [visible,setVisible]=useState(false),id=useId()
  return <div><label htmlFor={id}>{label}</label><div style={{position:'relative'}}><input {...props} id={id} type={visible?'text':'password'} style={{width:'100%',paddingRight:52}}/><button type="button" aria-label={`${visible?'Hide':'Show'} ${label.toLowerCase()}`} aria-pressed={visible} disabled={props.disabled} onClick={()=>setVisible(v=>!v)} style={{position:'absolute',right:4,top:'50%',transform:'translateY(-50%)',width:44,height:44,display:'grid',placeItems:'center',border:0,background:'transparent',color:'#34415f',cursor:'pointer'}}>{visible?<EyeOff size={20}/>:<Eye size={20}/>}</button></div></div>
 }
