@@ -964,6 +964,7 @@ function GroomerStopCard({appt,onFinish,finishing}) {
 }
 
 function GroomerPortal({session,groomer}) {
+  const business=useBusinessContext()
   const [tab,setTab]=useState('Today')
   const [weekStart,setWeekStart]=usePlannerWeekStart()
   const [record,setRecord]=useState(null)
@@ -1316,16 +1317,33 @@ function OpeningScreen({ ready, onFinished }) {
   )
 }
 
+class AppRecoveryBoundary extends React.Component {
+  state={failed:false,signingOut:false,message:''}
+  static getDerivedStateFromError(){return {failed:true}}
+  signOut=async()=>{
+    this.setState({signingOut:true,message:''})
+    try {
+      const result=await supabase?.auth.signOut({scope:'local'})
+      if(result?.error) throw result.error
+      window.location.reload()
+    } catch(error){this.setState({signingOut:false,message:'Could not sign out. Please try again.'})}
+  }
+  render(){
+    if(this.state.failed) return <div className="login-shell"><div className="login-card"><div className="login-brand">HB</div><h1>Let’s reopen Hey Betty</h1><p role="alert">This screen could not open. Try again, or sign out to return to the welcome screen.</p><button type="button" className="login-button" onClick={()=>window.location.reload()}>Try again</button><button type="button" className="text-btn" disabled={this.state.signingOut} onClick={this.signOut}>{this.state.signingOut?'Signing out…':'Sign out'}</button>{this.state.message&&<p role="status">{this.state.message}</p>}</div></div>
+    return this.props.children
+  }
+}
+
 export default function App() {
   const [ready, setReady] = useState(false)
   const [opening, setOpening] = useState(true)
   const finishOpening = React.useCallback(() => setOpening(false), [])
-  return <>
+  return <AppRecoveryBoundary>
     <div style={{visibility:opening && !ready ? 'hidden' : undefined}} aria-hidden={opening || undefined}>
       <PlannerApp onReady={setReady}/>
     </div>
     {opening && <OpeningScreen ready={ready} onFinished={finishOpening}/>}
-  </>
+  </AppRecoveryBoundary>
 }
 
 function PlannerApp({ onReady }) {
