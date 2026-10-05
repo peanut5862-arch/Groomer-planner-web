@@ -1,6 +1,7 @@
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { createBettyRequestPlan } from './bettyRequests.js'
+import { plannerWeekForDate } from './plannerWeek.js'
 import { supabase } from "../supabase.js";
 import { X, CheckCircle2 } from 'lucide-react';
 import { businessDateKey, canonicalServiceLabel, appointmentServiceOptions, serviceDefaultsForDog, canonicalAreaLabel, apiUrl, clientConfirmationStatus, needsClientConfirmation, mondayForDate, todayAppointments, clockMinutesForDisplay, displayClockTime, compareAppointmentTimes, fullClientAddress, clientAddressLookup, appointmentAddress, defaultFirstStopTime, schedulingOverrideReasons, appointmentDurationMinutes, openingForDuration, clientDueInfo, appointmentTimeInput, scheduleRowDuration, plannerClientGroups, plannerActiveRow , apiFetch } from './shared.jsx'
@@ -156,13 +157,27 @@ function bettySpecificBookingRequest(text) {
   return {subject,targetDate}
 }
 
+function bettyConfirmationSummary(weekRows,rowsNeeding,start,end,groomer='') {
+  const period = `${plannerDayLabel(start)} – ${plannerDayLabel(end)}`
+  const team = groomer ? ` for ${groomer}` : ''
+  if (!weekRows.length) return `No appointments are scheduled${team} for ${period}.`
+  if (!rowsNeeding.length) return `No appointments${team} still need confirmation for ${period}. All are confirmed or otherwise handled.`
+  return `${rowsNeeding.length} appointment${rowsNeeding.length===1?'':'s'}${team} still need confirmation for ${period}.`
+}
+
+function bettyEmptyResultMessage(answer) {
+  if (answer.mode==='confirmation') return answer.summary || 'No appointments still need confirmation for this week.'
+  if (answer.mode==='price') return "I couldn't find a matching client or dog. Try the name exactly as it appears in Clients."
+  return "I couldn't find an unbooked client that matches those filters right now. Try widening the area, price, service length, or day."
+}
+
 function bettyScheduleLookupRequest(text,todayKey=businessDateKey()) {
   const lower=String(text || '').toLowerCase().replace(/[’]/g,"'")
-  const asksExisting=/\b(what|which|show|list|tell me|who)\b/.test(lower) && /\b(dogs?|clients?|appointments?|stops?|schedule|booked|on)\b/.test(lower)
+  const asksExisting=/\b(what|which|show|list|tell me|who)\b/.test(lower) && /\b(dogs?|clients?|appointments?|stops?|scheduled?|booked|on)\b/.test(lower)
   if(!asksExisting) return null
   if(/\b(add|fill|opening|should i add|can i add|need to add|move|reschedule|change)\b/.test(lower)) return null
   const today=new Date(`${todayKey}T12:00:00Z`)
-  const thisMonday=new Date(today); thisMonday.setUTCDate(today.getUTCDate()-((today.getUTCDay()+6)%7))
+  const thisMonday=new Date(`${plannerWeekForDate(todayKey)}T12:00:00Z`)
   let start='',end='',label=''
   if(/\bnext week\b/.test(lower)){
     const d=new Date(thisMonday); d.setUTCDate(d.getUTCDate()+7); start=d.toISOString().slice(0,10)
@@ -414,7 +429,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
       // These locally recognized requests already overrode the router's result
       // below. Skip the round trip that could not affect their behavior.
       const knownIntent = specificBookingRequest || scheduleLookupRequest
-        ? 'general' : obviousWeather ? 'weather' : obviousGeneral ? 'general' : ''
+        ? 'general' : filters.confirmationOnly ? 'confirmations' : /^what needs my attention[?.!]*$/i.test(prompt.trim()) ? 'brief' : obviousWeather ? 'weather' : obviousGeneral ? 'general' : ''
       const requests = createBettyRequestPlan({
         knownIntent,
         // Price questions and obvious weather keep their no-schedule fast path.
@@ -659,7 +674,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
       }
 
       if (attentionIntent) {
-        const currentWeekStart = mondayForDate(today)
+        const currentWeekStart = plannerWeekForDate(today)
         const weekEndDate = new Date(`${currentWeekStart}T12:00:00Z`)
         weekEndDate.setUTCDate(weekEndDate.getUTCDate()+6)
         const currentWeekEnd = weekEndDate.toISOString().slice(0,10)
@@ -702,10 +717,10 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
         const weekRevenue = weekRows.reduce((sum,row)=>sum+Number(row.Price || 0),0)
 
         const brief = [
-          {label:'Still needs confirmation',value:confirmationRows.length,detail:confirmationRows.length?`${confirmationRows.length} appointment${confirmationRows.length===1?'':'s'} this week`:'Everyone this week is handled',tone:confirmationRows.length?'warn':'good'},
+          {label:'Still needs confirmation',value:confirmationRows.length,detail:confirmationRows.length?`${confirmationRows.length} appointment${confirmationRows.length===1?'':'s'} this week`:weekRows.length?'Everyone this week is handled':'No appointments scheduled this week',tone:confirmationRows.length?'warn':'good'},
           {label:'Overdue + not rebooked',value:overdueUnbooked.length,detail:overdueUnbooked.length?`${overdueUnbooked.length} client${overdueUnbooked.length===1?'':'s'} to contact`:'No overdue unbooked clients',tone:overdueUnbooked.length?'warn':'good'},
           {label:'Today',value:`${incompleteToday.length}/${todayRows.length}`,detail:`remaining · $${Math.round(todayRevenue)} scheduled`,tone:incompleteToday.length?'normal':'good'},
-          {label:'Tomorrow',value:tomorrowRows.length,detail:tomorrowUnconfirmed.length?`${tomorrowUnconfirmed.length} still unconfirmed`:'all confirmed / no stops',tone:tomorrowUnconfirmed.length?'warn':'normal'},
+          {label:'Tomorrow',value:tomorrowRows.length,detail:tomorrowUnconfirmed.length?`${tomorrowUnconfirmed.length} still unconfirmed`:tomorrowRows.length?'All confirmed or handled':'No appointments scheduled',tone:tomorrowUnconfirmed.length?'warn':'normal'},
           {label:'Week scheduled',value:`$${Math.round(weekRevenue)}`,detail:`${weekRows.length} stop${weekRows.length===1?'':'s'} on the books`,tone:'normal'}
         ]
 
@@ -714,16 +729,17 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
       }
 
       if (bettyIntent === 'confirmations') {
-        const currentWeekStart = mondayForDate(today)
+        const currentWeekStart = plannerWeekForDate(today)
         const weekEndDate = new Date(`${currentWeekStart}T12:00:00Z`)
         weekEndDate.setUTCDate(weekEndDate.getUTCDate()+6)
         const currentWeekEnd = weekEndDate.toISOString().slice(0,10)
-        const rowsNeeding = activeRows.filter(row=>{
+        const confirmationWeekRows = activeRows.filter(row=>{
           const date = String(row.Date || '').slice(0,10)
           if (date < currentWeekStart || date > currentWeekEnd) return false
           if (filters.groomer && String(row.Groomer || '').trim() !== filters.groomer) return false
-          return needsClientConfirmation(row)
+          return true
         })
+        const rowsNeeding = confirmationWeekRows.filter(needsClientConfirmation)
         const byHousehold = new Map()
         for (const row of rowsNeeding) {
           const household = String(row['Household ID'] || '').trim()
@@ -734,7 +750,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
           byHousehold.set(key,{...group,confirmationRow:row,confirmation:clientConfirmationStatus(row),date:String(row.Date || '').slice(0,10),time:String(row['Start Time'] || row['Locked Time'] || '').trim(),price:Number(row.Price || 0),minutes:scheduleRowDuration(row,60),due:{detail:clientConfirmationStatus(row)}})
         }
         const candidates = [...byHousehold.values()].sort((a,b)=>String(a.date).localeCompare(String(b.date)) || clockMinutesForDisplay(a.time)-clockMinutesForDisplay(b.time)).slice(0,20)
-        setAnswer({mode:'confirmation',title:'Clients who still need confirmation this week',targetDate:'',filters,candidates,summary:''})
+        setAnswer({mode:'confirmation',title:'Clients who still need confirmation this week',targetDate:'',filters,candidates,summary:bettyConfirmationSummary(confirmationWeekRows,rowsNeeding,currentWeekStart,currentWeekEnd,filters.groomer)})
         return
       }
 
@@ -1075,7 +1091,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
                 <div className="prototype-note" style={{marginTop:2}}>Tap another Betty prompt for the actual client list, route fit, pricing, or rebooking suggestions.</div>
               </div>
             ) : answer.candidates.length===0 ? (
-              <div className="prototype-note">I couldn't find an unbooked client that matches those filters right now. Try widening the area, price, service length, or day.</div>
+              <div className="prototype-note">{bettyEmptyResultMessage(answer)}</div>
             ) : (
               <div className="candidate-list">
                 {answer.candidates.map((candidate,index)=>{
