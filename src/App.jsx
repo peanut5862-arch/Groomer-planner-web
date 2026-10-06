@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from './supabase.js';
 import { AppLauncher } from '@capacitor/app-launcher';
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Ellipsis, Home, MapPin, Plus, Route, Sparkles, Users, WalletCards, LogOut } from 'lucide-react';
-import { Stat, ApptCard, businessDateKey, mondayForDate, todayAppointments, clockMinutesForDisplay, apiUrl, displayClockTime, compareAppointmentTimes, clientAddressLookup, appointmentAddress, clientConfirmationStatus, needsClientConfirmation, phoneForScheduleRow, googleMapsAddressUrl, dismissFormKeyboard, defaultFirstStopTime, completionBlockReason , apiFetch } from './performance/shared.jsx'
+import { Stat, ApptCard, businessDateKey, mondayForDate, todayAppointments, clockMinutesForDisplay, apiUrl, displayClockTime, compareAppointmentTimes, clientAddressLookup, appointmentAddress, clientConfirmationStatus, needsClientConfirmation, phoneForScheduleRow, googleMapsAddressUrl, dismissFormKeyboard, defaultFirstStopTime, completionBlockReason, scheduleRowDuration , apiFetch } from './performance/shared.jsx'
 import { createLazyFeature, DeferredSheet } from './performance/DeferredFeature.jsx'
 import LoginScreen from './performance/LoginScreen.jsx'
 import {needsBusinessSetup} from './performance/customerAuth.js'
@@ -268,6 +268,8 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
   const [expanded,setExpanded] = useState(false)
   const [mapOpenMessage,setMapOpenMessage] = useState('')
   const [autoReady,setAutoReady] = useState(false)
+  const [dayProposal,setDayProposal]=useState(null)
+  const [planning,setPlanning]=useState(false)
   const panelRef = useRef(null)
 
   const sorted = (Array.isArray(appointments) ? appointments : [])
@@ -290,6 +292,27 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
   const validGroomer = groomerNames().includes(routeGroomer)
   const canCheck = !mixedGroomers && validGroomer && stops.length >= 1 && missing.length === 0 && !loading
   const signature = stops.map(stop=>`${stop.id}:${stop.address}:${stop.time}`).join('|') + `:${routeGroomer}`
+
+  useEffect(()=>{setDayProposal(null)},[signature,dateKey])
+  const planDay=async()=>{
+    if(!canCheck || planning)return
+    setPlanning(true);setError('');setDayProposal(null)
+    try{
+      const profile=groomerConfig(routeGroomer)
+      const start=clockMinutesForDisplay(profile?.startTime || '09:00')
+      const end=clockMinutesForDisplay(profile?.endTime || '17:30')
+      const inputs=stops.map((stop,index)=>({...stop,fixed:Boolean(String(sorted[index]?.sourceRow?.['Locked Time'] || '').trim()),scheduled:clockMinutesForDisplay(stop.time),duration:scheduleRowDuration(sorted[index]?.sourceRow,60)}))
+      if(inputs.some(stop=>stop.fixed && !Number.isFinite(stop.scheduled)))throw new Error('A fixed appointment is missing its time.')
+      const response=await apiFetch('/api/google-route',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'plan-day',groomer:routeGroomer,stops:inputs})})
+      const payload=await response.json()
+      if(!response.ok)throw new Error(payload.error || 'Day planning failed.')
+      if(payload.proposalOnly!==true || !Array.isArray(payload.stops))throw new Error('Day planning is not available on the server yet.')
+      const ordered=payload.stops.map(stop=>inputs.find(input=>input.id===stop.id))
+      if(ordered.length!==inputs.length || ordered.some(stop=>!stop))throw new Error('The route proposal is missing an appointment.')
+      const timeline=dayPlanTimeline(ordered,payload.legs,{start,end,buffer:Number(businessSettings().bufferMinutes || 0)})
+      setDayProposal({...timeline,totalMinutes:payload.totalMinutes,totalMiles:payload.totalMiles,start})
+    }catch(error){setError(error.message)}finally{setPlanning(false)}
+  }
 
   const cacheKey = `${getBusinessContext().businessId}:${getBusinessContext().revision}:grooming-route-v2:${signature}`
   const cacheMs = 15 * 60 * 1000
@@ -491,6 +514,16 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
               {expanded ? 'Hide route details ▴' : 'View route details ▾'}
             </button>
           </div>
+
+          {!viewerMode && <button type="button" className="ghost" disabled={!canCheck || planning} onClick={planDay} style={{marginTop:12}}>{planning?'Planning day…':'Plan my day'}</button>}
+          {dayProposal && <div className="ai-result" style={{marginTop:12}}>
+            <strong>Suggested day · {routeGroomer}</strong>
+            <p>Leave your starting address at {displayClockFromMinutes(dayProposal.start)}. Estimated return: {displayClockFromMinutes(dayProposal.homeArrival)}.</p>
+            <p>Review these estimates before giving clients a time. Your saved appointments stay unchanged.</p>
+            {dayProposal.items.map((stop,index)=><div key={stop.id} style={{padding:'9px 0',borderTop:'1px solid #e6e8ed'}}><strong>{index+1}. {stop.owner}</strong><div>{stop.fixed?'Fixed appointment':'Suggested arrival window'}: {displayClockFromMinutes(stop.windowStart)}{!stop.fixed?`–${displayClockFromMinutes(stop.windowEnd)}`:''}</div><div>{stop.duration} min service · estimated finish {displayClockFromMinutes(stop.finish)}</div></div>)}
+            {dayProposal.warnings.map(warning=><p key={warning} role="alert" style={{color:'#a33'}}>{warning}</p>)}
+            <button className="ghost" type="button" onClick={()=>setDayProposal(null)}>Dismiss proposal</button>
+          </div>}
 
           {mapOpenMessage && (
             <div className="login-message" role="status" style={{marginTop:8}}>
@@ -1704,4 +1737,22 @@ function PlannerApp({ onReady }) {
       <DeferredSheet open={assistant.open}><AssistantSheet open={assistant.open} initial={assistant.initial} dogs={dogs} onClose={()=>setAssistant({open:false,initial:''})} onChoose={viewerMode?viewerNotice:preset=>{ setAssistant({open:false,initial:''}); setAddAppointment({open:true,date:preset.date,preset}) }} onClient={client=>{ setAssistant({open:false,initial:''}); setClientJump(client); setTab('Clients') }} onScheduleChanged={message=>{ setSaveMessage(message); setScheduleRevision(value=>value+1) }} viewerMode={viewerMode}/></DeferredSheet>
     </div>
   )
+}
+
+function dayPlanTimeline(stops,legs,{start,end,buffer=15}) {
+  let cursor=start
+  const warnings=[]
+  const items=stops.map((stop,index)=>{
+    const drive=Number(legs[index]?.minutes)
+    if(!Number.isFinite(drive))throw new Error('A driving estimate is missing.')
+    const earliest=cursor+Math.ceil(drive)
+    const arrival=stop.fixed?Math.max(earliest,stop.scheduled):earliest
+    if(stop.fixed && earliest>stop.scheduled)warnings.push(`${stop.owner}: the route arrives ${Math.ceil(earliest-stop.scheduled)} minutes after the fixed time.`)
+    const finish=arrival+stop.duration
+    cursor=finish+buffer
+    return {...stop,arrival,finish,windowStart:stop.fixed?stop.scheduled:arrival,windowEnd:stop.fixed?stop.scheduled:arrival+30}
+  })
+  const homeArrival=items.length?cursor-buffer+Math.ceil(Number(legs.at(-1)?.minutes || 0)):start
+  if(homeArrival>end)warnings.push(`Return home is ${Math.ceil(homeArrival-end)} minutes after the working day ends.`)
+  return {items,homeArrival,warnings}
 }
