@@ -244,6 +244,7 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
           <button type="button" onClick={async()=>{ await supabase?.auth?.signOut?.() }}><LogOut size={19}/><span>Sign out</span><ChevronRight size={17}/></button>
         </div>
       </>}
+      <div style={{display:"flex",justifyContent:"center",gap:20,flexWrap:"wrap",marginTop:20,fontSize:14}}><a href="mailto:HeyBetty.support@gmail.com">Contact support</a><a href="https://app.pawpular.dog/privacy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a></div>
       {settingsTab&&<Suspense fallback={<div role="status" className="prototype-note">Opening settings…</div>}><BusinessSettings initialTab={settingsTab} onClose={()=>setSettingsTab(null)} onSaved={onSettingsSaved}/></Suspense>}
     </section>
   )
