@@ -299,7 +299,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
     setPlanning(true);setError('');setDayProposal(null)
     try{
       const profile=groomerConfig(routeGroomer)
-      const start=clockMinutesForDisplay(profile?.startTime || '09:00')
+      const start=routeGroomer.toLowerCase()==='haley'?510:routeGroomer.toLowerCase()==='jen'?540:clockMinutesForDisplay(profile?.startTime || '09:00')
       const end=clockMinutesForDisplay(profile?.endTime || '17:30')
       const inputs=stops.map((stop,index)=>({...stop,fixed:Boolean(String(sorted[index]?.sourceRow?.['Locked Time'] || '').trim()),scheduled:clockMinutesForDisplay(stop.time),duration:scheduleRowDuration(sorted[index]?.sourceRow,60)}))
       if(inputs.some(stop=>stop.fixed && !Number.isFinite(stop.scheduled)))throw new Error('A fixed appointment is missing its time.')
@@ -518,9 +518,9 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
           {!viewerMode && <button type="button" className="ghost" disabled={!canCheck || planning} onClick={planDay} style={{marginTop:12}}>{planning?'Planning day…':'Plan my day'}</button>}
           {dayProposal && <div className="ai-result" style={{marginTop:12}}>
             <strong>Suggested day · {routeGroomer}</strong>
-            <p>Leave your starting address at {displayClockFromMinutes(dayProposal.start)}. Estimated return: {displayClockFromMinutes(dayProposal.homeArrival)}.</p>
-            <p>Review these estimates before giving clients a time. Your saved appointments stay unchanged.</p>
-            {dayProposal.items.map((stop,index)=><div key={stop.id} style={{padding:'9px 0',borderTop:'1px solid #e6e8ed'}}><strong>{index+1}. {stop.owner}</strong><div>{stop.fixed?'Fixed appointment':'Suggested arrival window'}: {displayClockFromMinutes(stop.windowStart)}{!stop.fixed?`–${displayClockFromMinutes(stop.windowEnd)}`:''}</div><div>{stop.duration} min service · estimated finish {displayClockFromMinutes(stop.finish)}</div></div>)}
+            <p>Leave your starting address at {displayClockFromMinutes(dayProposal.departure)}. Estimated return: {displayClockFromMinutes(dayProposal.homeArrival)}.</p>
+            <p>Review this proposed order before giving clients a time. Saved appointment times remain below. Finish estimates allow arrival at the end of each window.</p>
+            {dayProposal.items.map((stop,index)=><div key={stop.id} style={{padding:'9px 0',borderTop:'1px solid #e6e8ed'}}><strong>{index+1}. {stop.owner}</strong><div>{stop.fixed?'Fixed appointment':'Suggested arrival window'}: {displayClockFromMinutes(stop.windowStart)}{stop.windowEnd>stop.windowStart?`–${displayClockFromMinutes(stop.windowEnd)}`:''}</div><div>{stop.duration} min service · estimated finish {displayClockFromMinutes(stop.finish)}</div></div>)}
             {dayProposal.warnings.map(warning=><p key={warning} role="alert" style={{color:'#a33'}}>{warning}</p>)}
             <button className="ghost" type="button" onClick={()=>setDayProposal(null)}>Dismiss proposal</button>
           </div>}
@@ -1740,7 +1740,9 @@ function PlannerApp({ onReady }) {
 }
 
 function dayPlanTimeline(stops,legs,{start,end,buffer=15}) {
-  let cursor=start
+  const firstArrival=stops[0]?.fixed?stops[0].scheduled:start
+  const departure=firstArrival-Math.ceil(Number(legs[0]?.minutes || 0))
+  let cursor=departure
   const warnings=[]
   const items=stops.map((stop,index)=>{
     const drive=Number(legs[index]?.minutes)
@@ -1748,11 +1750,12 @@ function dayPlanTimeline(stops,legs,{start,end,buffer=15}) {
     const earliest=cursor+Math.ceil(drive)
     const arrival=stop.fixed?Math.max(earliest,stop.scheduled):earliest
     if(stop.fixed && earliest>stop.scheduled)warnings.push(`${stop.owner}: the route arrives ${Math.ceil(earliest-stop.scheduled)} minutes after the fixed time.`)
-    const finish=arrival+stop.duration
+    const windowEnd=stop.fixed || index===0?arrival:arrival+30
+    const finish=windowEnd+stop.duration
     cursor=finish+buffer
-    return {...stop,arrival,finish,windowStart:stop.fixed?stop.scheduled:arrival,windowEnd:stop.fixed?stop.scheduled:arrival+30}
+    return {...stop,arrival,finish,windowStart:stop.fixed?stop.scheduled:arrival,windowEnd:stop.fixed?stop.scheduled:windowEnd}
   })
   const homeArrival=items.length?cursor-buffer+Math.ceil(Number(legs.at(-1)?.minutes || 0)):start
   if(homeArrival>end)warnings.push(`Return home is ${Math.ceil(homeArrival-end)} minutes after the working day ends.`)
-  return {items,homeArrival,warnings}
+  return {items,homeArrival,warnings,departure}
 }
