@@ -1,4 +1,5 @@
-import React,{useEffect,useState} from 'react'
+import React,{useEffect,useState,useRef} from 'react'
+import {apiFetch} from './shared.jsx'
 import GroomerInvites from './GroomerInvites.jsx'
 import {X,Plus} from 'lucide-react'
 import {supabase} from '../supabase.js'
@@ -12,26 +13,40 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
  const [saving,setSaving]=useState(false),[error,setError]=useState(''),[loading,setLoading]=useState(true)
  useEffect(()=>{let live=true;supabase.rpc('get_business_context').then(({data,error})=>{if(!live)return;if(error)setError(error.message);else if(data?.businessId){setBusinessContext(data);setDraft(structuredClone(data.settings))}setLoading(false)}).catch(e=>{if(live){setError(e.message);setLoading(false)}});return()=>{live=false}},[])
  const [deleteId,setDeleteId]=useState(null)
+ const [inviteEmails,setInviteEmails]=useState({}),[inviteNotice,setInviteNotice]=useState('')
+ const busy=useRef(false)
  const editable=business.role==='owner'
  const patch=values=>{setError('');setDraft(s=>({...s,...values}))}
  const changeGroomer=(id,values)=>{setError('');setDraft(s=>({...s,groomers:s.groomers.map(g=>g.id===id?{...g,...values}:g)}))}
- const save=async event=>{
+ const save=async (event,inviteId=null)=>{
   event.preventDefault()
-  if(saving||loading||!editable)return
+  if(busy.current||saving||loading||!editable)return
+  const email=String(inviteEmails[inviteId]||'').trim().toLowerCase()
+  if(inviteId && (!email || !/^\S+@[^\s@]+\.[^\s@]+$/.test(email))){setError('Enter a valid groomer email address.');return}
+  if(inviteId && draft.groomers.find(g=>g.id===inviteId)?.active===false){setError('Activate this groomer before sending an invitation.');return}
   const next={...draft,businessName:draft.businessName.trim(),groomers:draft.groomers.map(g=>({...g,name:g.name.trim(),homeAddress:g.homeAddress.trim()}))}
   const errors=validateBusinessSettings(next)
   if(errors.length){setError(errors.join(' '));return}
-  setSaving(true);setError('')
+  busy.current=true;setSaving(true);setError('');setInviteNotice('')
   try{
    const {data,error}=await supabase.rpc('save_business_settings',{p_settings:next,p_expected_revision:business.revision})
    if(error)throw error
    if(!data?.businessId)throw Error('The save could not be confirmed. Close and reopen settings before trying again.')
-   setBusinessContext(data);onSaved?.();onClose()
-  }catch(e){setError(e.message||'Could not save your settings.')}finally{setSaving(false)}
+   setBusinessContext(data);setDraft(structuredClone(data.settings));onSaved?.()
+   if(inviteId){
+    const {data:auth,error:authError}=await supabase.auth.getSession()
+    if(authError || !auth?.session?.access_token)throw Error('Settings saved. Sign in again before sending the invitation.')
+    const response=await apiFetch('/api/invite-groomer',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${auth.session.access_token}`},body:JSON.stringify({groomerId:inviteId,email})})
+    const payload=await response.json().catch(()=>({}))
+    if(!response.ok)throw Error(`Settings saved. ${payload.error||'The invitation could not be sent. Try again.'}`)
+    setInviteNotice(payload.message||'Invitation sent.')
+    setInviteEmails(values=>({...values,[inviteId]:''}))
+   }else onClose()
+  }catch(e){setError(e.message||'Could not save your settings.')}finally{busy.current=false;setSaving(false)}
  }
  return <div className="sheet-backdrop" onClick={()=>!saving&&onClose()}>
   <form className="sheet business-settings" aria-label="Business settings" onClick={e=>e.stopPropagation()} onSubmit={save} style={{maxHeight:'92dvh',overflowY:'auto',paddingBottom:24}}>
-   <style>{`.business-settings .sheet-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.business-settings label{display:grid;gap:7px;margin:12px 0;font-weight:700;color:#34415f}.business-settings input,.business-settings select,.business-settings textarea{width:100%;box-sizing:border-box;border:1px solid #dcdfe5;border-radius:12px;padding:12px;background:white;color:#172038;font:inherit}.business-settings .settings-card{padding:15px;border:1px solid #e1e4e9;border-radius:16px;margin:12px 0}.business-settings .settings-days{display:flex;flex-wrap:wrap;gap:6px}.business-settings .settings-days button{padding:9px;border:1px solid #cdd4e0;border-radius:10px;background:#fff;color:#34415f}.business-settings .settings-days button[aria-pressed=true]{background:#17223f;color:#fff}.business-settings .check-label{display:flex;align-items:center;gap:10px}.business-settings .check-label input{width:20px}.business-settings .settings-help{font-size:12px;line-height:1.5;color:#727b89}.business-settings .settings-actions{display:flex;gap:10px;position:sticky;bottom:-24px;background:#faf9f6;padding:14px 0}.business-settings .settings-actions button{flex:1}`}</style>
+   <style>{`.business-settings .sheet-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.business-settings label{min-width:0;display:grid;gap:7px;margin:12px 0;font-weight:700;color:#34415f}.business-settings input,.business-settings select,.business-settings textarea{min-width:0;max-width:100%;width:100%;box-sizing:border-box;border:1px solid #dcdfe5;border-radius:12px;padding:12px;background:white;color:#172038;font:inherit}.business-settings .settings-card{padding:15px;border:1px solid #e1e4e9;border-radius:16px;margin:12px 0}.business-settings .settings-days{display:flex;flex-wrap:wrap;gap:6px}.business-settings .settings-days button{padding:9px;border:1px solid #cdd4e0;border-radius:10px;background:#fff;color:#34415f}.business-settings .settings-days button[aria-pressed=true]{background:#17223f;color:#fff}.business-settings .check-label{display:flex;align-items:center;gap:10px}.business-settings .check-label input{width:20px}.business-settings .settings-help{font-size:12px;line-height:1.5;color:#727b89}.business-settings .settings-actions{display:flex;gap:10px;position:sticky;bottom:-24px;background:#faf9f6;padding:14px 0}.business-settings .settings-actions button{flex:1}.business-settings .ghost{border:1px solid #cdd4e0;border-radius:12px;padding:10px 12px;font:inherit;font-weight:700;align-items:center;justify-content:center;gap:6px;cursor:pointer}.business-settings button:disabled{opacity:.5;cursor:default}`}</style>
    <div className="sheet-head"><div><div className="eyebrow">{business.settings.businessName}</div><h2>Your business settings</h2></div><button type="button" className="icon-btn" aria-label="Close settings" disabled={saving} onClick={onClose}><X size={20}/></button></div>
    <div className="segmented">{[['business','Business'],['schedule','Schedule'],['route','Routes'],['team','Team']].map(([key,label])=><button key={key} type="button" className={tab===key?'active':''} onClick={()=>setTab(key)}>{label}</button>)}</div>
    {!editable&&<p className="settings-help">Only your business owner can change these settings.</p>}
@@ -49,10 +64,13 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
     <p className="settings-help">Used when finding openings. Saved appointments stay where you placed them.</p>
     {draft.groomers.map(g=><div className="settings-card" key={g.id}>
      <label>Groomer name<input value={g.name} maxLength={50} onChange={e=>changeGroomer(g.id,{name:e.target.value})}/></label>
+     <label>Email for app invitation (optional)<input type="email" value={inviteEmails[g.id]||''} autoCapitalize="none" autoCorrect="off" maxLength={254} placeholder="groomer@example.com" onChange={e=>{setError('');setInviteNotice('');setInviteEmails(values=>({...values,[g.id]:e.target.value}))}}/></label>
+     <button type="button" className="primary-mini" disabled={saving||loading||!inviteEmails[g.id]?.trim()||g.active===false} onClick={event=>save(event,g.id)}>Save &amp; send invitation</button>
+     <p className="settings-help">Saves your settings, then emails this groomer a link to create their own login. Manage pending invitations in Team.</p>
      <label className="check-label"><input type="checkbox" checked={g.active!==false} onChange={e=>changeGroomer(g.id,{active:e.target.checked})}/>Active groomer</label>
      <p className="settings-help">Turn Active off to archive a groomer and keep their clients and history.</p>
      <div className="settings-days" aria-label={`${g.name} working days`}>{[1,2,3,4,5,6,0].map(day=><button key={day} type="button" aria-pressed={g.workDays.includes(day)} onClick={()=>changeGroomer(g.id,{workDays:g.workDays.includes(day)?g.workDays.filter(d=>d!==day):[...g.workDays,day]})}>{weekdays[day]}</button>)}</div>
-     <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}><label>Start time<input type="time" value={g.startTime} onChange={e=>changeGroomer(g.id,{startTime:e.target.value})}/></label><label>End time<input type="time" value={g.endTime} onChange={e=>changeGroomer(g.id,{endTime:e.target.value})}/></label></div>
+     <div style={{display:'grid',gridTemplateColumns:'minmax(0,1fr) minmax(0,1fr)',gap:12}}><label>Start time<input type="time" value={g.startTime} onChange={e=>changeGroomer(g.id,{startTime:e.target.value})}/></label><label>End time<input type="time" value={g.endTime} onChange={e=>changeGroomer(g.id,{endTime:e.target.value})}/></label></div>
      <label>Service commission (%)<input type="number" min={0} max={100} step="0.1" value={g.commissionPercent} onChange={e=>changeGroomer(g.id,{commissionPercent:Number(e.target.value)})}/></label>
      <p className="settings-help">Tips are separate. Changing this rate applies to future completions; past pay stays the same.</p>
      {deleteId===g.id ? <div role="group" aria-label="Confirm groomer deletion"><p>Delete {g.name||'this groomer'}? This takes effect when you save settings. Groomers with clients, appointments, staff access, or history must be archived instead.</p><button type="button" className="ghost" onClick={()=>setDeleteId(null)}>Keep groomer</button><button type="button" className="ghost" onClick={()=>{patch({groomers:draft.groomers.filter(item=>item.id!==g.id)});setDeleteId(null)}}>Yes, delete groomer</button></div> : <button type="button" className="ghost" disabled={draft.groomers.length===1} onClick={()=>setDeleteId(g.id)}>Delete groomer</button>}
@@ -67,6 +85,7 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
     <p className="settings-help">0 means no limit. Suggestions with a calculated Google route over this limit are marked for review.</p>
    </>}
    </fieldset>
+   {inviteNotice&&<div role="status" className="prototype-note">{inviteNotice}</div>}
    {error&&<div className="login-message" role="alert">{error}</div>}
    <div className="settings-actions"><button type="button" className="ghost" disabled={saving} onClick={onClose}>Close</button>{editable&&<button type="submit" className="primary-mini" disabled={saving||loading}>{saving?'Saving…':'Save settings'}</button>}</div>
   </form>
