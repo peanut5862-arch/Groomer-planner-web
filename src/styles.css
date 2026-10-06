@@ -206,3 +206,10 @@ h2,h3,p{margin:0}
     font-size: 16px;
   }
 }
+/* Give the browser dashboard the full desktop width. */
+@media (min-width: 900px){
+  .app-shell{max-width:none;width:100%;}
+  .bottom-nav{width:100%;box-sizing:border-box;}
+  .floating-ai{right:24px;}
+  .page{padding-left:28px;padding-right:28px;}
+}
