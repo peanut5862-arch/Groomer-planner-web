@@ -52,6 +52,7 @@ export default function LoginScreen({onSignedIn,registrationReady=CUSTOMER_SIGNU
    {message&&<div className="login-message" role="status">{message}</div>}
    <button className="login-button" type="submit" disabled={loading||(mode==='reset'&&cooldown>0)||(mode==='signup'&&!registrationReady)}>{mode==='reset'?(loading?'Sending…':cooldown?`Send again in ${cooldown}s`:'Send reset email'):mode==='signup'&&!registrationReady?'Registration opens soon':loading?(mode==='signup'?'Creating account…':'Signing in…'):(mode==='signup'?'Create account':'Sign in')}</button>
   </form> : <><div className="login-message" role="status">{message}</div><button className="login-button" type="button" disabled={loading||cooldown>0} onClick={resend}>{loading?'Sending…':cooldown?`Resend email in ${cooldown}s`:'Resend confirmation email'}</button></>}
+  <div style={{display:"flex",justifyContent:"center",gap:20,flexWrap:"wrap",marginTop:20,fontSize:14}}><a href="mailto:HeyBetty.support@gmail.com">Contact support</a><a href="https://app.pawpular.dog/privacy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a></div>
   <div style={{display:'grid',gap:12,marginTop:20,textAlign:'center'}}>
    <button type="button" className="text-btn" disabled={loading} onClick={()=>changeMode(mode==='signin'?'signup':'signin')}>{mode==='signin'?'New to Hey Betty? Create account':'Already have an account? Sign in'}</button>
    {mode==='signin'&&<button type="button" className="text-btn" disabled={loading} onClick={()=>changeMode('reset')}>Forgot password?</button>}
