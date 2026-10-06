@@ -519,8 +519,8 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
           {dayProposal && <div className="ai-result" style={{marginTop:12}}>
             <strong>Suggested day · {routeGroomer}</strong>
             <p>Leave your starting address at {displayClockFromMinutes(dayProposal.departure)}. Estimated return: {displayClockFromMinutes(dayProposal.homeArrival)}.</p>
-            <p>Review this proposed order before giving clients a time. Saved appointment times remain below. Finish estimates allow arrival at the end of each window.</p>
-            {dayProposal.items.map((stop,index)=><div key={stop.id} style={{padding:'9px 0',borderTop:'1px solid #e6e8ed'}}><strong>{index+1}. {stop.owner}</strong><div>{stop.fixed?'Fixed appointment':'Suggested arrival window'}: {displayClockFromMinutes(stop.windowStart)}{stop.windowEnd>stop.windowStart?`–${displayClockFromMinutes(stop.windowEnd)}`:''}</div><div>{stop.duration} min service · estimated finish {displayClockFromMinutes(stop.finish)}</div></div>)}
+            <p>Review this proposed order before giving clients a time. Saved appointment times remain below. Finish estimates use the arrival time plus service time.</p>
+            {dayProposal.items.map((stop,index)=><div key={stop.id} style={{padding:'9px 0',borderTop:'1px solid #e6e8ed'}}><strong>{index+1}. {stop.owner}</strong><div>{stop.fixed?'Fixed appointment':'Estimated arrival'}: {displayClockFromMinutes(stop.arrival)}</div><div>{stop.duration} min service · estimated finish {displayClockFromMinutes(stop.finish)}</div></div>)}
             {dayProposal.warnings.map(warning=><p key={warning} role="alert" style={{color:'#a33'}}>{warning}</p>)}
             <button className="ghost" type="button" onClick={()=>setDayProposal(null)}>Dismiss proposal</button>
           </div>}
@@ -1750,7 +1750,7 @@ function dayPlanTimeline(stops,legs,{start,end,buffer=15}) {
     const earliest=cursor+Math.ceil(drive)
     const arrival=stop.fixed?Math.max(earliest,stop.scheduled):earliest
     if(stop.fixed && earliest>stop.scheduled)warnings.push(`${stop.owner}: the route arrives ${Math.ceil(earliest-stop.scheduled)} minutes after the fixed time.`)
-    const windowEnd=stop.fixed || index===0?arrival:arrival+30
+    const windowEnd=arrival
     const finish=windowEnd+stop.duration
     cursor=finish+buffer
     return {...stop,arrival,finish,windowStart:stop.fixed?stop.scheduled:arrival,windowEnd:stop.fixed?stop.scheduled:windowEnd}
