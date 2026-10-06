@@ -174,7 +174,7 @@ function bettyEmptyResultMessage(answer) {
 
 function bettyScheduleLookupRequest(text,todayKey=businessDateKey()) {
   const lower=String(text || '').toLowerCase().replace(/[’]/g,"'")
-  const asksExisting=/\b(what|which|show|list|tell me|who)\b/.test(lower) && /\b(dogs?|clients?|appointments?|stops?|scheduled?|booked|on)\b/.test(lower)
+  const asksExisting=/\b(what|which|show|list|tell me|who)\b/.test(lower) && /\b(dogs?|clients?|appointments?|stops?|scheduled?|booked|book|on)\b/.test(lower)
   if(!asksExisting) return null
   if(/\b(add|fill|opening|should i add|can i add|need to add|move|reschedule|change)\b/.test(lower)) return null
   const today=new Date(`${todayKey}T12:00:00Z`)
@@ -196,6 +196,7 @@ function bettyScheduleLookupRequest(text,todayKey=businessDateKey()) {
 function bettyExplicitSuggestionRequest(text,hasPreviousPlannerResult=false) {
   const lower=String(text || '').toLowerCase().replace(/[’]/g,"'")
   if(hasPreviousPlannerResult && /\b(instead|what about|which one|another|more|cheaper|closest|pays? the most)\b/.test(lower)) return true
+  if(/\b(?:need (?:someone|a client)|fill (?:in )?(?:a |an |the )?(?:spot|opening|gap))\b/.test(lower)) return true
   return /\b(who|which client|which dog|anyone|someone)\b/.test(lower) && /\b(add|book|schedule|fill|fit|opening|overdue|rebook|not booked|booked back)\b/.test(lower)
 }
 
@@ -326,12 +327,20 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
     setText('')
     setLoading(true)
     setError('')
-    setAnswer(null)
     try {
       if (!supabase) throw new Error('Your schedule connection is not configured.')
       const today = businessDateKey()
       let filters = plannerQueryFilters(prompt,dogs)
       const groups = plannerClientGroups(dogs)
+      const addressSubject=addressQuestion(prompt,conversation)
+      if(addressSubject){
+        const matches=matchingTravelClients(groups,addressSubject)
+        const addresses=matches.length===1?[...new Set(matches[0].rows.map(fullClientAddress).filter(Boolean))]:[]
+        const reply=!matches.length?`I couldn't find ${addressSubject} in Clients. Try the full owner or dog name.`:matches.length>1?`I found more than one match: ${matches.map(g=>g.owner).join(', ')}. Which full owner name do you mean?`:addresses.length===1?`${matches[0].owner}'s saved address is ${addresses[0]}.`:addresses.length>1?`${matches[0].owner} has multiple saved addresses: ${addresses.join('; ')}.`:`There is no street address saved for ${matches[0].owner} in Clients yet.`
+        setConversation(current=>[...current,{role:'user',text:prompt},{role:'assistant',text:reply}].slice(-16))
+        setAnswer({mode:'ai',title:'Betty',text:reply,targetDate:'',filters:{},candidates:[],summary:''})
+        return
+      }
       const travel = travelFollowup(prompt,previousAnswer?.travel,conversation)
       if (travel) {
         const matches=matchingTravelClients(groups,travel.subject)
@@ -359,7 +368,8 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
         return
       }
       const specificBookingRequest=bettySpecificBookingRequest(prompt)
-      const scheduleLookupRequest=bettyScheduleLookupRequest(prompt,today)
+      const scheduleContext=scheduleFollowup(prompt,conversation,{parseRange:value=>bettyScheduleLookupRequest(value,today),resolveDate:value=>plannerResolveDate(value,today),groomers:groomerNames(true)})
+      const scheduleLookupRequest=scheduleContext || bettyScheduleLookupRequest(prompt,today)
 
       // Action requests are handled before the suggestion router so a day name
       // like "Thursday" cannot accidentally turn "move Nikki to Thursday" into
@@ -450,13 +460,19 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
       const previousPlannerResult = summarizePlannerAnswer(previousAnswer)
       const priorConversation = conversation.slice(-12)
       const explicitSuggestionRequest=bettyExplicitSuggestionRequest(prompt,Boolean(previousPlannerResult))
+      if(explicitSuggestionRequest && /\b(her|his|their)\b/i.test(prompt)){
+        const priorUser=priorConversation.filter(message=>message.role==='user').at(-1)
+        const priorFilters=plannerQueryFilters(priorUser?.text || '',dogs)
+        if(!filters.groomer)filters.groomer=priorFilters.groomer
+        if(!filters.date)filters.date=priorFilters.date
+      }
 
       const obviousWeather = /\b(weather|forecast|rain|storm|temperature|temp|heat index|cold front)\b/i.test(prompt)
       const obviousGeneral = /\b(commission|earnings?|make (?:today|tomorrow|this week)|what time|time is it|revenue|sales total|my share|haley(?:'s)? share)\b/i.test(prompt)
       // These locally recognized requests already overrode the router's result
       // below. Skip the round trip that could not affect their behavior.
       const knownIntent = specificBookingRequest || scheduleLookupRequest
-        ? 'general' : filters.confirmationOnly ? 'confirmations' : /^what needs my attention[?.!]*$/i.test(prompt.trim()) ? 'brief' : obviousWeather ? 'weather' : obviousGeneral ? 'general' : ''
+        ? 'general' : explicitSuggestionRequest ? 'planner_schedule' : filters.confirmationOnly ? 'confirmations' : /^what needs my attention[?.!]*$/i.test(prompt.trim()) ? 'brief' : obviousWeather ? 'weather' : obviousGeneral ? 'general' : ''
       const requests = createBettyRequestPlan({
         knownIntent,
         // Price questions and obvious weather keep their no-schedule fast path.
@@ -485,6 +501,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
       })
       let bettyIntent = await requests.intent
       if (specificBookingRequest || scheduleLookupRequest) bettyIntent='general'
+      else if(explicitSuggestionRequest) bettyIntent='planner_schedule'
       if (bettyIntent==='planner_schedule' && !explicitSuggestionRequest) bettyIntent='general'
 
       if (bettyIntent === 'planner_schedule' && previousPlannerResult) {
@@ -564,7 +581,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
       if (scheduleLookupRequest) {
         const rows=activeRows.filter(row=>{
           const date=String(row?.Date || '').slice(0,10)
-          return date>=scheduleLookupRequest.start && date<=scheduleLookupRequest.end
+          return date>=scheduleLookupRequest.start && date<=scheduleLookupRequest.end && (!scheduleLookupRequest.groomer || String(row.Groomer || '').trim()===scheduleLookupRequest.groomer)
         }).sort((a,b)=>String(a.Date || '').localeCompare(String(b.Date || '')) || clockMinutesForDisplay(String(a['Start Time'] || a['Locked Time'] || ''))-clockMinutesForDisplay(String(b['Start Time'] || b['Locked Time'] || '')))
         const items=rows.map(row=>({
           date:String(row.Date || '').slice(0,10),
@@ -576,10 +593,11 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
           price:Number(row.Price || 0) || 0,
           confirmation:clientConfirmationStatus(row)
         }))
-        const reply=items.length ? `${scheduleLookupRequest.label}: ${items.length} appointment${items.length===1?'':'s'} on the schedule.` : `${scheduleLookupRequest.label}: no appointments are currently scheduled.`
+        const details=items.map(item=>`${displayClockTime(item.time)} — ${item.owner} — ${item.groomer} — ${item.confirmation}`).join('\n')
+        const reply=items.length ? `${scheduleLookupRequest.label}${scheduleLookupRequest.groomer?` · ${scheduleLookupRequest.groomer}`:''}: ${items.length} appointment${items.length===1?'':'s'}.\n\n${details}` : `${scheduleLookupRequest.label}: no appointments are currently scheduled.`
         const nextConversation=[...priorConversation,{role:'user',text:prompt},{role:'assistant',text:reply}].slice(-16)
         setConversation(nextConversation)
-        setAnswer({mode:'schedule_list',title:scheduleLookupRequest.label,text:reply,scheduleItems:items,targetDate:'',filters:{},candidates:[],summary:''})
+        setAnswer({mode:'ai',title:'Betty',text:reply,targetDate:scheduleLookupRequest.start,filters:{groomer:scheduleLookupRequest.groomer || ''},candidates:[],summary:''})
         return
       }
 
@@ -1051,6 +1069,13 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
         <div className="quick-prompts">
           {quick.map(q=><button key={q} onClick={()=>run(q)}>{q}</button>)}
         </div>
+        {conversation.length>0 && (loading || answer?.mode!=='ai') && (
+          <div className="ai-result" aria-label="Previous Betty messages" style={{marginTop:12}}>
+            <div style={{display:'grid',gap:8}}>
+              {conversation.map((message,index)=><div key={`${message.role}-${index}`} style={{display:'flex',justifyContent:message.role==='user'?'flex-end':'flex-start'}}><div style={{maxWidth:'88%',padding:'10px 12px',border:'1px solid #e6e8ed',borderRadius:12,background:message.role==='user'?'#eef2fb':'#f8f9fb',fontSize:13,lineHeight:1.5,color:'#2f3748',whiteSpace:'pre-wrap'}}>{message.text}</div></div>)}
+            </div>
+          </div>
+        )}
         {loading && <div className="ai-result" style={{marginTop:12}}><div className="result-head"><CheckCircle2 size={17}/><strong>Betty</strong></div><div style={{display:'flex',justifyContent:'flex-start',marginTop:10}}><div style={{maxWidth:'88%',padding:'10px 12px',border:'1px solid #e6e8ed',borderRadius:12,background:'#f8f9fb',fontSize:13,lineHeight:1.5,color:'#6b7280'}}>Betty is thinking…</div></div></div>}
         {error && <div className="login-message" role="alert" style={{marginTop:12}}>{error}</div>}
         {answer && !loading && (
@@ -1101,7 +1126,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
               </div>
             ) : answer.mode==='ai' ? (
               <div style={{display:'grid',gap:8,marginTop:10}}>
-                {(conversation.length?conversation.slice(-8):[{role:'assistant',text:answer.text || 'Betty did not return an answer.'}]).map((message,index)=>(
+                {(conversation.length?conversation:[{role:'assistant',text:answer.text || 'Betty did not return an answer.'}]).map((message,index)=>(
                   <div key={`${message.role}-${index}`} style={{display:'flex',justifyContent:message.role==='user'?'flex-end':'flex-start'}}>
                     <div style={{maxWidth:'88%',padding:'10px 12px',border:'1px solid #e6e8ed',borderRadius:12,background:message.role==='user'?'#eef2fb':'#f8f9fb',fontSize:13,lineHeight:1.5,color:'#2f3748',whiteSpace:'pre-wrap'}}>
                       {message.text}
@@ -1181,3 +1206,65 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
 }
 
 export default AssistantSheet
+
+// Keep short schedule follow-ups tied to the last explicit schedule request.
+function scheduleFollowup(prompt,conversation,{parseRange,resolveDate,groomers}) {
+  const normalize=value=>String(value || '').toLowerCase().replace(/[’]/g,"'").trim()
+  const groomerFor=value=>groomers.find(name=>new RegExp(`\\b${name.toLowerCase()}(?:'s|s)?\\b`).test(value)) || ''
+  let scope=null
+  for(const message of conversation.filter(item=>item.role==='user')) {
+    const value=normalize(message.text)
+    const range=parseRange(value)
+    if(range){scope={...range,groomer:groomerFor(value)};continue}
+    if(!scope)continue
+    const groomer=groomerFor(value)
+    if(/^(?:only|just)\b/.test(value) && groomer){scope={...scope,groomer};continue}
+    if(/^(?:are they|are those|are these|are all|who is|who's|which ones).*(?:confirm)|^(?:today|tomorrow)[?.!]*$/.test(value)){
+      const date=resolveDate(value)
+      if(date)scope={...scope,start:date,end:date,label:date}
+      continue
+    }
+    scope=null
+  }
+  if(!scope)return null
+  const value=normalize(prompt),groomer=groomerFor(value)
+  const shortGroomer=/^(?:only|just)\b/.test(value) && groomer
+  const confirmation=/^(?:are they|are those|are these|are all|who is|who's|which ones).*(?:confirm)/.test(value)
+  const shortDate=/^(?:today|tomorrow)[?.!]*$/.test(value)
+  if(!shortGroomer && !confirmation && !shortDate)return null
+  const date=resolveDate(value)
+  return {...scope,...(date?{start:date,end:date,label:date}:{}),groomer:groomer || scope.groomer,confirmation}
+}
+
+// Resolve address follow-ups from recent user messages, never invented client data.
+const normalize = text => String(text || '').replace(/[’‘]/g,"'").trim().replace(/[?.!]+$/,'').replace(/\b(?:adress|addess|adres|addrress)\b/gi,'address')
+function directSubject(value) {
+  if(!/\baddress\b/i.test(value)) return null
+  const cleaned=value.replace(/^(?:please\s+)?(?:(?:what|whats|hat|wht|wat)(?:'s| is)?|show me|tell me|give me|can you (?:show|tell|give) me|do you (?:have|know))\s+/i,'').replace(/\s+please$/i,'')
+  return (cleaned.match(/^(.+?)(?:'s|s')?\s+(?:street\s+)?address(?:\s+on file)?$/i)?.[1]
+    || cleaned.match(/^(?:the\s+)?(?:street\s+)?address\s+(?:for|of)\s+(.+)$/i)?.[1])?.trim() || null
+}
+function newSubject(value) {
+  return (value.match(/^(?:what about|how about|and)\s+(.+)$/i)?.[1]
+    || value.match(/^(?:what's|whats|what is)\s+(.+)'s$/i)?.[1])?.replace(/'s$/i,'').trim() || null
+}
+function addressQuestion(text,conversation=[]) {
+  const value=normalize(text)
+  const direct=directSubject(value)
+  if(direct) return direct
+  const next=newSubject(value)
+  const addressOnly=/^(?:(?:the|their|his|her|street)\s+)?address(?:\s+please)?$/i.test(value)
+  if(!next && !addressOnly)return null
+  let subject=null
+  // Only continue an uninterrupted address topic; other questions end it.
+  for(const message of conversation.filter(m=>m.role==='user').slice(-6)) {
+    const previous=normalize(message.text)
+    const named=directSubject(previous)
+    if(named){subject=named;continue}
+    const followup=newSubject(previous)
+    if(subject && followup){subject=followup;continue}
+    if(subject && /^(?:(?:the|their|his|her|street)\s+)?address(?:\s+please)?$/i.test(previous))continue
+    subject=null
+  }
+  return subject ? next || subject : null
+}
