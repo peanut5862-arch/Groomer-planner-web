@@ -1096,7 +1096,7 @@ function GroomerPortal({session,groomer}) {
 
   let body=null
   if(tab==='More'){
-    body=(<section><div className="page-head"><div><div className="eyebrow">{groomer}</div><h1>Groomer mode</h1></div></div><div className="prototype-note">This login only shows your assigned appointments, addresses, dogs/services, notes and route tools. Customer phone numbers and text/call tools are not available.</div><div className="menu-list" style={{marginTop:16}}><button type="button" onClick={async()=>{await supabase?.auth?.signOut?.()}}><LogOut size={19}/><span>Sign out</span><ChevronRight size={17}/></button></div></section>)
+    body=(<section><div className="page-head"><div><div className="eyebrow">{groomer}</div><h1>Groomer mode</h1></div></div><div style={{display:"flex",justifyContent:"center",gap:20,flexWrap:"wrap",marginTop:20,fontSize:14}}><a href="mailto:HeyBetty.support@gmail.com">Contact support</a><a href="https://app.pawpular.dog/privacy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a></div><div className="prototype-note">This login only shows your assigned appointments, addresses, dogs/services, notes and route tools. Customer phone numbers and text/call tools are not available.</div><div className="menu-list" style={{marginTop:16}}><button type="button" onClick={async()=>{await supabase?.auth?.signOut?.()}}><LogOut size={19}/><span>Sign out</span><ChevronRight size={17}/></button></div></section>)
   }else if(tab==='Today'){
     const todayAppointments=appointments.filter(appt=>appt.date===today)
     const label=new Date(`${today}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric',year:'numeric'})
