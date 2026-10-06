@@ -5,7 +5,7 @@ import { AppLauncher } from '@capacitor/app-launcher';
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Ellipsis, Home, MapPin, Plus, Route, Sparkles, Users, WalletCards, LogOut } from 'lucide-react';
 import { Stat, ApptCard, businessDateKey, mondayForDate, todayAppointments, clockMinutesForDisplay, apiUrl, displayClockTime, compareAppointmentTimes, clientAddressLookup, appointmentAddress, clientConfirmationStatus, needsClientConfirmation, phoneForScheduleRow, googleMapsAddressUrl, dismissFormKeyboard, defaultFirstStopTime, completionBlockReason, scheduleRowDuration , apiFetch } from './performance/shared.jsx'
 import { createLazyFeature, DeferredSheet } from './performance/DeferredFeature.jsx'
-import LoginScreen from './performance/LoginScreen.jsx'
+import LoginScreen, {PasswordRecoveryScreen} from './performance/LoginScreen.jsx'
 import {needsBusinessSetup} from './performance/customerAuth.js'
 const GroomerWelcome = createLazyFeature(() => import('./performance/GroomerWelcome.jsx'), {sheet:false})
 const BusinessWelcome = createLazyFeature(() => import('./performance/BusinessWelcome.jsx'), {sheet:false})
@@ -1382,6 +1382,7 @@ export default function App() {
 
 function PlannerApp({ onReady }) {
   const [session, setSession] = useState(null)
+  const [recovering,setRecovering]=useState(()=>new URLSearchParams(window.location.hash.slice(1)).get('type')==='recovery' || sessionStorage.getItem('hey-betty-recovery')==='1')
   const [authReady, setAuthReady] = useState(false)
   const [accessMode,setAccessMode] = useState('editor')
   const [accessReady,setAccessReady] = useState(false)
@@ -1562,6 +1563,8 @@ function PlannerApp({ onReady }) {
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (_event, nextSession) => {
+        if(_event==='PASSWORD_RECOVERY'){sessionStorage.setItem('hey-betty-recovery','1');setRecovering(true)}
+        if(_event==='SIGNED_OUT'){sessionStorage.removeItem('hey-betty-recovery');setRecovering(false)}
         setSession(nextSession)
         setAuthReady(true)
       }
@@ -1640,8 +1643,10 @@ function PlannerApp({ onReady }) {
   }, [session?.user?.id,scheduleRevision,groomerMode,accessReady,business.businessId,business.revision])
 
   useEffect(() => {
-    if (authReady && (!session || accessReady)) onReady(true)
-  }, [authReady, session, accessReady, onReady])
+    if (authReady && (recovering || !session || accessReady)) onReady(true)
+  }, [authReady, session, accessReady, recovering, onReady])
+
+  if (authReady && recovering && session) return <PasswordRecoveryScreen onComplete={()=>{sessionStorage.removeItem('hey-betty-recovery');setRecovering(false)}}/>
 
   if (!authReady || (session && (!accessReady || (!accessError && business.accountId!==session.user.id)))) {
     return <div className="login-shell" role="status" aria-label="Opening Hey Betty" aria-busy="true"/>
