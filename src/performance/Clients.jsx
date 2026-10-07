@@ -1,3 +1,4 @@
+import ClientNotes from './ClientNotes.jsx';
 import DogPhoto from './DogPhoto.jsx';
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -1383,6 +1384,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
               <button type="button" className="primary-mini" onClick={() => { const form=blankDogForm(selectedClient); setDogMessage(''); setDogEditor(form); setSelectedClient(null) }}><Plus size={15}/>Add Dog</button>
             </div>}
 
+            <ClientNotes householdId={selectedClient.household} editable={!viewerMode}/>
             <div style={{marginTop:18}}>
               <div className="eyebrow" style={{marginBottom:8}}>Appointment history</div>
               {historyLoading && <div className="prototype-note">Loading appointment history…</div>}
