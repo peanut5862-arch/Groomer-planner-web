@@ -261,7 +261,7 @@ function appointmentWindowText(value) {
   return `${fmt(minutes - 30)}–${fmt(minutes + 30)}`
 }
 
-function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,viewerMode=false}) {
+function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,viewerMode=false,groomerMode=false}) {
   const [loading,setLoading] = useState(false)
   const [error,setError] = useState('')
   const [result,setResult] = useState(null)
@@ -516,8 +516,8 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
             </button>
           </div>
 
-          {!viewerMode && <button type="button" className="ghost" disabled={!canCheck || planning} onClick={planDay} style={{marginTop:12}}>{planning?'Planning day…':'Plan my day'}</button>}
-          {dayProposal && <div className="ai-result" style={{marginTop:12}}>
+          {!viewerMode && !groomerMode && <button type="button" className="ghost" disabled={!canCheck || planning} onClick={planDay} style={{marginTop:12}}>{planning?'Planning day…':'Plan my day'}</button>}
+          {!groomerMode && dayProposal && <div className="ai-result" style={{marginTop:12}}>
             <strong>Suggested day · {routeGroomer}</strong>
             <p>Leave your starting address at {displayClockFromMinutes(dayProposal.departure)}. Estimated return: {displayClockFromMinutes(dayProposal.homeArrival)}.</p>
             <p>Review this proposed order before giving clients a time. Saved appointment times remain below. Finish estimates use the arrival time plus service time.</p>
@@ -1099,11 +1099,11 @@ function GroomerPortal({session,groomer}) {
 
   let body=null
   if(tab==='More'){
-    body=(<section><div className="page-head"><div><div className="eyebrow">{groomer}</div><h1>Groomer mode</h1></div></div><div style={{display:"flex",justifyContent:"center",gap:20,flexWrap:"wrap",marginTop:20,fontSize:14}}><a href="mailto:HeyBetty.support@gmail.com">Contact support</a><a href="https://app.pawpular.dog/privacy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a></div><div className="prototype-note">This login only shows your assigned appointments, addresses, dogs/services, notes and route tools. Customer phone numbers and text/call tools are not available.</div><div className="menu-list" style={{marginTop:16}}><button type="button" onClick={async()=>{await supabase?.auth?.signOut?.()}}><LogOut size={19}/><span>Sign out</span><ChevronRight size={17}/></button></div></section>)
+    body=(<section><div className="page-head"><div><div className="eyebrow">{groomer}</div><h1>Groomer mode</h1></div></div><div style={{display:"flex",justifyContent:"center",gap:20,flexWrap:"wrap",marginTop:20,fontSize:14}}><a href="mailto:HeyBetty.support@gmail.com">Contact support</a><a href="https://app.pawpular.dog/privacy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a></div><div className="menu-list" style={{marginTop:16}}><button type="button" onClick={async()=>{await supabase?.auth?.signOut?.()}}><LogOut size={19}/><span>Sign out</span><ChevronRight size={17}/></button></div></section>)
   }else if(tab==='Today'){
     const todayAppointments=appointments.filter(appt=>appt.date===today)
     const label=new Date(`${today}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric',year:'numeric'})
-    body=(<section><div className="page-head"><div><div className="eyebrow">{label}</div><h1>Today</h1></div><button className="text-btn" onClick={()=>setRevision(value=>value+1)}>Refresh</button></div>{loading&&<div className="prototype-note">Loading your appointments…</div>}{error&&<div className="login-message">{error}</div>}{!loading&&!error&&<><div className="stats-row"><Stat label="Stops" value={todayAppointments.length}/><Stat label="Finished" value={`${todayAppointments.filter(a=>a.finished).length}/${todayAppointments.length}`}/></div><GoogleRoutePanel appointments={todayAppointments} dogs={[]} selectedGroomer={groomer} dateLabel={label} dateKey={today} viewerMode={false}/><div className="section-title"><h3>Your appointments</h3></div>{todayAppointments.length?<div className="appt-list">{todayAppointments.map(appt=><GroomerStopCard key={appt.id} appt={appt} onFinish={finishStop} finishing={finishingId===appt.id}/>)}</div>:<div className="prototype-note">No {groomer} appointments scheduled today.</div>}</>}</section>)
+    body=(<section><div className="page-head"><div><div className="eyebrow">{label}</div><h1>Today</h1></div><button className="text-btn" onClick={()=>setRevision(value=>value+1)}>Refresh</button></div>{loading&&<div className="prototype-note">Loading your appointments…</div>}{error&&<div className="login-message">{error}</div>}{!loading&&!error&&<><div className="stats-row"><Stat label="Stops" value={todayAppointments.length}/><Stat label="Finished" value={`${todayAppointments.filter(a=>a.finished).length}/${todayAppointments.length}`}/></div><GoogleRoutePanel appointments={todayAppointments} dogs={[]} selectedGroomer={groomer} dateLabel={label} dateKey={today} viewerMode={false} groomerMode/><div className="section-title"><h3>Your appointments</h3></div>{todayAppointments.length?<div className="appt-list">{todayAppointments.map(appt=><GroomerStopCard key={appt.id} appt={appt} onFinish={finishStop} finishing={finishingId===appt.id}/>)}</div>:<div className="prototype-note">No {groomer} appointments scheduled today.</div>}</>}</section>)
   }else{
     const weekEnd=addDays(parseLocalDate(activeWeek) || new Date(`${activeWeek}T12:00:00`),4)
     const weekStartDate=parseLocalDate(activeWeek) || new Date(`${activeWeek}T12:00:00`)
@@ -1128,7 +1128,7 @@ function GroomerPortal({session,groomer}) {
         {weekDays.map(day=>{
           const dateKey=ymd(day)
           const dayAppts=appointments.filter(a=>a.date===dateKey)
-          return <div className="day-block" key={dateKey} ref={node=>{if(node) dayRefs.current[dateKey]=node}}><div className="day-head"><div><strong>{displayDay(day)}</strong><span>{day.getDate()}</span></div></div>{dayAppts.length?<><div style={{fontSize:11,color:'#8a8f99',margin:'0 0 8px 2px'}}>{dayAppts.length} stop{dayAppts.length===1?'':'s'} · {dayAppts.filter(a=>a.finished).length} finished</div><GoogleRoutePanel appointments={dayAppts} dogs={[]} selectedGroomer={groomer} dateLabel={`${displayDay(day)} ${displayDate(day)}`} dateKey={dateKey} viewerMode={false}/><div className="appt-list">{dayAppts.map(appt=><GroomerStopCard key={appt.id} appt={appt} onFinish={finishStop} finishing={finishingId===appt.id}/>)}</div></>:<div className="prototype-note">No appointments</div>}</div>
+          return <div className="day-block" key={dateKey} ref={node=>{if(node) dayRefs.current[dateKey]=node}}><div className="day-head"><div><strong>{displayDay(day)}</strong><span>{day.getDate()}</span></div></div>{dayAppts.length?<><div style={{fontSize:11,color:'#8a8f99',margin:'0 0 8px 2px'}}>{dayAppts.length} stop{dayAppts.length===1?'':'s'} · {dayAppts.filter(a=>a.finished).length} finished</div><GoogleRoutePanel appointments={dayAppts} dogs={[]} selectedGroomer={groomer} dateLabel={`${displayDay(day)} ${displayDate(day)}`} dateKey={dateKey} viewerMode={false} groomerMode/><div className="appt-list">{dayAppts.map(appt=><GroomerStopCard key={appt.id} appt={appt} onFinish={finishStop} finishing={finishingId===appt.id}/>)}</div></>:<div className="prototype-note">No appointments</div>}</div>
         })}
       </>}
     </section>)
