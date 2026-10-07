@@ -40,10 +40,10 @@ function formatAppointmentDogServices(items) {
   return items.map(item=>`${String(item.name || '').trim()} (${item.service})`).join(', ')
 }
 
-function rescheduleValidation(date,time,groomer,today) {
+function rescheduleValidation(date,time,groomer,today,manualOverride=false) {
   if (!date || date<today) return 'Choose today or a future date.'
   const day = new Date(`${date}T12:00:00Z`).getUTCDay()
-  if (!groomerWorksOn(groomer,date)) return 'The selected groomer is not working that day.'
+  if (!manualOverride && !groomerWorksOn(groomer,date)) return 'The selected groomer is not working that day.'
   if (!groomerNames().includes(groomer)) return 'Choose a groomer.'
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return 'Choose a valid arrival time.'
   return ''
@@ -293,7 +293,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
       if (editOverrideReasons.length && !manualOverride) { setError('Turn on Manual override to save outside the normal groomer rules.'); return }
     }
     if (mode==='reschedule') {
-      const message=rescheduleValidation(targetDate,targetTime,targetGroomer,businessDateKey())
+      const message=rescheduleValidation(targetDate,targetTime,targetGroomer,businessDateKey(),manualOverride)
       if(message){setError(message);return}
       if(!groomers.includes(targetGroomer)){setError('Choose a groomer.');return}
       if (rescheduleOverrideReasons.length && !manualOverride) { setError('Turn on Manual override to save outside the normal groomer rules.'); return }
