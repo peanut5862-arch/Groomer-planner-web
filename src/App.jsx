@@ -949,14 +949,13 @@ function GroomerStopCard({appt,onFinish,finishing}) {
       <div className="appt-main">
         <div className="appt-topline"><strong>{appt.owner}</strong><span className={`status-dot ${appt.finished?'confirmed':'locked'}`}/></div>
         <div className="dogs">{appt.dogs}</div>
-        <ClientNotes appt={appt}/>
         <div className="meta">
           {appt.area && <span><MapPin size={14}/>{appt.area}</span>}
           {address && <span><MapPin size={14}/>{address}</span>}
         </div>
         {appt.note && <div style={{fontSize:11,color:'#59616e',marginTop:7,lineHeight:1.45}}><strong>Notes:</strong> {appt.note}</div>}
 
-        {canFinish && (
+        {!appt.inactive && !appt.finished && (
           <div style={{marginTop:12,padding:10,border:'1px solid #e0e5ec',borderRadius:12,background:'#f8fafc'}}>
             <div style={{fontSize:11,fontWeight:900,color:'#34415f',marginBottom:7}}>Payment received</div>
             <div style={{display:'flex',gap:7,flexWrap:'wrap'}}>
@@ -991,9 +990,11 @@ function GroomerStopCard({appt,onFinish,finishing}) {
 
         <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>
           {mapsUrl && <button type="button" onClick={()=>openExternalUrl(mapsUrl)} className="day-ai" style={{display:'inline-flex',alignItems:'center',gap:6}}><MapPin size={14}/>Open address</button>}
-          {canFinish && <button type="button" className="save" disabled={finishing || !paymentType} onClick={()=>onFinish(appt,paymentType)}>{finishing?'Saving…':'✓ Finished'}</button>}
+          {!appt.inactive && !appt.finished && <button type="button" className="save" disabled={finishing || !paymentType} onClick={()=>onFinish(appt,paymentType)}>{finishing?'Saving…':'✓ Finished'}</button>}
           {appt.finished && <div style={{fontSize:12,fontWeight:900,color:'#267447',padding:'8px 0'}}>✓ Finished</div>}
         </div>
+        {!appt.inactive && !appt.finished && !canFinish && <div style={{fontSize:12,color:"#68758a",marginTop:8}}>Payment and finishing are available on the appointment day.</div>}
+        <ClientNotes appt={appt}/>
       </div>
     </div>
   )
@@ -1053,7 +1054,7 @@ function GroomerPortal({session,groomer}) {
 
   const appointments=(Array.isArray(record?.plan_json)?record.plan_json:[])
     .map(row=>groomerAppointmentFromRow(row,activeWeek))
-    .filter(appt=>appt.groomer===groomer && !appt.inactive)
+    .filter(appt=>appt.groomer===groomer && !appt.inactive && appt.owner && appt.dogs && /^\d{4}-\d{2}-\d{2}$/.test(appt.date))
     .sort(compareAppointmentTimes)
 
   const finishStop=async(appt,paymentType)=>{
