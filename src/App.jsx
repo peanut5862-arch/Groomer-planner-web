@@ -1,3 +1,4 @@
+import { AppointmentDogPhotos } from './performance/DogPhoto.jsx';
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './performance/businessConfig.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from './supabase.js';
@@ -948,6 +949,7 @@ function GroomerStopCard({appt,onFinish,finishing}) {
       <div className="appt-main">
         <div className="appt-topline"><strong>{appt.owner}</strong><span className={`status-dot ${appt.finished?'confirmed':'locked'}`}/></div>
         <div className="dogs">{appt.dogs}</div>
+        <AppointmentDogPhotos appt={appt}/>
         <div className="meta">
           {appt.area && <span><MapPin size={14}/>{appt.area}</span>}
           {address && <span><MapPin size={14}/>{address}</span>}
