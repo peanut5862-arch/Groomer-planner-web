@@ -1675,7 +1675,7 @@ function PlannerApp({ onReady }) {
   } else if (tab === 'Week') {
     body = <Week dogs={dogs} onAsk={ask} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onPayment={viewerMode?viewerNotice:savePaymentFromSchedule} onAddAppointment={viewerMode?viewerNotice:(date,selectedGroomer)=>setAddAppointment({open:true,date,preset:groomerNames().includes(selectedGroomer)?{groomer:selectedGroomer}:null})} onFillOpening={viewerMode?viewerNotice:payload=>setFillOpening({open:true,date:payload.date,groomer:payload.groomer,appointments:payload.appointments || []})} completingId={completingId} confirmingId={confirmingId} paymentSavingId={paymentSavingId} revision={scheduleRevision} viewerMode={viewerMode}/>
   } else if (tab === 'Month') {
-    body = <Month dogs={dogs} onOpen={setEditing} revision={scheduleRevision}/>
+    body = <Month viewerMode={viewerMode} dogs={dogs} onOpen={setEditing} revision={scheduleRevision}/>
   } else if (tab === 'Clients') {
     body = <Clients userId={session?.user?.id || ''} dogs={dogs} loading={dataLoading} error={dataError} onOpen={setEditing} revision={scheduleRevision} openClient={clientJump} onOpenClientHandled={()=>setClientJump(null)} onRebook={viewerMode?viewerNotice:openRebookForClient} onDataChanged={message=>{ setSaveMessage(message); setScheduleRevision(value=>value+1) }} viewerMode={viewerMode}/>
   } else {
