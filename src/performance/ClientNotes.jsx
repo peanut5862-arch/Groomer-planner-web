@@ -10,7 +10,7 @@ export default function ClientNotes({householdId,appt,editable=true}) {
    if(!active)return
    if(error)setMessage('Could not load this client’s photos and notes. Please refresh and try again.')
    else setData(data)
-  })
+  }).catch(()=>{if(active)setMessage('Could not load this client’s photos and notes. Please refresh and try again.')})
   return ()=>{active=false}
  },[householdId,appt?.weekStart,appt?.rowIndex,refresh])
  async function save(){
@@ -24,14 +24,14 @@ export default function ClientNotes({householdId,appt,editable=true}) {
   }catch{setMessage('Could not save your note. Please try again.')}finally{setBusy(false)}
  }
  const c=data?.clientNotes || {}
- return <section style={{marginTop:12,padding:12,border:'1px solid #e0e5ec',borderRadius:12,background:'#f8fafc'}}>
+ return <section className="client-notes">
   {appt && <><strong style={{display:'block',marginBottom:6}}>Dog photos</strong>{data && <AppointmentDogPhotos appt={appt} householdId={data.householdId}/>}</>}
   <strong style={{display:'block',marginTop:10}}>Client notes</strong>
   {data && <><div style={{fontSize:13,lineHeight:1.5,whiteSpace:'pre-wrap'}}>{[['Client',c.client],['Gate / access',c.access],['Parking',c.parking]].filter(([,value])=>value).map(([label,value])=><p key={label}><strong>{label}:</strong> {value}</p>)}
   {(data.dogNotes || []).map(d=><div key={d.dog}>{[['Grooming',d.grooming],['Handling',d.handling],['Care',d.care]].filter(([,v])=>v).map(([label,value])=><p key={label}><strong>{d.dog} · {label}:</strong> {value}</p>)}</div>)}
   {(data.sharedNotes || []).map(n=><div key={n.id} style={{marginTop:8,padding:8,background:'#fff',borderRadius:8}}><strong>{n.author}</strong><span style={{color:'#7b828e',marginLeft:8,fontSize:11}}>{new Date(n.createdAt).toLocaleString()}</span><div>{n.note}</div></div>)}
   {!c.client && !c.access && !c.parking && !(data.dogNotes || []).some(d=>d.grooming || d.handling || d.care) && !data.sharedNotes?.length && <p>No saved notes yet.</p>}</div>
-  {editable && <><label style={{display:'block',fontSize:13,marginTop:10}}>Add a note<textarea aria-label="Add a client note" maxLength={2000} value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Grooming, handling, or visit notes…" style={{display:'block',width:'100%',boxSizing:'border-box',minHeight:80,marginTop:6}}/></label><button type="button" className="secondary-btn" disabled={busy || !draft.trim()} onClick={save}>{busy?'Saving…':'Save note'}</button></>}
+  {editable && <details className="note-composer"><summary>Add a note</summary><label style={{display:'block',fontSize:13,marginTop:10}}>Note<textarea aria-label="Add a client note" maxLength={2000} value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Grooming, handling, or visit notes…" style={{display:'block',width:'100%',boxSizing:'border-box',minHeight:80,marginTop:6}}/></label><button type="button" className="secondary-btn" disabled={busy || !draft.trim()} onClick={save}>{busy?'Saving…':'Save note'}</button></details>}
   </>}
   {!data && !message && <div role="status">Loading photos and notes…</div>}
   {message && <div role="status" style={{fontSize:12,marginTop:8}}>{message}{!data && <button type="button" className="secondary-btn" onClick={()=>setRefresh(v=>v+1)}>Retry</button>}</div>}
