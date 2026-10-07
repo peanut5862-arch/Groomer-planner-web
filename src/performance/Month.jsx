@@ -1,4 +1,5 @@
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
+import RecurringPlanSheet from './RecurringPlanSheet.jsx';
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from "../supabase.js";
 import { ChevronLeft, ChevronRight } from 'lucide-react';
@@ -27,8 +28,10 @@ function moveMonth(monthKey,offset) {
   return day.toISOString().slice(0,7)
 }
 
-function Month({onOpen,revision,dogs}) {
+function Month({onOpen,revision,dogs,viewerMode=false}) {
   const business = useBusinessContext()
+  const [recurringOpen,setRecurringOpen] = useState(false)
+  const [notice,setNotice] = useState('')
   const [month,setMonth] = useState(()=>businessDateKey().slice(0,7))
   const [groomer,setGroomer] = useState('All')
   useEffect(() => { if (groomer !== 'All' && !groomerNames().includes(groomer)) setGroomer('All') }, [business.revision,groomer])
@@ -97,6 +100,9 @@ function Month({onOpen,revision,dogs}) {
         <button className="text-btn" onClick={()=>{setMonth(businessDateKey().slice(0,7));setSelected(businessDateKey())}}>This month</button>
         <button className="text-btn" disabled={loading} onClick={()=>setRefresh(value=>value+1)}>Refresh</button>
       </div>
+      {!viewerMode && ['owner','editor'].includes(business.role) && <button className="primary-mini" style={{marginBottom:12}} onClick={()=>setRecurringOpen(true)}>Plan next 3 months</button>}
+      {notice && <div className="prototype-note" role="status">{notice}</div>}
+      {recurringOpen && <RecurringPlanSheet dogs={dogs} onClose={()=>setRecurringOpen(false)} onSaved={message=>{setNotice(message);setRefresh(v=>v+1)}}/>}
       {loading && <div className="prototype-note" role="status">Loading your month…</div>}
       {error && <div className="login-message" role="alert">{error}</div>}
       {ready && <>
@@ -127,7 +133,7 @@ function Month({onOpen,revision,dogs}) {
         </div>
         <div className="section-title"><h3>{new Date(`${selected}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric'})}</h3></div>
         {selectedWeek && <div className="eyebrow" style={{marginBottom:12}}>{selectedWeek.status==='confirmed'?'Confirmed week':'Draft week'}</div>}
-        <div className="appt-list">{selectedAppointments.map(appt=><ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={(mode)=>onOpen({...appt,_initialMode:mode || 'edit'})}/>)}</div>
+        <div className="appt-list">{selectedAppointments.map(appt=><ApptCard key={appt.id} appt={appt} dogs={dogs} viewerMode={viewerMode} onOpen={(mode)=>onOpen({...appt,_initialMode:mode || 'edit'})}/>)}</div>
         {!selectedAppointments.length && <div className="prototype-note">{selectedWeek
           ? `No appointments scheduled${groomer==='All'?'':` for ${groomer}`} on this date.`
           : 'No saved schedule for this week yet.'}</div>}
