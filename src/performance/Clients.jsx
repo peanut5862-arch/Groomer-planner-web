@@ -495,10 +495,10 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
     setDraftMessage('Draft cleared. Ready for a new client.')
   }
 
-  const editDog = row => {
+  const editDog = (row, clientEdit=false) => {
     const client = selectedClient
     setDogEditor({
-    household_id:selectedClient.household || '', owner:selectedClient.owner || '',
+    clientEdit, household_id:selectedClient.household || '', owner:selectedClient.owner || '',
     original_dog:valueOf(row,'dog','Dog') || '', dog:valueOf(row,'dog','Dog') || '',
     phone:selectedClient.phone || '', groomer:valueOf(row,'groomer','Groomer') || selectedClient.groomer || '',
     area:selectedClient.area || '', area_mode:'existing', new_area:'', address:selectedClient.address || '', city:selectedClient.city || '',
@@ -939,7 +939,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
         <div className={`sheet-backdrop ${newClientOpen ? 'new-client-backdrop' : ''}`} onMouseDown={closeDogEditor}>
           <div className={`sheet ${newClientOpen ? 'new-client-sheet' : ''}`} onMouseDown={e=>e.stopPropagation()} style={newClientOpen ? undefined : {maxHeight:'90dvh',overflowY:'auto'}}>
             <div className="sheet-handle" />
-            <div className="sheet-title"><div><span>{dogEditor.original_dog ? 'Edit dog' : newClientOpen ? 'New client' : 'Add dog'}</span><h2>{dogEditor.original_dog || dogEditor.dog || 'Dog details'}</h2></div><button className="icon-btn" onClick={closeDogEditor}><X size={18}/></button></div>
+            <div className="sheet-title"><div><span>{dogEditor.clientEdit ? 'Edit client' : dogEditor.original_dog ? 'Edit dog' : newClientOpen ? 'New client' : 'Add dog'}</span><h2>{dogEditor.clientEdit ? dogEditor.owner : dogEditor.original_dog || dogEditor.dog || 'Dog details'}</h2></div><button className="icon-btn" onClick={closeDogEditor}><X size={18}/></button></div>
             <div className="form-grid dog-entry-form">
               <label>Owner<input value={dogEditor.owner} onChange={e=>setDogEditor({...dogEditor,owner:e.target.value})}/></label>
               <label>Dog name<input value={dogEditor.dog} onChange={e=>setDogEditor({...dogEditor,dog:e.target.value})}/></label>
@@ -1174,6 +1174,8 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
               </div>
               {rebookTextDate && <div className="communication-preview">{rebookingMessage({owner:selectedClient.owner,date:rebookTextDate})}</div>}
             </div>}
+
+            {!viewerMode && selectedClient.rows?.length > 0 && <button type="button" className="secondary-btn" onClick={() => { setDogMessage(''); editDog(selectedClient.rows[0],true) }} style={{marginBottom:12}}>Edit client</button>}
 
             <div className="form-grid">
               <label>
