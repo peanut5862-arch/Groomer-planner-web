@@ -213,3 +213,19 @@ h2,h3,p{margin:0}
   .floating-ai{right:24px;}
   .page{padding-left:28px;padding-right:28px;}
 }
+
+/* Consistent controls for client photos, notes, and settings. */
+.secondary-btn{appearance:none;-webkit-appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:8px 12px;border:1px solid #d7dde6;border-radius:11px;background:#fff;color:#31415f;font-size:12px;font-weight:750;line-height:1.25;}
+button:disabled{cursor:default;opacity:.5;}
+button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #8ba8d7;outline-offset:3px;}
+.form-grid textarea,.client-notes textarea{font:inherit;border:1px solid #d7dde6;border-radius:11px;padding:10px 12px;background:#fff;color:#202839;resize:vertical;line-height:1.45;}
+.client-notes{margin-top:12px;padding:12px;border:1px solid #e0e5ec;border-radius:12px;background:#f8fafc;}
+.client-notes p{margin:8px 0;}
+.client-notes .note-composer{margin-top:10px;}
+.client-notes summary{cursor:pointer;color:#31415f;font-size:12px;font-weight:750;padding:8px 0;}
+.client-notes .note-composer button{margin-top:8px;}
+.dog-photo-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-top:8px;}
+.dog-photo-list>div{min-width:0;}
+.dog-photo-actions{display:flex;gap:6px;flex-wrap:wrap;}
+.dog-photo-actions .secondary-btn{font-size:11px;padding:7px 9px;}
+.photo-message{font-size:12px;line-height:1.45;color:#59616e;margin-top:6px;}
