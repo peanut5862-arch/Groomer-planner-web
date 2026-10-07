@@ -41,7 +41,7 @@ export default function LoginScreen({onSignedIn,registrationReady=CUSTOMER_SIGNU
   catch(e){setMessage(e.message||'Could not send the confirmation email. Please try again.')}finally{busy.current=false;setLoading(false)}
  }
  return <div className="login-shell"><div className="login-card">
-  <div className="login-brand">HB</div><div className="eyebrow">Your grooming business, organized</div><h1>Hey Betty</h1>
+  <h1 style={{marginTop:0,marginBottom:8}}>Hey Betty</h1><div className="eyebrow" style={{marginBottom:20}}>Your grooming business, organized</div>
   <h2>{mode==='signup'?'Create your account':mode==='confirm'?'Check your email':mode==='reset'?'Reset your password':'Welcome back'}</h2>
   <p className="login-copy">{mode==='signup'?'Start your own private business dashboard. Add your groomers, clients and appointments after confirming your email.':mode==='confirm'?`We sent confirmation instructions to ${email.trim()}.`:mode==='reset'?'Enter the email you use for Hey Betty. We’ll send a link to choose a new password.':'Sign in to access your clients, routes and schedule.'}</p>
   {mode==='signup'&&!registrationReady&&<div className="login-message" role="status">Customer registration is coming soon. Please check back shortly.</div>}
@@ -79,7 +79,7 @@ export function PasswordRecoveryScreen({onComplete}) {
   }catch(error){setMessage(error.message||'Could not update your password. Request a new reset email and try again.')}
   finally{busy.current=false;setLoading(false)}
  }
- return <div className="login-shell"><div className="login-card"><div className="login-brand">HB</div><h1>Hey Betty</h1><h2>{saved?'Password updated':'Choose a new password'}</h2>
+ return <div className="login-shell"><div className="login-card"><h1 style={{marginTop:0,marginBottom:8}}>Hey Betty</h1><div className="eyebrow" style={{marginBottom:20}}>Your grooming business, organized</div><h2>{saved?'Password updated':'Choose a new password'}</h2>
  {saved?<><p role="status">{message}</p><button className="login-button" onClick={onComplete}>Continue to planner</button></>:<form className="login-form" onSubmit={submit}><PasswordField label="New password" autoComplete="new-password" minLength={8} required value={password} disabled={loading} onChange={e=>setPassword(e.target.value)}/><p>Use at least 8 characters.</p><PasswordField label="Confirm new password" autoComplete="new-password" required value={confirmation} disabled={loading} onChange={e=>setConfirmation(e.target.value)}/>{message&&<p role="alert">{message}</p>}<button className="login-button" disabled={loading}>{loading?'Saving…':'Save new password'}</button></form>}
  </div></div>
 }
