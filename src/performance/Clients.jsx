@@ -1,3 +1,4 @@
+import DogPhoto from './DogPhoto.jsx';
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from "../supabase.js";
@@ -1334,6 +1335,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                         {!viewerMode && <button type="button" className="secondary-btn" onClick={() => { setDogMessage(''); editDog(row) }} style={{flex:'0 0 auto'}}>Edit</button>}
                       </div>
 
+                      <DogPhoto householdId={selectedClient.household} dogName={dog} editable={!viewerMode}/>
                       {!lastGroom && !lastBath ? (
                         <div style={{marginTop:10,padding:'9px 10px',borderRadius:11,background:selectedClient.scheduleInfo ? '#eef5fb' : '#f7f7f5',border:'1px solid #e3e2de',fontSize:11.5,color:'#59616e'}}>
                           {selectedClient.scheduleInfo
