@@ -19,17 +19,20 @@ export async function prepareDogPhoto(file) {
   } finally {URL.revokeObjectURL(url)}
 }
 export default function DogPhoto({householdId,dogName,editable=false,removable=editable}) {
-  const [photo,setPhoto]=useState(null),[url,setUrl]=useState(''),[busy,setBusy]=useState(false),[message,setMessage]=useState('')
+  const [photo,setPhoto]=useState(null),[url,setUrl]=useState(''),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[loading,setLoading]=useState(true),[changing,setChanging]=useState(false)
   const camera=useRef(null),library=useRef(null),generation=useRef(0)
   const businessId=getBusinessContext().businessId
   useEffect(()=>{
-    const current=++generation.current;setPhoto(null);setUrl('');setMessage('')
+    const current=++generation.current;setPhoto(null);setUrl('');setMessage('');setLoading(true);setChanging(false)
     if (!businessId || !householdId || !dogName) return
     ;(async()=>{
-      const {data,error}=await supabase.from('planner_dog_photos').select('object_path').eq('household_id',householdId).eq('dog_name',dogName).maybeSingle()
+      const {data,error}=await supabase.from('planner_dog_photos').select('object_path,dog_name').eq('household_id',householdId)
       if(current!==generation.current)return
-      if(error){setMessage(editable?'Photos are not available yet.':'');return}
-      if(data){const result=await supabase.storage.from(BUCKET).createSignedUrl(data.object_path,3600);if(current===generation.current){setPhoto(data);setUrl(result.data?.signedUrl || '')}}
+      if(error){setLoading(false);setMessage(editable?'Photos are not available yet.':'');return}
+      const matches=(data || []).filter(p=>String(p.dog_name || '').trim().toLowerCase()===String(dogName).trim().toLowerCase());
+      const saved=matches.find(p=>p.dog_name===dogName) || matches[0]
+      if(saved){const result=await supabase.storage.from(BUCKET).createSignedUrl(saved.object_path,3600);if(current===generation.current){setPhoto(saved);setUrl(result.data?.signedUrl || '');if(result.error)setMessage('Could not load the saved photo.')}}
+      if(current===generation.current)setLoading(false)
     })()
     return ()=>{generation.current++}
   },[businessId,householdId,dogName,editable])
@@ -39,8 +42,8 @@ export default function DogPhoto({householdId,dogName,editable=false,removable=e
     try {
       const blob=await prepareDogPhoto(file);const {data:auth,error:authError}=await supabase.auth.getUser();if(authError || !auth.user)throw new Error('Please sign in again.');path=`${businessId}/${auth.user.id}/${crypto.randomUUID()}.jpg`
       const uploaded=await supabase.storage.from(BUCKET).upload(path,blob,{contentType:'image/jpeg',upsert:false});if(uploaded.error)throw uploaded.error
-      const saved=await supabase.from('planner_dog_photos').upsert({business_id:businessId,household_id:householdId,dog_name:dogName,object_path:path},{onConflict:'business_id,household_id,dog_name'});if(saved.error)throw saved.error
-      const oldPath=photo?.object_path;setPhoto({object_path:path})
+      const saved=await supabase.from('planner_dog_photos').upsert({business_id:businessId,household_id:householdId,dog_name:photo?.dog_name || dogName,object_path:path},{onConflict:'business_id,household_id,dog_name'});if(saved.error)throw saved.error
+      const oldPath=photo?.object_path;setPhoto({object_path:path});setChanging(false)
       const signed=await supabase.storage.from(BUCKET).createSignedUrl(path,3600);setUrl(signed.data?.signedUrl || '')
       if(oldPath)await supabase.storage.from(BUCKET).remove([oldPath])
       setMessage('Photo saved.');path=''
@@ -49,7 +52,7 @@ export default function DogPhoto({householdId,dogName,editable=false,removable=e
   async function remove(){
     if(!photo || busy || !window.confirm(`Remove ${dogName}’s photo?`))return
     setBusy(true);setMessage('')
-    const {error}=await supabase.from('planner_dog_photos').delete().eq('household_id',householdId).eq('dog_name',dogName)
+    const {error}=await supabase.from('planner_dog_photos').delete().eq('household_id',householdId).eq('dog_name',photo.dog_name || dogName)
     if(error)setMessage('Could not remove the photo. Please try again.')
     else{await supabase.storage.from(BUCKET).remove([photo.object_path]);setPhoto(null);setUrl('');setMessage('Photo removed.')}
     setBusy(false)
@@ -58,7 +61,9 @@ export default function DogPhoto({householdId,dogName,editable=false,removable=e
   if(!editable && !url)return null
   return <div style={{marginTop:10}}>
     {url && <img src={url} alt={dogName} style={{width:140,height:140,objectFit:'cover',borderRadius:14,display:'block',marginBottom:8}}/>}
-    {editable && <><input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={upload}/><input ref={library} type="file" accept="image/*" hidden onChange={upload}/><div style={{display:'flex',gap:8,flexWrap:'wrap'}}><button type="button" className="secondary-btn" disabled={busy} onClick={()=>camera.current.click()}>Take photo</button><button type="button" className="secondary-btn" disabled={busy} onClick={()=>library.current.click()}>{photo?'Replace photo':'Choose photo'}</button>{photo && removable && <button type="button" className="secondary-btn" disabled={busy} onClick={remove}>Remove photo</button>}</div></>}
+    {loading && <div role="status" style={{fontSize:12}}>Loading photo…</div>}
+    {editable && !loading && photo && !changing && <button type="button" className="secondary-btn" onClick={()=>setChanging(true)}>Change photo</button>}
+    {editable && !loading && (!photo || changing) && <><input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={upload}/><input ref={library} type="file" accept="image/*" hidden onChange={upload}/><div style={{display:'flex',gap:8,flexWrap:'wrap'}}><button type="button" className="secondary-btn" disabled={busy} onClick={()=>camera.current.click()}>Take photo</button><button type="button" className="secondary-btn" disabled={busy} onClick={()=>library.current.click()}>{photo?'Replace photo':'Choose photo'}</button>{photo && removable && <button type="button" className="secondary-btn" disabled={busy} onClick={remove}>Remove photo</button>}</div></>}
     {(busy || message) && <div role="status" style={{fontSize:12,marginTop:6,color:'#59616e'}}>{busy?'Saving photo…':message}</div>}
   </div>
 }
