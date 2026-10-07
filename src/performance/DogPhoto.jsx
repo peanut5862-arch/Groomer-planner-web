@@ -62,7 +62,7 @@ export default function DogPhoto({householdId,dogName,editable=false,removable=e
     {(busy || message) && <div role="status" style={{fontSize:12,marginTop:6,color:'#59616e'}}>{busy?'Saving photo…':message}</div>}
   </div>
 }
-export function AppointmentDogPhotos({appt}) {
-  const householdId=appt.sourceRow?.['Household ID'] || appt.sourceRow?.household_id
-  return <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>{String(appt.dogs || '').split(',').map(part=>part.replace(/\s*\([^)]*\)/g,'').trim()).filter(Boolean).map(dog=><DogPhoto key={dog} householdId={householdId} dogName={dog} editable removable={false}/>)}</div>
+export function AppointmentDogPhotos({appt,householdId:resolvedHouseholdId}) {
+  const householdId=resolvedHouseholdId || appt.sourceRow?.['Household ID'] || appt.sourceRow?.household_id
+  return <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>{String(appt.dogs || '').split(',').map(part=>part.replace(/\s*\([^)]*\)/g,'').trim()).filter(Boolean).map(dog=><div key={dog}><strong style={{fontSize:12}}>{dog}</strong><DogPhoto householdId={householdId} dogName={dog} editable removable={false}/></div>)}</div>
 }
