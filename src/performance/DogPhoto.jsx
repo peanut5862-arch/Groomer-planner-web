@@ -24,7 +24,7 @@ export default function DogPhoto({householdId,dogName,editable=false,removable=e
   const businessId=getBusinessContext().businessId
   useEffect(()=>{
     const current=++generation.current;setPhoto(null);setUrl('');setMessage('');setLoading(true);setChanging(false)
-    if (!businessId || !householdId || !dogName) return
+    if (!businessId || !householdId || !dogName) {setLoading(false);return}
     ;(async()=>{
       const {data,error}=await supabase.from('planner_dog_photos').select('object_path,dog_name').eq('household_id',householdId)
       if(current!==generation.current)return
@@ -33,7 +33,7 @@ export default function DogPhoto({householdId,dogName,editable=false,removable=e
       const saved=matches.find(p=>p.dog_name===dogName) || matches[0]
       if(saved){const result=await supabase.storage.from(BUCKET).createSignedUrl(saved.object_path,3600);if(current===generation.current){setPhoto(saved);setUrl(result.data?.signedUrl || '');if(result.error)setMessage('Could not load the saved photo.')}}
       if(current===generation.current)setLoading(false)
-    })()
+    })().catch(()=>{if(current===generation.current){setLoading(false);setMessage('Could not load the photo. Please try again.')}})
     return ()=>{generation.current++}
   },[businessId,householdId,dogName,editable])
   async function upload(event){
@@ -63,11 +63,11 @@ export default function DogPhoto({householdId,dogName,editable=false,removable=e
     {url && <img src={url} alt={dogName} style={{width:140,height:140,objectFit:'cover',borderRadius:14,display:'block',marginBottom:8}}/>}
     {loading && <div role="status" style={{fontSize:12}}>Loading photo…</div>}
     {editable && !loading && photo && !changing && <button type="button" className="secondary-btn" onClick={()=>setChanging(true)}>Change photo</button>}
-    {editable && !loading && (!photo || changing) && <><input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={upload}/><input ref={library} type="file" accept="image/*" hidden onChange={upload}/><div style={{display:'flex',gap:8,flexWrap:'wrap'}}><button type="button" className="secondary-btn" disabled={busy} onClick={()=>camera.current.click()}>Take photo</button><button type="button" className="secondary-btn" disabled={busy} onClick={()=>library.current.click()}>{photo?'Replace photo':'Choose photo'}</button>{photo && removable && <button type="button" className="secondary-btn" disabled={busy} onClick={remove}>Remove photo</button>}</div></>}
-    {(busy || message) && <div role="status" style={{fontSize:12,marginTop:6,color:'#59616e'}}>{busy?'Saving photo…':message}</div>}
+    {editable && !loading && (!photo || changing) && <><input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={upload}/><input ref={library} type="file" accept="image/*" hidden onChange={upload}/><div className="dog-photo-actions"><button type="button" className="secondary-btn" disabled={busy} onClick={()=>camera.current.click()}>Take photo</button><button type="button" className="secondary-btn" disabled={busy} onClick={()=>library.current.click()}>{photo?'Replace photo':'Choose photo'}</button>{photo && <button type="button" className="secondary-btn" disabled={busy} onClick={()=>setChanging(false)}>Cancel</button>}{photo && removable && <button type="button" className="secondary-btn" disabled={busy} onClick={remove}>Remove photo</button>}</div></>}
+    {(busy || message) && <div role="status" className="photo-message">{busy?'Saving photo…':message}</div>}
   </div>
 }
 export function AppointmentDogPhotos({appt,householdId:resolvedHouseholdId}) {
   const householdId=resolvedHouseholdId || appt.sourceRow?.['Household ID'] || appt.sourceRow?.household_id
-  return <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>{String(appt.dogs || '').split(',').map(part=>part.replace(/\s*\([^)]*\)/g,'').trim()).filter(Boolean).map(dog=><div key={dog}><strong style={{fontSize:12}}>{dog}</strong><DogPhoto householdId={householdId} dogName={dog} editable removable={false}/></div>)}</div>
+  return <div className="dog-photo-list">{String(appt.dogs || '').split(',').map(part=>part.replace(/\s*\([^)]*\)/g,'').trim()).filter(Boolean).map(dog=><div key={dog}><strong style={{fontSize:12}}>{dog}</strong><DogPhoto householdId={householdId} dogName={dog} editable removable={false}/></div>)}</div>
 }
