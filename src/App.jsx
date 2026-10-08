@@ -537,7 +537,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
             </button>
           </div>
 
-          {!viewerMode && !groomerMode && <button type="button" className="ghost" disabled={!canCheck || planning} onClick={planDay} style={{marginTop:12}}>{planning?'Planning day…':'Plan my day'}</button>}
+          {!viewerMode && !groomerMode && <button type="button" className="secondary-btn" disabled={!canCheck || planning} onClick={planDay} style={{marginTop:12,cursor:!canCheck || planning?'default':'pointer',opacity:!canCheck || planning?0.55:1}}><Route size={16} aria-hidden="true"/>{planning?'Planning day…':'Plan my day'}</button>}
           {!groomerMode && dayProposal && <div className="ai-result" style={{marginTop:12}}>
             <strong>Suggested day · {routeGroomer}</strong>
             <p>Leave your starting address at {displayClockFromMinutes(dayProposal.departure)}. Estimated return: {displayClockFromMinutes(dayProposal.homeArrival)}.</p>
