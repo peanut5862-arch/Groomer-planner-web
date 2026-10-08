@@ -319,6 +319,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
 
   const applyRoute=async()=>{
     if(!dayProposal || applyingRoute)return
+    if(dayProposal.homeArrival>clockMinutesForDisplay(groomerConfig(routeGroomer)?.endTime || '17:30')){setError('This route returns home after the groomer’s end time. Move a stop to another day before applying.');return}
     setApplyingRoute(true);setError('')
     try{
       const updates=dayProposal.items.map(stop=>{
@@ -544,7 +545,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
             {dayProposal.items.map((stop,index)=><div key={stop.id} style={{padding:'9px 0',borderTop:'1px solid #e6e8ed'}}><strong>{index+1}. {stop.owner}</strong><div>{stop.fixed?'Fixed appointment':'Estimated arrival'}: {displayClockFromMinutes(stop.arrival)}</div><div>{stop.duration} min service · estimated finish {displayClockFromMinutes(stop.finish)}</div></div>)}
             {dayProposal.warnings.map(warning=><p key={warning} role="alert" style={{color:'#a33'}}>{warning}</p>)}
             {dayProposal.warnings.length>0 && <label style={{display:'flex',gap:8,fontSize:12,marginTop:10}}><input type="checkbox" checked={acceptRouteWarnings} onChange={e=>setAcceptRouteWarnings(e.target.checked)}/>I have reviewed the timing warnings.</label>}
-            <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:12}}><button className="primary-mini" type="button" disabled={applyingRoute || (dayProposal.warnings.length>0 && !acceptRouteWarnings) || dayProposal.items.some(stop=>stop.fixed && stop.arrival!==stop.scheduled)} onClick={applyRoute}>{applyingRoute?'Applying…':'Apply route to schedule'}</button><button className="secondary-btn" type="button" disabled={applyingRoute} onClick={()=>setDayProposal(null)}>Dismiss proposal</button></div>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:12}}><button className="primary-mini" type="button" disabled={applyingRoute || dayProposal.homeArrival>clockMinutesForDisplay(groomerConfig(routeGroomer)?.endTime || '17:30') || (dayProposal.warnings.length>0 && !acceptRouteWarnings) || dayProposal.items.some(stop=>stop.fixed && stop.arrival!==stop.scheduled)} onClick={applyRoute}>{applyingRoute?'Applying…':'Apply route to schedule'}</button><button className="secondary-btn" type="button" disabled={applyingRoute} onClick={()=>setDayProposal(null)}>Dismiss proposal</button></div>
           </div>}
 
           {mapOpenMessage && (
