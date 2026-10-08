@@ -763,6 +763,20 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
         })
         const weekRevenue = weekRows.reduce((sum,row)=>sum+Number(row.Price || 0),0)
 
+        const scheduleItemsFor = rows => rows.map(row=>({
+          owner:String(row.Owner || row.Client || '').trim(), household:String(row['Household ID'] || '').trim(),
+          dogs:String(row.Dogs || row.Dog || '').trim(), date:String(row.Date || '').slice(0,10),
+          time:String(row['Start Time'] || row['Locked Time'] || '').trim(), groomer:row.Groomer || '',
+          area:row.Area || '', confirmation:clientConfirmationStatus(row), price:Number(row.Price || 0)
+        })).sort((a,b)=>a.date.localeCompare(b.date) || clockMinutesForDisplay(a.time)-clockMinutesForDisplay(b.time))
+        const briefLists = {
+          'Still needs confirmation':scheduleItemsFor(confirmationRows),
+          'Overdue + not rebooked':overdueUnbooked.map(client=>({owner:client.owner,household:client.household || '',dogs:client.rows.map(row=>row.dog || row.Dog || '').filter(Boolean).join(' + '),area:client.area || '',dueLabel:client.due.detail})),
+          'Today':scheduleItemsFor(todayRows),
+          'Tomorrow':scheduleItemsFor(tomorrowRows),
+          'Week scheduled':scheduleItemsFor(weekRows)
+        }
+
         const brief = [
           {label:'Still needs confirmation',value:confirmationRows.length,detail:confirmationRows.length?`${confirmationRows.length} appointment${confirmationRows.length===1?'':'s'} this week`:weekRows.length?'Everyone this week is handled':'No appointments scheduled this week',tone:confirmationRows.length?'warn':'good'},
           {label:'Overdue + not rebooked',value:overdueUnbooked.length,detail:overdueUnbooked.length?`${overdueUnbooked.length} client${overdueUnbooked.length===1?'':'s'} to contact`:'No overdue unbooked clients',tone:overdueUnbooked.length?'warn':'good'},
@@ -771,7 +785,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
           {label:'Week scheduled',value:`$${Math.round(weekRevenue)}`,detail:`${weekRows.length} stop${weekRows.length===1?'':'s'} on the books`,tone:'normal'}
         ]
 
-        setAnswer({mode:'brief',title:'What needs your attention',targetDate:'',filters,candidates:[],brief,summary:'Here is the business snapshot Betty would check first.'})
+        setAnswer({mode:'brief',title:'What needs your attention',targetDate:'',filters,candidates:[],brief:brief.map(item=>({...item,items:briefLists[item.label]})),summary:'Tap a card to see the clients and appointments.'})
         return
       }
 
@@ -1010,6 +1024,16 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
     onChoose?.({date:booking.targetDate,clientKey:booking.clientKey,groomer:booking.targetGroomer,time:booking.suggestedTime,fixed:false,note:'Added from Ask Betty'})
   }
 
+  const openClientCard = client => {
+    onClient?.({key:client.key || '',household:client.household || '',owner:client.owner})
+    onClose?.()
+  }
+
+  const openBriefList = item => {
+    setAnswer({mode:'schedule_list',title:item.label,filters:{},candidates:[],scheduleItems:item.items || [],summary:'Tap a client to open their card.'})
+    requestAnimationFrame(()=>sheetRef.current?.scrollTo({top:0,behavior:'smooth'}))
+  }
+
   const choose = candidate => {
     if (viewerMode) {
       onClose?.()
@@ -1095,7 +1119,7 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
               </div>
             ) : answer.mode==='schedule_list' ? (
               <div style={{display:'grid',gap:8,marginTop:10}}>
-                {(answer.scheduleItems || []).length===0 ? <div className="prototype-note">No appointments are scheduled for that period.</div> : (answer.scheduleItems || []).map((item,index)=><div key={`${item.date}-${item.time}-${item.owner}-${index}`} style={{padding:'10px 12px',border:'1px solid #e6e8ed',borderRadius:12,background:'#f8f9fb'}}><strong style={{display:'block',fontSize:13}}>{plannerDayLabel(item.date)} · {displayClockTime(item.time)}</strong><span style={{display:'block',marginTop:3,fontSize:12,color:'#566071'}}>{item.owner} · {item.dogs}</span><span style={{display:'block',marginTop:2,fontSize:11,color:'#7b828e'}}>{[item.groomer,item.area,item.confirmation,item.price?`$${Math.round(item.price)}`:''].filter(Boolean).join(' · ')}</span></div>)}
+                {(answer.scheduleItems || []).length===0 ? <div className="prototype-note">No appointments are scheduled for that period.</div> : (answer.scheduleItems || []).map((item,index)=><button type="button" onClick={()=>openClientCard(item)} aria-label={`Open ${item.owner} client card`} key={`${item.date}-${item.time}-${item.owner}-${index}`} style={{textAlign:'left',width:'100%',cursor:'pointer',color:'#172038',padding:'10px 12px',border:'1px solid #e6e8ed',borderRadius:12,background:'#f8f9fb'}}>{item.date && <strong style={{display:'block',fontSize:13}}>{plannerDayLabel(item.date)}{item.time?` · ${displayClockTime(item.time)}`:''}</strong>}<span style={{display:'block',marginTop:3,fontSize:12,color:'#566071'}}>{item.owner} · {item.dogs}</span><span style={{display:'block',marginTop:2,fontSize:11,color:'#7b828e'}}>{[item.groomer,item.area,item.confirmation,item.dueLabel,item.price?`$${Math.round(item.price)}`:''].filter(Boolean).join(' · ')}</span></button>)}
               </div>
             ) : answer.mode==='reschedule' ? (
               <div style={{display:'grid',gap:10,marginTop:10}}>
@@ -1137,12 +1161,12 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
             ) : answer.mode==='brief' ? (
               <div style={{display:'grid',gap:8,marginTop:10}}>
                 {(answer.brief || []).map(item=>(
-                  <div key={item.label} style={{display:'grid',gridTemplateColumns:'1fr auto',gap:10,alignItems:'center',padding:'11px 12px',border:'1px solid #e6e8ed',borderRadius:12,background:item.tone==='warn'?'#fff9ec':item.tone==='good'?'#effaf2':'#f8f9fb'}}>
+                  <button type="button" key={item.label} onClick={()=>openBriefList(item)} aria-label={`View ${item.label}`} style={{textAlign:'left',width:'100%',cursor:'pointer',color:'#172038',display:'grid',gridTemplateColumns:'1fr auto',gap:10,alignItems:'center',padding:'11px 12px',border:'1px solid #e6e8ed',borderRadius:12,background:item.tone==='warn'?'#fff9ec':item.tone==='good'?'#effaf2':'#f8f9fb'}}>
                     <div><strong style={{display:'block',fontSize:13}}>{item.label}</strong><span style={{fontSize:11,color:'#7b828e'}}>{item.detail}</span></div>
                     <strong style={{fontSize:18,color:item.tone==='warn'?'#8a651e':item.tone==='good'?'#267447':'#172038'}}>{item.value}</strong>
-                  </div>
+                  </button>
                 ))}
-                <div className="prototype-note" style={{marginTop:2}}>Tap another Betty prompt for the actual client list, route fit, pricing, or rebooking suggestions.</div>
+                <div className="prototype-note" style={{marginTop:2}}>Tap any card above to open its list.</div>
               </div>
             ) : answer.candidates.length===0 ? (
               <div className="prototype-note">{bettyEmptyResultMessage(answer)}</div>
