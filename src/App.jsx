@@ -223,7 +223,7 @@ function Today({onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppointme
             <Stat label="Completed" value={`${completed}/${appointments.length}`}/>
           </div>
           {missingPrices && <div className="prototype-note">Some appointments have no price saved; the total includes known prices only.</div>}
-          <GoogleRoutePanel appointments={appointments} dogs={dogs} selectedGroomer={groomer} dateLabel={dateLabel} dateKey={dateKey} viewerMode={viewerMode}/>
+          <GoogleRoutePanel appointments={appointments} dogs={dogs} selectedGroomer={groomer} dateLabel={dateLabel} dateKey={dateKey} viewerMode={viewerMode} onRouteApplied={()=>setRefresh(v=>v+1)}/>
           <div className="section-title"><h3>Appointments</h3></div>
           {appointments.length ? (
             <div className="appt-list">{appointments.map(appt=><ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={(mode)=>onOpen({...appt,_initialMode:mode || 'edit'})} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} onPayment={onPayment} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id} paymentSaving={paymentSavingId===appt.id} viewerMode={viewerMode}/>)}</div>
@@ -261,7 +261,7 @@ function appointmentWindowText(value) {
   return `${fmt(minutes - 30)}–${fmt(minutes + 30)}`
 }
 
-function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,viewerMode=false,groomerMode=false}) {
+function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,viewerMode=false,groomerMode=false,onRouteApplied}) {
   const [loading,setLoading] = useState(false)
   const [error,setError] = useState('')
   const [result,setResult] = useState(null)
@@ -271,6 +271,8 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
   const [autoReady,setAutoReady] = useState(false)
   const [dayProposal,setDayProposal]=useState(null)
   const [planning,setPlanning]=useState(false)
+  const [applyingRoute,setApplyingRoute]=useState(false)
+  const [acceptRouteWarnings,setAcceptRouteWarnings]=useState(false)
   const panelRef = useRef(null)
 
   const sorted = (Array.isArray(appointments) ? appointments : [])
@@ -297,7 +299,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
   useEffect(()=>{setDayProposal(null)},[signature,dateKey])
   const planDay=async()=>{
     if(!canCheck || planning)return
-    setPlanning(true);setError('');setDayProposal(null)
+    setPlanning(true);setError('');setDayProposal(null);setAcceptRouteWarnings(false)
     try{
       const profile=groomerConfig(routeGroomer)
       const start=routeGroomer.toLowerCase()==='haley'?510:routeGroomer.toLowerCase()==='jen'?540:clockMinutesForDisplay(profile?.startTime || '09:00')
@@ -313,6 +315,24 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
       const timeline=dayPlanTimeline(ordered,payload.legs,{start,end,buffer:Number(businessSettings().bufferMinutes || 0)})
       setDayProposal({...timeline,totalMinutes:payload.totalMinutes,totalMiles:payload.totalMiles,start})
     }catch(error){setError(error.message)}finally{setPlanning(false)}
+  }
+
+  const applyRoute=async()=>{
+    if(!dayProposal || applyingRoute)return
+    setApplyingRoute(true);setError('')
+    try{
+      const updates=dayProposal.items.map(stop=>{
+        const original=sorted.find(appt=>appt.id===stop.id)
+        if(!original?.sourceRow || stop.arrival<0 || stop.arrival>=1440)throw new Error('This route cannot be saved. Review the appointment times.')
+        if(stop.fixed && stop.arrival!==stop.scheduled)throw new Error('Resolve the fixed-time conflict before applying this route.')
+        const m=Math.round(stop.arrival)
+        return {expected:original.sourceRow,time:`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`}
+      })
+      const {data,error:saveError}=await supabase.rpc('apply_grooming_day_route',{p_date:dateKey,p_groomer:routeGroomer,p_stops:updates})
+      if(saveError)throw saveError
+      if(data?.status!=='applied')throw new Error('The route was not applied.')
+      setDayProposal(null);onRouteApplied?.()
+    }catch(err){setError(err.message || 'Could not apply the route.')}finally{setApplyingRoute(false)}
   }
 
   const cacheKey = `${getBusinessContext().businessId}:${getBusinessContext().revision}:grooming-route-v2:${signature}`
@@ -520,10 +540,11 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
           {!groomerMode && dayProposal && <div className="ai-result" style={{marginTop:12}}>
             <strong>Suggested day · {routeGroomer}</strong>
             <p>Leave your starting address at {displayClockFromMinutes(dayProposal.departure)}. Estimated return: {displayClockFromMinutes(dayProposal.homeArrival)}.</p>
-            <p>Review this proposed order before giving clients a time. Saved appointment times remain below. Finish estimates use the arrival time plus service time.</p>
+            <p>Review this proposed order before giving clients a time. Apply this route to update flexible appointment times and put the cards in route order. Fixed appointments keep their times.</p>
             {dayProposal.items.map((stop,index)=><div key={stop.id} style={{padding:'9px 0',borderTop:'1px solid #e6e8ed'}}><strong>{index+1}. {stop.owner}</strong><div>{stop.fixed?'Fixed appointment':'Estimated arrival'}: {displayClockFromMinutes(stop.arrival)}</div><div>{stop.duration} min service · estimated finish {displayClockFromMinutes(stop.finish)}</div></div>)}
             {dayProposal.warnings.map(warning=><p key={warning} role="alert" style={{color:'#a33'}}>{warning}</p>)}
-            <button className="ghost" type="button" onClick={()=>setDayProposal(null)}>Dismiss proposal</button>
+            {dayProposal.warnings.length>0 && <label style={{display:'flex',gap:8,fontSize:12,marginTop:10}}><input type="checkbox" checked={acceptRouteWarnings} onChange={e=>setAcceptRouteWarnings(e.target.checked)}/>I have reviewed the timing warnings.</label>}
+            <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:12}}><button className="primary-mini" type="button" disabled={applyingRoute || (dayProposal.warnings.length>0 && !acceptRouteWarnings) || dayProposal.items.some(stop=>stop.fixed && stop.arrival!==stop.scheduled)} onClick={applyRoute}>{applyingRoute?'Applying…':'Apply route to schedule'}</button><button className="secondary-btn" type="button" disabled={applyingRoute} onClick={()=>setDayProposal(null)}>Dismiss proposal</button></div>
           </div>}
 
           {mapOpenMessage && (
@@ -572,6 +593,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
   useEffect(() => { if (groomer !== 'All' && !groomerNames().includes(groomer)) setGroomer('All') }, [business.revision,groomer])
   const [weekStart,setWeekStart]=usePlannerWeekStart({dateObject:true})
   const [weekRecord,setWeekRecord]=useState(null)
+  const [routeRefresh,setRouteRefresh]=useState(0)
   const [loading,setLoading]=useState(true)
   const [error,setError]=useState('')
   const [confirmationFilter,setConfirmationFilter]=useState('All')
@@ -637,7 +659,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
 
     loadWeek()
     return () => { cancelled = true }
-  }, [weekStart,revision])
+  }, [weekStart,revision,routeRefresh])
 
   const rawRows = useMemo(
     ()=>Array.isArray(weekRecord?.plan_json) ? weekRecord.plan_json : [],
@@ -855,7 +877,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
                 <div style={{fontSize:11,color:'#8a8f99',margin:'0 0 8px 2px'}}>
                   {activeAppointments.length} stop{activeAppointments.length===1?'':'s'} · ${Math.round(revenue)}
                 </div>
-                <GoogleRoutePanel appointments={activeAppointments} dogs={dogs} selectedGroomer={groomer} dateLabel={`${displayDay(dayDate)} ${displayDate(dayDate)}`} dateKey={dateKey} viewerMode={viewerMode}/>
+                <GoogleRoutePanel appointments={activeAppointments} dogs={dogs} selectedGroomer={groomer} dateLabel={`${displayDay(dayDate)} ${displayDate(dayDate)}`} dateKey={dateKey} viewerMode={viewerMode} onRouteApplied={()=>setRouteRefresh(v=>v+1)}/>
                 <div className="appt-list">
                   {dayAppointments
                     .slice()
