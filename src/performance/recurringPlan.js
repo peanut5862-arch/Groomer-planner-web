@@ -9,28 +9,46 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0}){
  for(const e of events){if(!e.active)continue;const key=`${e.groomer}|${norm(e.area)}`;if(e.area && e.date>=addDays(today,-84)){const weekdays=rules.get(key)||new Map();const wd=day(e.date).getUTCDay();weekdays.set(wd,(weekdays.get(wd)||0)+1);rules.set(key,weekdays)}
   const slot=minutes(e.time);if(e.date>=from){const k=`${e.date}|${e.groomer}`,list=occupied.get(k)||[];list.push(Number.isFinite(slot)&&e.duration>0?{start:slot,end:slot+e.duration}:{start:0,end:1440});occupied.set(k,list)}
  }
- const tasks=[],seenClients=new Set()
+ const tasks=[],seenClients=new Set(),householdAssignments=new Map()
  for(const c of clients){
   const clientKey=`${c.household}|${norm(c.dog)}`;if(seenClients.has(clientKey))continue;seenClients.add(clientKey)
-  const g=groomers.find(g=>g.active!==false&&g.name===c.groomer),weekdays=rules.get(`${c.groomer}|${norm(c.area)}`)
-  const reason=c.paused?'Client is paused or inactive.':!c.household?'Missing client ID.':!c.area?'Missing area.':!g?'Choose an active assigned groomer.':!c.frequency || c.frequency<1?'Missing grooming frequency.':!c.duration || c.duration<1?'Missing service length.':!c.service?'Choose a recurring service.':!weekdays?.size?'No area weekday found in the existing schedule.':''
+  const either=norm(c.groomer)==='either'
+  const eligible=groomers.filter(g=>g.active!==false&&(either||g.name===c.groomer))
+  const options=eligible.map(g=>({g,weekdays:rules.get(`${g.name}|${norm(c.area)}`)})).filter(o=>o.weekdays?.size)
+  const reason=c.paused?'Client is paused or inactive.':!c.household?'Missing client ID.':!c.area?'Missing area.':!eligible.length?'Choose an active assigned groomer.':!c.frequency || c.frequency<1?'Missing grooming frequency.':!c.duration || c.duration<1?'Missing service length.':!c.service?'Choose a recurring service.':!options.length?'No area weekday found in the existing schedule.':''
   if(reason){issues.push({owner:c.owner,dog:c.dog,reason});continue}
   const history=events.filter(e=>e.active && e.household===c.household && e.dogs.some(d=>norm(d)===norm(c.dog))).sort((a,b)=>a.date.localeCompare(b.date))
   const last=history.at(-1)?.date;let due=last?addDays(last,Math.round(c.frequency*7)):c.due
   if(!due){issues.push({owner:c.owner,dog:c.dog,reason:'No service history or next due date.'});continue}
-  tasks.push({c,g,weekdays,due:due<from?from:due})
+  tasks.push({c,options,either,due:due<from?from:due})
  }
  while(tasks.length){tasks.sort((a,b)=>a.due.localeCompare(b.due)||a.c.owner.localeCompare(b.c.owner)||a.c.dog.localeCompare(b.c.dog));const t=tasks.shift();if(t.due>until)continue
-  const {c,g,weekdays}=t;let chosen=null
-  const dates=Array.from({length:8},(_,i)=>addDays(t.due,i)).filter(d=>d<=until&&g.workDays.includes(day(d).getUTCDay())&&weekdays.has(day(d).getUTCDay()))
-  dates.sort((a,b)=> (events.some(e=>e.active&&e.date===b&&e.groomer===g.name&&norm(e.area)===norm(c.area))?1:0)-(events.some(e=>e.active&&e.date===a&&e.groomer===g.name&&norm(e.area)===norm(c.area))?1:0)||a.localeCompare(b))
-  for(const date of dates){const slots=[...(occupied.get(`${date}|${g.name}`)||[])].sort((a,b)=>a.start-b.start);let start=minutes(g.startTime),end=minutes(g.endTime);if(!Number.isFinite(start)||!Number.isFinite(end))continue
-   for(const slot of slots){if(start+c.duration+buffer<=slot.start)break;start=Math.max(start,slot.end+buffer)}
-   if(start+c.duration<=end){chosen={date,time:clock(start)};break}
+  const {c,options,either}=t;let chosen=null
+  const assignmentKey=`${c.household}|${t.due}`,assigned=householdAssignments.get(assignmentKey)
+  const candidates=[]
+  for(const {g,weekdays} of options){
+   if(either && assigned && assigned!==g.name)continue
+   for(let i=0;i<8;i++){
+    const date=addDays(t.due,i),wd=day(date).getUTCDay()
+    if(date>until || !g.workDays.includes(wd) || !weekdays.has(wd))continue
+    const slots=[...(occupied.get(`${date}|${g.name}`)||[])].sort((a,b)=>a.start-b.start)
+    let start=minutes(g.startTime),end=minutes(g.endTime)
+    if(!Number.isFinite(start)||!Number.isFinite(end))continue
+    const siblings=tasks.filter(other=>other.c.household===c.household&&other.due===t.due&&other.options.some(o=>o.g.name===g.name))
+    const required=c.duration+siblings.reduce((sum,other)=>sum+other.c.duration+buffer,0)
+    for(const slot of slots){if(start+required+buffer<=slot.start)break;start=Math.max(start,slot.end+buffer)}
+    if(start+required>end)continue
+    const sameArea=[...events.filter(e=>e.active),...proposals].filter(e=>e.date===date&&e.groomer===g.name&&norm(e.area)===norm(c.area)).length
+    const load=slots.reduce((sum,slot)=>sum+slot.end-slot.start,0)
+    candidates.push({date,time:clock(start),groomer:g.name,sameArea,weekdayStrength:weekdays.get(wd),load})
+   }
   }
+  candidates.sort((a,b)=>b.sameArea-a.sameArea || a.date.localeCompare(b.date) || b.weekdayStrength-a.weekdayStrength || a.load-b.load || a.groomer.localeCompare(b.groomer))
+  chosen=candidates[0]
   if(!chosen){issues.push({owner:c.owner,dog:c.dog,reason:`No opening on the usual area days near ${t.due}.`});continue}
   const id=`recurring:${c.household}:${norm(c.dog)}:${t.due}`
-  proposals.push({...c,...chosen,id,due:t.due});const k=`${chosen.date}|${g.name}`,slots=occupied.get(k)||[],start=minutes(chosen.time);slots.push({start,end:start+c.duration});occupied.set(k,slots)
+  if(either)householdAssignments.set(assignmentKey,chosen.groomer)
+  proposals.push({...c,...chosen,id,due:t.due,assignmentReason:either?'Suggested from area weekdays and available space.':''});const k=`${chosen.date}|${chosen.groomer}`,slots=occupied.get(k)||[],start=minutes(chosen.time);slots.push({start,end:start+c.duration});occupied.set(k,slots)
   tasks.push({...t,due:addDays(chosen.date,Math.round(c.frequency*7))})
  }
  // Dogs due on the same day for one household are one stop.
