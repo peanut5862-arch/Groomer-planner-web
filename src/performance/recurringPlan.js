@@ -10,7 +10,13 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0}){
   const slot=minutes(e.time);if(e.date>=from){const k=`${e.date}|${e.groomer}`,list=occupied.get(k)||[];list.push(Number.isFinite(slot)&&e.duration>0?{start:slot,end:slot+e.duration}:{start:0,end:1440});occupied.set(k,list)}
  }
  const tasks=[],seenClients=new Set(),householdAssignments=new Map()
- for(const c of clients){
+ for(const original of clients){
+  const c={...original}
+  if(!c.service){
+   const previous=events.filter(e=>e.active&&e.household===c.household&&e.duration>0&&e.dogs.some(d=>norm(d)===norm(c.dog))).sort((a,b)=>a.date.localeCompare(b.date)).at(-1)
+   c.service='To confirm';c.servicePending=true;c.price=0
+   c.duration=previous?Math.ceil(previous.duration/Math.max(1,previous.dogs.length)):(c.duration>0?c.duration:60)
+  }
   const clientKey=`${c.household}|${norm(c.dog)}`;if(seenClients.has(clientKey))continue;seenClients.add(clientKey)
   const either=norm(c.groomer)==='either'
   const eligible=groomers.filter(g=>g.active!==false&&(either||g.name===c.groomer))
@@ -52,6 +58,6 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0}){
   tasks.push({...t,due:addDays(chosen.date,Math.round(c.frequency*7))})
  }
  // Dogs due on the same day for one household are one stop.
- const groups=new Map();for(const p of proposals){const key=`${p.household}|${p.date}|${p.groomer}`;const group=[...groups.values()].find(v=>v.household===p.household&&v.date===p.date&&v.groomer===p.groomer&&minutes(v.time)+v.duration===minutes(p.time));if(group && minutes(group.time)+group.duration===minutes(p.time)){group.dogs.push({dog:p.dog,service:p.service});group.duration+=p.duration;group.price+=p.price;group.ids.push(p.id)}else groups.set(key+':'+p.time,{...p,dogs:[{dog:p.dog,service:p.service}],ids:[p.id]})}
+ const groups=new Map();for(const p of proposals){const key=`${p.household}|${p.date}|${p.groomer}`;const group=[...groups.values()].find(v=>v.household===p.household&&v.date===p.date&&v.groomer===p.groomer&&minutes(v.time)+v.duration===minutes(p.time));if(group && minutes(group.time)+group.duration===minutes(p.time)){group.dogs.push({dog:p.dog,service:p.service});group.duration+=p.duration;group.price+=p.price;group.ids.push(p.id);group.servicePending=Boolean(group.servicePending||p.servicePending)}else groups.set(key+':'+p.time,{...p,dogs:[{dog:p.dog,service:p.service}],ids:[p.id]})}
  return {from,until,appointments:[...groups.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time)),issues}
 }
