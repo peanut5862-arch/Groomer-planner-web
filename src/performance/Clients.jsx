@@ -818,7 +818,6 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
     <section>
       <div className="page-head">
         <div>
-          <div className="eyebrow">Live Supabase data</div>
           <h1>Clients</h1>
         </div>
         {!viewerMode && <button className="primary-mini" onClick={openNewClient}><Plus size={16}/>New</button>}
