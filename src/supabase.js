@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import {requestWithTimeout} from './performance/requestWithTimeout.js'
 
 const url = import.meta.env.VITE_SUPABASE_URL
 const publishableKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -13,7 +14,7 @@ if (typeof window !== 'undefined') {
 
 export const supabase =
   url && publishableKey
-    ? createClient(url, publishableKey)
+    ? createClient(url, publishableKey, {global:{fetch:(input,options)=>requestWithTimeout(input,options,30000)}})
     : null
 
 // Initialization may finish before React mounts its auth listener.
