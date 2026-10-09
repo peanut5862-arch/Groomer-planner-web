@@ -507,7 +507,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
             </div>
             <div className={`schedule-check ${scheduleCheck.severity}`}>
               <div className="schedule-check-title">{scheduleCheck.loading ? 'Checking destination day…' : scheduleRiskBadge(scheduleCheck.severity)}</div>
-              {!scheduleCheck.loading && scheduleCheck.messages.length===0 && <div>No overlap or Google route-window conflict found on the destination day.</div>}
+              {!scheduleCheck.loading && scheduleCheck.messages.length===0 && <div>{targetFixed ? 'No overlap or Google route conflict found on the destination day.' : 'Arrival time stays flexible. Plan the destination day’s route to choose its time.'}</div>}
               {!scheduleCheck.loading && scheduleCheck.messages.map((message,index)=><div key={index}>• {message}</div>)}
             </div>
             {rescheduleOverrideReasons.length > 0 && <div className="schedule-check warning">
