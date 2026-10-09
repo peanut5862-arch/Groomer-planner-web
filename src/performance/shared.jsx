@@ -1,3 +1,4 @@
+import {requestWithTimeout} from './requestWithTimeout.js';
 import React, { useEffect, useState } from 'react';
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, getBusinessContext } from './businessConfig.js';
 import { supabase } from "../supabase.js";
@@ -14,7 +15,7 @@ function apiUrl(path) {
 async function apiFetch(path, options={}) {
   const {data} = await supabase?.auth.getSession() || {data:{}}
   const token = data?.session?.access_token
-  return fetch(apiUrl(path),{...options,headers:{...options.headers,...(token ? {Authorization:`Bearer ${token}`} : {})}})
+  return requestWithTimeout(apiUrl(path),{...options,headers:{...options.headers,...(token ? {Authorization:`Bearer ${token}`} : {})}})
 }
 
 
