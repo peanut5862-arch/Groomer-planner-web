@@ -20,11 +20,11 @@ function backInAreaMessage({date}) {
   return `No problem! We will be back in the area ${dateLabel}.`
 }
 
-function rescheduleMessage({owner,date,time}) {
+function rescheduleMessage({owner,date,time,fixed=false}) {
   const first = String(owner || '').trim().split(/\s+/)[0] || 'there'
   const dateLabel = messageDateLabel(date)
-  const windowLabel = arrivalWindowLabel(time)
-  return `Hi ${first}! I need to move your grooming appointment. Would ${dateLabel}${windowLabel ? ` between ${windowLabel}` : ''} work for you instead?`
+  const timeLabel = fixed ? displayClockTime(time) : ''
+  return `Hi ${first}! I need to move your grooming appointment. Would ${dateLabel}${timeLabel ? ` at ${timeLabel}` : ''} work for you instead?`
 }
 
 function parseAppointmentDogServices(value) {
@@ -77,6 +77,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
   const originalDate = String(row.Date || today).slice(0,10)
   const [mode,setMode] = useState(appt?._initialMode || 'edit')
   const [targetDate,setTargetDate] = useState(originalDate<today?today:originalDate)
+  const [targetFixed,setTargetFixed] = useState(false)
   const [targetTime,setTargetTime] = useState(()=>appointmentTimeInput(row['Start Time'] || row['Locked Time'] || row['Original Start Time']))
   const [targetGroomer,setTargetGroomer] = useState(String(row.Groomer || '').trim())
   const [note,setNote] = useState(String(row['Status Note'] || ''))
@@ -205,7 +206,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
           && String(item.Date || '').slice(0,10)===date
           && String(item.Groomer || '').trim()===groomer
           && !(weekStart===appt.weekStart && sameSourceAppointment(item,row)))
-        const candidate = {...row,Date:date,Groomer:groomer,'Start Time':time,'Locked Time':editFixed?time:''}
+        const candidate = {...row,Date:date,Groomer:groomer,'Start Time':time,'Locked Time':(mode==='reschedule'?targetFixed:editFixed)?time:''}
         const candidateId = 'candidate-edit'
         const candidateStart = clockMinutesForDisplay(time)
         const candidateDuration = mode==='edit' ? scheduleRowDuration(row, serviceMinutesTotal || 60) : scheduleRowDuration(row, serviceMinutesTotal || 60)
@@ -218,7 +219,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
           severity = 'danger'
         }
 
-        for (const item of existing) {
+        for (const item of (mode==='reschedule' && !targetFixed ? [] : existing)) {
           const otherStart = clockMinutesForDisplay(item['Start Time'] || item['Locked Time'])
           if (!Number.isFinite(otherStart) || !Number.isFinite(candidateStart)) continue
           const otherDuration = scheduleRowDuration(item,60)
@@ -237,7 +238,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
           address:appointmentAddress({sourceRow:item,owner:String(item.Owner || '').trim()},lookup)
         })).filter(item=>item.owner && Number.isFinite(clockMinutesForDisplay(item.time))).sort((a,b)=>clockMinutesForDisplay(a.time)-clockMinutesForDisplay(b.time))
         const candidateIndex = routeRows.findIndex(item=>item.id===candidateId)
-        if (candidateIndex>=0 && routeRows.every(item=>item.address)) {
+        if (!(mode==='reschedule' && !targetFixed) && candidateIndex>=0 && routeRows.every(item=>item.address)) {
           const signature = routeRows.map(stop=>`${stop.id}:${stop.address}:${stop.time}`).join('|')
           const cacheKey = `${getBusinessContext().businessId}:${getBusinessContext().revision}:edit-route-check-v1:${date}:${groomer}:${signature}`
           let routePayload = null
@@ -282,7 +283,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
       }
     },400)
     return ()=>{cancelledCheck=true;clearTimeout(timer)}
-  },[mode,targetDate,targetTime,targetGroomer,editTime,editGroomer,editFixed,originalDate,appt.weekStart])
+  },[mode,targetDate,targetTime,targetGroomer,targetFixed,editTime,editGroomer,editFixed,originalDate,appt.weekStart])
 
   const submit = async event => {
     event.preventDefault()
@@ -314,7 +315,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
           : mode==='edit'
             ? await supabase.rpc('update_grooming_appointment_details',{...params,p_time:editTime,p_groomer:editGroomer,p_fixed:editFixed,p_note:note.trim() || null})
           : mode==='reschedule'
-            ? await supabase.rpc('reschedule_grooming_appointment_safe',{...params,p_target_date:targetDate,p_target_time:targetTime,p_target_groomer:targetGroomer,p_note:note.trim() || null})
+            ? await supabase.rpc('reschedule_grooming_appointment_flexible',{...params,p_target_date:targetDate,p_target_time:targetTime,p_target_groomer:targetGroomer,p_fixed:targetFixed,p_note:note.trim() || null})
             : await supabase.rpc('change_grooming_appointment',{...params,p_action:mode,
               p_target_date:null,p_target_time:null,p_target_groomer:null,p_note:note.trim()})
       if (saveError) {
@@ -326,7 +327,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
       else if(data.status==='services_updated') onSaved(`${appt.owner}'s services were updated for this appointment.`)
       else if(data.status==='appointment_updated') onSaved(`${appt.owner}'s appointment details were updated.`)
       else if(data.status==='already_completed') onSaved(`${appt.owner} was already completed.`)
-      else if(data.status==='rescheduled') onSaved(`${appt.owner} moved to ${targetDate} at ${displayClockTime(targetTime)} with ${targetGroomer}. Review the affected draft routes in your existing planner.`)
+      else if(data.status==='rescheduled') onSaved(`${appt.owner} moved to ${targetDate} ${targetFixed ? `at ${displayClockTime(targetTime)} ` : ''}with ${targetGroomer}. Review the affected draft routes in your existing planner.`)
       else if(data.status==='missed') onSaved(`${appt.owner} marked as a no-show. The service history was not advanced.`)
       else if(data.status==='already_missed') onSaved(`${appt.owner} was already marked as a no-show.`)
       else onSaved(`${appt.owner} cancelled. Review the affected draft route in your existing planner.`)
@@ -480,18 +481,19 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
           {mode==='reschedule' && <>
             <div className="form-grid">
               <label>New date<input type="date" min={today} value={targetDate} required disabled={saving} onChange={event=>setTargetDate(event.target.value)}/></label>
-              <label>Arrival time<input type="time" value={targetTime} required disabled={saving} onChange={event=>setTargetTime(event.target.value)}/></label>
+              <label style={{gridColumn:'1 / -1'}}><span><input type="checkbox" checked={targetFixed} disabled={saving} onChange={event=>setTargetFixed(event.target.checked)}/> Fixed arrival time</span></label>
+              {targetFixed && <label>Arrival time<input type="time" value={targetTime} required disabled={saving} onChange={event=>setTargetTime(event.target.value)}/></label>}
               <label style={{gridColumn:'1 / -1'}}>Groomer<select value={targetGroomer} disabled={saving} onChange={event=>setTargetGroomer(event.target.value)}>
                 <option value="">Choose groomer</option>{groomers.map(name=><option key={name}>{name}</option>)}
               </select></label>
             </div>
             <div className="communication-card" style={{margin:'10px 0 12px'}}>
-              <div><strong>Reschedule message preview</strong><span>{rescheduleMessage({owner:appt.owner,date:targetDate,time:targetTime})}</span></div>
+              <div><strong>Reschedule message preview</strong><span>{rescheduleMessage({owner:appt.owner,date:targetDate,time:targetTime,fixed:targetFixed})}</span></div>
               <div className="communication-actions">
                 <button type="button" disabled={!phoneForScheduleRow(dogs,row)} onClick={()=>{
                   const phone = phoneForScheduleRow(dogs,row)
                   setLastContact(saveAppointmentContact(appt,'Reschedule'))
-                  openSms(phone,rescheduleMessage({owner:appt.owner,date:targetDate,time:targetTime}))
+                  openSms(phone,rescheduleMessage({owner:appt.owner,date:targetDate,time:targetTime,fixed:targetFixed}))
                 }}><MessageCircle size={14}/> Text reschedule</button>
               </div>
               <div style={{paddingTop:4,borderTop:'1px solid #dfe6ee'}}><strong>Back-in-area reply</strong><span>{backInAreaMessage({date:targetDate})}</span></div>
@@ -516,7 +518,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
                 <span>Manual override — move this appointment anyway</span>
               </label>
             </div>}
-            <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>The selected arrival time becomes fixed. Customer times are never changed automatically; warnings use saved service lengths, Google drive time, and your ±30-minute arrival window.</p>
+            <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>Moving the day leaves the arrival time flexible for route planning. Select Fixed arrival time only when the client needs a specific time.</p>
           </>}
           {mode==='cancel' && <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>Cancel this appointment for {appt.owner}? It stays in Week history, and the affected route becomes a draft for review.</p>}
           {mode==='missed' && <p style={{fontSize:13,lineHeight:1.6,color:'#687080'}}>Mark this past appointment as a no-show? It stays in history and does not advance the dog’s last-service date.</p>}
