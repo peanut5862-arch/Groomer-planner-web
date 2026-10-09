@@ -828,6 +828,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
                 >
                   <span>{displayDay(dayDate)} {dayDate.getDate()}</span>
                   <small>{dayRows.length ? `${done}/${dayRows.length} done` : 'No stops'}</small>
+                  <small>{new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(dayRows.reduce((sum,appt)=>sum+(Number.isFinite(appt.price)?appt.price:0),0))}</small>
                 </button>
               )
             })}
