@@ -5,11 +5,13 @@ import { supabase } from "../supabase.js";
 import { ChevronLeft, ChevronRight, Route, Settings, WalletCards, LogOut } from 'lucide-react';
 import { clientConfirmationStatus, businessDateKey, mondayForDate, clientDueInfo, plannerClientGroups, plannerActiveRow , apiFetch } from './shared.jsx'
 
+const VehicleMaintenance=lazy(()=>import('./VehicleMaintenance.jsx'))
 const BusinessSettings=lazy(()=>import('./BusinessSettings.jsx'))
 
 function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettingsSaved}) {
   const business=useBusinessContext()
   const [settingsTab,setSettingsTab]=useState(null)
+  const [showVehicles,setShowVehicles]=useState(false)
   const today = businessDateKey()
   const [weekStart,setWeekStart] = usePlannerWeekStart()
   const [weekRecord,setWeekRecord] = useState(null)
@@ -238,6 +240,7 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
         {showPushSetup && <OwnerPushNotifications session={session}/>}
 
         <div className="menu-list" style={{marginTop:16}}>
+          {business.role==='owner'&&<button type="button" onClick={()=>setShowVehicles(true)}><Settings size={19}/><span>Vehicle maintenance</span><ChevronRight size={17}/></button>}
           <button type="button" onClick={()=>setSettingsTab('schedule')}><Settings size={19}/><span>Scheduling settings</span><ChevronRight size={17}/></button>
           <button type="button" onClick={()=>setSettingsTab('route')}><Route size={19}/><span>Route settings</span><ChevronRight size={17}/></button>
           <button type="button" onClick={()=>onAsk?.('Show me this week\'s business summary')}><WalletCards size={19}/><span>Ask Betty about the week</span><ChevronRight size={17}/></button>
@@ -245,6 +248,7 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
         </div>
       </>}
       <div style={{display:"flex",justifyContent:"center",gap:20,flexWrap:"wrap",marginTop:20,fontSize:14}}><a href="mailto:HeyBetty.support@gmail.com">Contact support</a><a href="https://app.pawpular.dog/privacy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a></div>
+      {showVehicles&&business.role==='owner'&&<Suspense fallback={<div role="status" className="prototype-note">Opening vehicle maintenance…</div>}><VehicleMaintenance onClose={()=>setShowVehicles(false)}/></Suspense>}
       {settingsTab&&<Suspense fallback={<div role="status" className="prototype-note">Opening settings…</div>}><BusinessSettings initialTab={settingsTab} onClose={()=>setSettingsTab(null)} onSaved={onSettingsSaved}/></Suspense>}
     </section>
   )
