@@ -1,10 +1,19 @@
-import React,{useEffect,useState} from 'react'
+import React,{useEffect,useRef,useState} from 'react'
 import {supabase} from '../supabase.js'
 import {AppointmentDogPhotos} from './DogPhoto.jsx'
 
 export default function ClientNotes({householdId,appt,editable=true}) {
+ const panel=useRef(null),[ready,setReady]=useState(false)
+ useEffect(()=>{
+  if(ready)return
+  if(typeof IntersectionObserver==='undefined'){setReady(true);return}
+  const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){setReady(true);observer.disconnect()}},{rootMargin:'200px 0px'})
+  if(panel.current)observer.observe(panel.current)
+  return()=>observer.disconnect()
+ },[ready])
  const [data,setData]=useState(null),[draft,setDraft]=useState(''),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[refresh,setRefresh]=useState(0)
  useEffect(()=>{
+  if(!ready)return
   let active=true;setData(null);setMessage('');setDraft('')
   supabase.rpc('get_planner_client_notes',{p_household:householdId || null,p_week_start:appt?.weekStart || null,p_row_index:appt?.rowIndex ?? null}).then(({data,error})=>{
    if(!active)return
@@ -12,7 +21,7 @@ export default function ClientNotes({householdId,appt,editable=true}) {
    else setData(data)
   }).catch(()=>{if(active)setMessage('Could not load this client’s photos and notes. Please refresh and try again.')})
   return ()=>{active=false}
- },[householdId,appt?.weekStart,appt?.rowIndex,refresh])
+ },[ready,householdId,appt?.weekStart,appt?.rowIndex,refresh])
  async function save(){
   if(!draft.trim() || busy || !data?.householdId)return
   setBusy(true);setMessage('')
@@ -24,7 +33,7 @@ export default function ClientNotes({householdId,appt,editable=true}) {
   }catch{setMessage('Could not save your note. Please try again.')}finally{setBusy(false)}
  }
  const c=data?.clientNotes || {}
- return <section className="client-notes">
+ return <section ref={panel} className="client-notes">
   {appt && <><strong style={{display:'block',marginBottom:6}}>Dog photos</strong>{data && <AppointmentDogPhotos appt={appt} householdId={data.householdId}/>}</>}
   <strong style={{display:'block',marginTop:10}}>Client notes</strong>
   {data && <><div style={{fontSize:13,lineHeight:1.5,whiteSpace:'pre-wrap'}}>{[['Client',c.client],['Gate / access',c.access],['Parking',c.parking]].filter(([,value])=>value).map(([label,value])=><p key={label}><strong>{label}:</strong> {value}</p>)}
