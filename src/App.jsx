@@ -13,6 +13,7 @@ const BusinessWelcome = createLazyFeature(() => import('./performance/BusinessWe
 import { usePlannerWeekStart } from './performance/plannerWeek.js'
 const Month = createLazyFeature(() => import('./performance/Month.jsx'), { sheet: false })
 const Clients = createLazyFeature(() => import('./performance/Clients.jsx'), { sheet: false })
+const DailyCloseout = createLazyFeature(() => import('./performance/DailyCloseout.jsx'), { sheet: true })
 const More = createLazyFeature(() => import('./performance/More.jsx'), { sheet: false })
 const AssistantSheet = createLazyFeature(() => import('./performance/AssistantSheet.jsx'), { sheet: true })
 const AddAppointmentSheet = createLazyFeature(() => import('./performance/AddAppointmentSheet.jsx'), { sheet: true })
@@ -131,7 +132,7 @@ async function openExternalUrl(url) {
   window.location.href = clean
 }
 
-function Today({onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppointment,completingId,confirmingId,paymentSavingId,revision,dogs,viewerMode=false}) {
+function Today({onReviewDay,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppointment,completingId,confirmingId,paymentSavingId,revision,dogs,viewerMode=false}) {
   const business = useBusinessContext()
   const [groomer,setGroomer] = useState('All')
   useEffect(() => { if (groomer !== 'All' && !groomerNames().includes(groomer)) setGroomer('All') }, [business.revision,groomer])
@@ -234,6 +235,7 @@ function Today({onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppointme
           ) : (
             <div className="prototype-note">No appointments scheduled today{groomer === 'All' ? '' : ` for ${groomer}`}.</div>
           )}
+          {!viewerMode&&<button type="button" className="secondary-btn" style={{width:'100%',marginTop:16,padding:14}} onClick={()=>onReviewDay(dateKey)}>Review day · Daily closeout</button>}
           <div className="prototype-note">Cancelled appointments and appointments moved to another week are excluded.</div>
         </>
       )}
@@ -1431,6 +1433,7 @@ function PlannerApp({ onReady }) {
   useRememberScrollPosition(`owner:${tab}`, ['Month', 'Clients', 'More'].includes(tab))
   useEffect(()=>{ sessionStorage.setItem('grooming-owner-tab', tab) },[tab])
   const [editing,setEditing]=useState(null)
+  const [closeoutDate,setCloseoutDate]=useState(null)
   const [scheduleRevision,setScheduleRevision]=useState(0)
   const [saveMessage,setSaveMessage]=useState('')
   const [completingId,setCompletingId]=useState('')
@@ -1708,7 +1711,7 @@ function PlannerApp({ onReady }) {
 
   let body
   if (tab === 'Today') {
-    body = <Today dogs={dogs} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onPayment={viewerMode?viewerNotice:savePaymentFromSchedule} onAddAppointment={viewerMode?viewerNotice:date=>setAddAppointment({open:true,date,preset:null})} completingId={completingId} confirmingId={confirmingId} paymentSavingId={paymentSavingId} revision={scheduleRevision} viewerMode={viewerMode}/>
+    body = <Today onReviewDay={setCloseoutDate} dogs={dogs} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onPayment={viewerMode?viewerNotice:savePaymentFromSchedule} onAddAppointment={viewerMode?viewerNotice:date=>setAddAppointment({open:true,date,preset:null})} completingId={completingId} confirmingId={confirmingId} paymentSavingId={paymentSavingId} revision={scheduleRevision} viewerMode={viewerMode}/>
   } else if (tab === 'Week') {
     body = <Week dogs={dogs} onAsk={ask} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onPayment={viewerMode?viewerNotice:savePaymentFromSchedule} onAddAppointment={viewerMode?viewerNotice:(date,selectedGroomer)=>setAddAppointment({open:true,date,preset:groomerNames().includes(selectedGroomer)?{groomer:selectedGroomer}:null})} onFillOpening={viewerMode?viewerNotice:payload=>setFillOpening({open:true,date:payload.date,groomer:payload.groomer,appointments:payload.appointments || []})} completingId={completingId} confirmingId={confirmingId} paymentSavingId={paymentSavingId} revision={scheduleRevision} viewerMode={viewerMode}/>
   } else if (tab === 'Month') {
@@ -1765,6 +1768,7 @@ function PlannerApp({ onReady }) {
         ))}
       </nav>
 
+      {closeoutDate&&!viewerMode&&<DailyCloseout initialDate={closeoutDate} dogs={dogs} revision={scheduleRevision} onClose={()=>setCloseoutDate(null)} onOpen={setEditing}/>}
       {editing && <CompletionSheet appt={editing} dogs={dogs} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} viewerMode={viewerMode} onClose={()=>setEditing(null)} onSaved={message=>{
         setEditing(null)
         setSaveMessage(message)
