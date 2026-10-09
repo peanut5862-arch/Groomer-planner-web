@@ -25,7 +25,7 @@ function useRememberScrollPosition(key, waitForSection = false) {
   useEffect(() => {
     const storageKey = `grooming-scroll:${key}`
     let timers = []
-    let scrollFrame = 0
+    let scrollTimer = 0
     let lastStored = null
     // A short loading fallback can temporarily collapse the page to scroll 0.
     // Keep the saved position intact until the deferred page has committed.
@@ -44,11 +44,10 @@ function useRememberScrollPosition(key, waitForSection = false) {
     }
 
     const save = () => {
-      if (scrollFrame) return
-      scrollFrame = window.requestAnimationFrame(() => {
-        scrollFrame = 0
-        saveNow()
-      })
+      lastScrollRef.current = window.scrollY || document.documentElement.scrollTop || 0
+      clearTimeout(scrollTimer)
+      // Synchronous storage writes during momentum scrolling stall iPhone frames.
+      scrollTimer = window.setTimeout(saveNow, 250)
     }
 
     const restore = () => {
@@ -78,6 +77,9 @@ function useRememberScrollPosition(key, waitForSection = false) {
       restore()
     }
 
+    const stopRestoring = () => { timers.forEach(clearTimeout); timers = [] }
+    window.addEventListener('touchstart', stopRestoring, { passive:true })
+    window.addEventListener('wheel', stopRestoring, { passive:true })
     window.addEventListener('scroll', save, { passive:true })
     window.addEventListener('pagehide', saveNow)
     window.addEventListener('pageshow', restore)
@@ -87,9 +89,11 @@ function useRememberScrollPosition(key, waitForSection = false) {
     restore()
 
     return () => {
-      if (scrollFrame) window.cancelAnimationFrame(scrollFrame)
+      clearTimeout(scrollTimer)
       saveNow()
       timers.forEach(clearTimeout)
+      window.removeEventListener('touchstart', stopRestoring)
+      window.removeEventListener('wheel', stopRestoring)
       window.removeEventListener('scroll', save)
       window.removeEventListener('pagehide', saveNow)
       window.removeEventListener('pageshow', restore)
@@ -1326,6 +1330,10 @@ const plannerThemeCss = `
   @media (max-width:480px){
     .sheet .dog-entry-form,.sheet .additional-dog-card{grid-template-columns:minmax(0,1fr);}
   }
+  @media (any-pointer:coarse), (max-width:767px){
+    /* Avoid repainting a blurred schedule behind three fixed/sticky layers. */
+    .topbar,.bottom-nav,.week-day-jump{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;background:#faf9f7!important;}
+  }
   /* Keep rapid taps from zooming the page; scrolling and pinch zoom remain available. */
   html{touch-action:manipulation;}
   button,a,input,select,textarea,[role="button"]{touch-action:manipulation;}
@@ -1584,6 +1592,10 @@ function PlannerApp({ onReady }) {
 
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session ?? null)
+      setAuthReady(true)
+    }).catch(() => {
+      // Offer sign-in again if startup cannot establish a session.
+      setSession(null)
       setAuthReady(true)
     })
 
