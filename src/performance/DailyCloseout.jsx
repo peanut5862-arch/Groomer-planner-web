@@ -5,8 +5,8 @@ import {businessDateKey,mondayForDate,todayAppointments} from './shared.jsx'
 import {dailyCloseout} from './dailyCloseout.js'
 import {X} from 'lucide-react'
 const money=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(n)
-export default function DailyCloseout({onClose,onOpen,dogs,revision}){
- const business=useBusinessContext(),[date,setDate]=useState(businessDateKey()),[rows,setRows]=useState([]),[loading,setLoading]=useState(true),[error,setError]=useState(''),[retry,setRetry]=useState(0)
+export default function DailyCloseout({onClose,onOpen,dogs,revision,initialDate}){
+ const business=useBusinessContext(),[date,setDate]=useState(initialDate||businessDateKey()),[rows,setRows]=useState([]),[loading,setLoading]=useState(true),[error,setError]=useState(''),[retry,setRetry]=useState(0)
  useEffect(()=>{let live=true;setLoading(true);setError('');supabase.from('weekly_drafts').select('plan_json').eq('business_id',business.businessId).eq('week_start',mondayForDate(date)).limit(1).then(({data,error})=>{if(!live)return;if(error)setError('Could not load this day. Please try again.');else setRows(data?.[0]?.plan_json||[])}).catch(()=>{if(live)setError('Could not load this day. Please try again.')}).finally(()=>{if(live)setLoading(false)});return()=>{live=false}},[date,business.businessId,revision,retry])
  if(business.role!=='owner')return null
  const report=dailyCloseout(rows,date,business.settings.groomers),appointments=todayAppointments(rows,date,'All',dogs)
