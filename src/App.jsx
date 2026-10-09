@@ -1716,7 +1716,7 @@ function PlannerApp({ onReady }) {
   } else if (tab === 'Clients') {
     body = <Clients userId={session?.user?.id || ''} dogs={dogs} loading={dataLoading} error={dataError} onOpen={setEditing} revision={scheduleRevision} openClient={clientJump} onOpenClientHandled={()=>setClientJump(null)} onRebook={viewerMode?viewerNotice:openRebookForClient} onDataChanged={message=>{ setSaveMessage(message); setScheduleRevision(value=>value+1) }} viewerMode={viewerMode}/>
   } else {
-    body = <More dogs={dogs} revision={scheduleRevision} onAsk={ask} onRebook={viewerMode?viewerNotice:openRebookForClient} session={session} showPushSetup={!viewerMode} onSettingsSaved={()=>setScheduleRevision(value=>value+1)}/>
+    body = <More onOpen={setEditing} dogs={dogs} revision={scheduleRevision} onAsk={ask} onRebook={viewerMode?viewerNotice:openRebookForClient} session={session} showPushSetup={!viewerMode} onSettingsSaved={()=>setScheduleRevision(value=>value+1)}/>
   }
 
   const nav=[['Today',Home],['Week',CalendarDays],['Month',Clock3],['Clients',Users],['More',Ellipsis]]
