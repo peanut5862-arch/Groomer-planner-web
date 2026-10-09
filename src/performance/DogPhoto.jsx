@@ -60,7 +60,7 @@ export default function DogPhoto({householdId,dogName,editable=false,removable=e
   if(!householdId || !dogName)return null
   if(!editable && !url)return null
   return <div style={{marginTop:10}}>
-    {url && <img src={url} alt={dogName} style={{width:140,height:140,objectFit:'cover',borderRadius:14,display:'block',marginBottom:8}}/>}
+    {url && <img loading="lazy" decoding="async" src={url} alt={dogName} style={{width:140,height:140,objectFit:'cover',borderRadius:14,display:'block',marginBottom:8}}/>}
     {loading && <div role="status" style={{fontSize:12}}>Loading photo…</div>}
     {editable && !loading && photo && !changing && <button type="button" className="secondary-btn" onClick={()=>setChanging(true)}>Change photo</button>}
     {editable && !loading && (!photo || changing) && <><input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={upload}/><input ref={library} type="file" accept="image/*" hidden onChange={upload}/><div className="dog-photo-actions"><button type="button" className="secondary-btn" disabled={busy} onClick={()=>camera.current.click()}>Take photo</button><button type="button" className="secondary-btn" disabled={busy} onClick={()=>library.current.click()}>{photo?'Replace photo':'Choose photo'}</button>{photo && <button type="button" className="secondary-btn" disabled={busy} onClick={()=>setChanging(false)}>Cancel</button>}{photo && removable && <button type="button" className="secondary-btn" disabled={busy} onClick={remove}>Remove photo</button>}</div></>}
