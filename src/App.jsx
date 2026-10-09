@@ -1243,7 +1243,8 @@ const plannerThemeCss = `
   .client-quick-actions button,.communication-actions button{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid #dce1e8;background:#fff;color:#26345e;border-radius:11px;padding:9px 11px;font-size:12px;font-weight:850;}
   .client-quick-actions button:disabled,.communication-actions button:disabled{opacity:.45;}
   .communication-card{display:grid;gap:10px;margin:0 0 16px;padding:12px 13px;border:1px solid #d7e4ef;border-radius:14px;background:#f3f8fc;}
-  .communication-card>div:first-child{display:grid;gap:2px;}
+  .communication-card>div:first-child,.communication-card>div[style]{display:grid;gap:6px;}
+  .ghost{border:1px solid #d7ddea;border-radius:12px;padding:9px 14px;min-height:40px;font:inherit;font-weight:700;cursor:pointer;}
   .communication-card strong{font-size:13px;color:#172038;}
   .communication-card span{font-size:11px;color:#657084;}
   .communication-actions{display:flex;gap:7px;flex-wrap:wrap;}
