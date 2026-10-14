@@ -1,3 +1,5 @@
+import DogBreed from './DogBreed.jsx'
+import RabiesRecord from './RabiesRecord.jsx'
 import React,{useEffect,useRef,useState} from 'react'
 import {supabase} from '../supabase.js'
 import {AppointmentDogPhotos} from './DogPhoto.jsx'
@@ -34,7 +36,7 @@ export default function ClientNotes({householdId,appt,editable=true}) {
  }
  const c=data?.clientNotes || {}
  return <section ref={panel} className="client-notes">
-  {appt && <><strong style={{display:'block',marginBottom:6}}>Dog photos</strong>{data && <AppointmentDogPhotos appt={appt} householdId={data.householdId}/>}</>}
+  {appt && <><strong style={{display:'block',marginBottom:6}}>Dog photos</strong>{data && <><AppointmentDogPhotos appt={appt} householdId={data.householdId}/>{String(appt.dogs||'').split(',').map(p=>p.replace(/\s*\([^)]*\)/g,'').trim()).filter(Boolean).map(name=><div key={name}><strong>{name}</strong><DogBreed householdId={data.householdId} dogName={name}/><RabiesRecord householdId={data.householdId} dogName={name}/></div>)}</>}</>}
   <strong style={{display:'block',marginTop:10}}>Client notes</strong>
   {data && <><div style={{fontSize:13,lineHeight:1.5,whiteSpace:'pre-wrap'}}>{[['Client',c.client],['Gate / access',c.access],['Parking',c.parking]].filter(([,value])=>value).map(([label,value])=><p key={label}><strong>{label}:</strong> {value}</p>)}
   {(data.dogNotes || []).map(d=><div key={d.dog}>{[['Grooming',d.grooming],['Handling',d.handling],['Care',d.care]].filter(([,v])=>v).map(([label,value])=><p key={label}><strong>{d.dog} · {label}:</strong> {value}</p>)}</div>)}
