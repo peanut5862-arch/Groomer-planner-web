@@ -1,3 +1,4 @@
+import {renderMessage} from './messageTemplates.js';
 import ClientNotes from './ClientNotes.jsx';
 import GroomingReport from './GroomingReport.jsx';
 import {requestWithTimeout} from './requestWithTimeout.js';
@@ -126,7 +127,7 @@ function confirmationMessage({owner,dogs,date,time}) {
   const windowLabel = arrivalWindowLabel(time)
   const petNames = naturalPetNames(dogs)
   const petText = petNames ? ` for ${petNames}` : ''
-  return `Hi ${first}! Just confirming your grooming appointment${petText} on ${dateLabel}.${windowLabel ? ` Would between ${windowLabel} work for you?` : ''}`
+  return renderMessage('confirmation',{name:first,pets:petNames,date:dateLabel,window:windowLabel,business:businessSettings().businessName},businessSettings().messageTemplates)
 }
 
 function reminderMessage({owner,dogs,date,time}) {
@@ -135,7 +136,7 @@ function reminderMessage({owner,dogs,date,time}) {
   const windowLabel = arrivalWindowLabel(time)
   const petNames = naturalPetNames(dogs)
   const petText = petNames ? ` for ${petNames}` : ''
-  return `Hi ${first}! Just checking in about your grooming appointment${petText} on ${dateLabel}.${windowLabel ? ` Would between ${windowLabel} still work for you?` : ''} Just let me know when you get a chance!`
+  return renderMessage('reminder',{name:first,pets:petNames,date:dateLabel,window:windowLabel,business:businessSettings().businessName},businessSettings().messageTemplates)
 }
 
 function runningLateMessage({owner,minutes}) {
