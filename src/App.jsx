@@ -1,3 +1,4 @@
+import {routeApplyBlock} from './performance/routeApplyGuard.js';
 import BookingNotice from './performance/BookingNotice.jsx';
 import ClientNotes from './performance/ClientNotes.jsx';
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './performance/businessConfig.js';
@@ -281,6 +282,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
   const [planning,setPlanning]=useState(false)
   const [applyingRoute,setApplyingRoute]=useState(false)
   const [acceptRouteWarnings,setAcceptRouteWarnings]=useState(false)
+  const [allowLateReturn,setAllowLateReturn]=useState(false)
   const panelRef = useRef(null)
 
   const sorted = (Array.isArray(appointments) ? appointments : [])
@@ -304,15 +306,15 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
   const canCheck = !mixedGroomers && validGroomer && stops.length >= 1 && missing.length === 0 && !loading
   const signature = stops.map(stop=>`${stop.id}:${stop.address}:${stop.time}`).join('|') + `:${routeGroomer}`
 
-  useEffect(()=>{setDayProposal(null)},[signature,dateKey])
+  useEffect(()=>{setDayProposal(null);setAllowLateReturn(false);setAcceptRouteWarnings(false)},[signature,dateKey])
   const planDay=async()=>{
     if(!canCheck || planning)return
-    setPlanning(true);setError('');setDayProposal(null);setAcceptRouteWarnings(false)
+    setPlanning(true);setError('');setDayProposal(null);setAcceptRouteWarnings(false);setAllowLateReturn(false)
     try{
       const profile=groomerConfig(routeGroomer)
       const start=routeGroomer.toLowerCase()==='haley'?510:routeGroomer.toLowerCase()==='jen'?540:clockMinutesForDisplay(profile?.startTime || '09:00')
       const end=clockMinutesForDisplay(profile?.endTime || '17:30')
-      const inputs=stops.map((stop,index)=>({...stop,fixed:Boolean(String(sorted[index]?.sourceRow?.['Locked Time'] || '').trim()),scheduled:clockMinutesForDisplay(stop.time),duration:scheduleRowDuration(sorted[index]?.sourceRow,60)}))
+      const inputs=stops.map((stop,index)=>({...stop,completed:Boolean(sorted[index]?.completed || /completed/i.test(String(sorted[index]?.sourceRow?.['Completion Status']||'')) || /finished/i.test(String(sorted[index]?.sourceRow?.['Groomer Finish Status']||''))),fixed:Boolean(sorted[index]?.completed || /completed/i.test(String(sorted[index]?.sourceRow?.['Completion Status']||'')) || /finished/i.test(String(sorted[index]?.sourceRow?.['Groomer Finish Status']||'')) || String(sorted[index]?.sourceRow?.['Locked Time'] || '').trim()),scheduled:clockMinutesForDisplay(stop.time),duration:scheduleRowDuration(sorted[index]?.sourceRow,60)}))
       if(inputs.some(stop=>stop.fixed && !Number.isFinite(stop.scheduled)))throw new Error('A fixed appointment is missing its time.')
       const response=await apiFetch('/api/google-route',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'plan-day',groomer:routeGroomer,stops:inputs})})
       const payload=await response.json()
@@ -327,10 +329,11 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
 
   const applyRoute=async()=>{
     if(!dayProposal || applyingRoute)return
-    if(dayProposal.homeArrival>clockMinutesForDisplay(groomerConfig(routeGroomer)?.endTime || '17:30')){setError('This route returns home after the groomer’s end time. Move a stop to another day before applying.');return}
+    const block=routeApplyBlock({proposal:dayProposal,end:clockMinutesForDisplay(groomerConfig(routeGroomer)?.endTime || '17:30'),role:getBusinessContext().role,allowLate:allowLateReturn,acceptedWarnings:acceptRouteWarnings})
+    if(block){setError(block);return}
     setApplyingRoute(true);setError('')
     try{
-      const updates=dayProposal.items.map(stop=>{
+      const updates=dayProposal.items.filter(stop=>!stop.completed).map(stop=>{
         const original=sorted.find(appt=>appt.id===stop.id)
         if(!original?.sourceRow || stop.arrival<0 || stop.arrival>=1440)throw new Error('This route cannot be saved. Review the appointment times.')
         if(stop.fixed && stop.arrival!==stop.scheduled)throw new Error('Resolve the fixed-time conflict before applying this route.')
@@ -549,11 +552,13 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
           {!groomerMode && dayProposal && <div className="ai-result" style={{marginTop:12}}>
             <strong>Suggested day · {routeGroomer}</strong>
             <p>Leave your starting address at {displayClockFromMinutes(dayProposal.departure)}. Estimated return: {displayClockFromMinutes(dayProposal.homeArrival)}.</p>
-            <p>Review this proposed order before giving clients a time. Apply this route to update flexible appointment times and put the cards in route order. Fixed appointments keep their times.</p>
-            {dayProposal.items.map((stop,index)=><div key={stop.id} style={{padding:'9px 0',borderTop:'1px solid #e6e8ed'}}><strong>{index+1}. {stop.owner}</strong><div>{stop.fixed?'Fixed appointment':'Estimated arrival'}: {displayClockFromMinutes(stop.arrival)}</div><div>{stop.duration} min service · estimated finish {displayClockFromMinutes(stop.finish)}</div></div>)}
+            <p>Review this proposed order before giving clients a time. Apply this route to update flexible appointment times and put the cards in route order. Fixed appointments keep their times. Completed stops stay unchanged; only remaining appointments are updated.</p>
+            {dayProposal.items.map((stop,index)=><div key={stop.id} style={{padding:'9px 0',borderTop:'1px solid #e6e8ed'}}><strong>{index+1}. {stop.owner}</strong><div>{stop.completed?'Completed stop':stop.fixed?'Fixed appointment':'Estimated arrival'}: {displayClockFromMinutes(stop.arrival)}</div><div>{stop.duration} min service · estimated finish {displayClockFromMinutes(stop.finish)}</div></div>)}
             {dayProposal.warnings.map(warning=><p key={warning} role="alert" style={{color:'#a33'}}>{warning}</p>)}
+            {dayProposal.homeArrival>clockMinutesForDisplay(groomerConfig(routeGroomer)?.endTime || '17:30')&&getBusinessContext().role==='owner'&&<label style={{display:'flex',alignItems:'start',gap:8,fontSize:13,marginTop:10,padding:10,border:'1px solid #e5bf67',borderRadius:10,background:'#fff6df'}}><input type="checkbox" checked={allowLateReturn} onChange={e=>setAllowLateReturn(e.target.checked)}/>Allow a late return for this day: estimated home arrival {displayClockFromMinutes(dayProposal.homeArrival)}. Normal Home by stays unchanged.</label>}
+            {routeApplyBlock({proposal:dayProposal,end:clockMinutesForDisplay(groomerConfig(routeGroomer)?.endTime || '17:30'),role:getBusinessContext().role,allowLate:allowLateReturn,acceptedWarnings:acceptRouteWarnings})&&<p role="status" style={{fontSize:12,color:'#8a5d12'}}>{routeApplyBlock({proposal:dayProposal,end:clockMinutesForDisplay(groomerConfig(routeGroomer)?.endTime || '17:30'),role:getBusinessContext().role,allowLate:allowLateReturn,acceptedWarnings:acceptRouteWarnings})}</p>}
             {dayProposal.warnings.length>0 && <label style={{display:'flex',gap:8,fontSize:12,marginTop:10}}><input type="checkbox" checked={acceptRouteWarnings} onChange={e=>setAcceptRouteWarnings(e.target.checked)}/>I have reviewed the timing warnings.</label>}
-            <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:12}}><button className="primary-mini" type="button" disabled={applyingRoute || dayProposal.homeArrival>clockMinutesForDisplay(groomerConfig(routeGroomer)?.endTime || '17:30') || (dayProposal.warnings.length>0 && !acceptRouteWarnings) || dayProposal.items.some(stop=>stop.fixed && stop.arrival!==stop.scheduled)} onClick={applyRoute}>{applyingRoute?'Applying…':'Apply route to schedule'}</button><button className="secondary-btn" type="button" disabled={applyingRoute} onClick={()=>setDayProposal(null)}>Dismiss proposal</button></div>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:12}}><button className="primary-mini" type="button" disabled={applyingRoute || Boolean(routeApplyBlock({proposal:dayProposal,end:clockMinutesForDisplay(groomerConfig(routeGroomer)?.endTime || '17:30'),role:getBusinessContext().role,allowLate:allowLateReturn,acceptedWarnings:acceptRouteWarnings}))} onClick={applyRoute}>{applyingRoute?'Applying…':'Apply route to schedule'}</button><button className="secondary-btn" type="button" disabled={applyingRoute} onClick={()=>setDayProposal(null)}>Dismiss proposal</button></div>
           </div>}
 
           {mapOpenMessage && (
