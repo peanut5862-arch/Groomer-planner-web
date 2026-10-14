@@ -26,7 +26,7 @@ export default function LoginScreen({onSignedIn,registrationReady=CUSTOMER_SIGNU
     setPassword('');setConfirmation('')
     if(session){onSignedIn(session);return}
     setMode('confirm');setCooldown(60)
-    setMessage('Check your inbox and spam folder for a confirmation email. Open its link to confirm your email, then sign in here or continue on the website. If you already have an account, choose Sign in.')
+    setMessage('For a new account, check your inbox and spam folder for a confirmation link. If you used this email before, a new signup email may not be sent—choose Sign in or Forgot password instead.')
    }else{
     const {data,error}=await supabase.auth.signInWithPassword({email:email.trim(),password})
     if(error)throw error
@@ -43,7 +43,7 @@ export default function LoginScreen({onSignedIn,registrationReady=CUSTOMER_SIGNU
  return <div className="login-shell"><div className="login-card">
   <h1 style={{marginTop:0,marginBottom:8}}>Hey Betty</h1><div className="eyebrow" style={{marginBottom:20}}>Your grooming business, organized</div>
   <h2>{mode==='signup'?'Create your account':mode==='confirm'?'Check your email':mode==='reset'?'Reset your password':'Welcome back'}</h2>
-  <p className="login-copy">{mode==='signup'?'Start your own private business dashboard. Add your groomers, clients and appointments after confirming your email.':mode==='confirm'?`We sent confirmation instructions to ${email.trim()}.`:mode==='reset'?'Enter the email you use for Hey Betty. We’ll send a link to choose a new password.':'Sign in to access your clients, routes and schedule.'}</p>
+  <p className="login-copy">{mode==='signup'?'Start your own private business dashboard. Add your groomers, clients and appointments after confirming your email.':mode==='confirm'?`Check the next step for ${email.trim()}.`:mode==='reset'?'Enter the email you use for Hey Betty. We’ll send a link to choose a new password.':'Sign in to access your clients, routes and schedule.'}</p>
   {mode==='signup'&&!registrationReady&&<div className="login-message" role="status">Customer registration is coming soon. Please check back shortly.</div>}
   {mode!=='confirm' ? <form className="login-form" onSubmit={submit}>
    <label>Email<input type="email" autoComplete="email" required value={email} disabled={loading||(mode==='signup'&&!registrationReady)} onChange={e=>setEmail(e.target.value)}/></label>
@@ -57,7 +57,7 @@ export default function LoginScreen({onSignedIn,registrationReady=CUSTOMER_SIGNU
    <button type="button" className="text-btn" disabled={loading} onClick={()=>changeMode(mode==='signin'?'signup':'signin')}>{mode==='signin'?'New to Hey Betty? Create account':'Already have an account? Sign in'}</button>
    {mode==='signin'&&<button type="button" className="text-btn" disabled={loading} onClick={()=>changeMode('reset')}>Forgot password?</button>}
    {mode==='signin'&&<button type="button" className="text-btn" disabled={loading||!email.trim()} onClick={()=>{setMode('confirm');setMessage('Need a confirmation email? Check the email address above, then choose Resend confirmation email.')}}>Need to confirm your email?</button>}
-   {mode==='confirm'&&<button type="button" className="text-btn" disabled={loading} onClick={()=>changeMode('signup')}>Use a different email</button>}
+   {mode==='confirm'&&<><button type="button" className="text-btn" disabled={loading} onClick={()=>changeMode('reset')}>Forgot password?</button><button type="button" className="text-btn" disabled={loading} onClick={()=>changeMode('signup')}>Use a different email</button></>}
   </div>
  </div></div>
 }
