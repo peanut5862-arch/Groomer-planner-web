@@ -1344,7 +1344,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                       </div>
 
                       <DogPhoto householdId={selectedClient.household} dogName={dog} editable={!viewerMode}/>
-                      <DogBreed householdId={selectedClient.household} dogName={dog}/>
+                      <DogBreed householdId={selectedClient.household} dogName={dog} onSaved={breed=>setDogDetailsLookup(current=>({...current,[normalizedKey(dog)]:{...current[normalizedKey(dog)],breed}}))}/>
                       <RabiesRecord householdId={selectedClient.household} dogName={dog}/>
                       {!lastGroom && !lastBath ? (
                         <div style={{marginTop:10,padding:'9px 10px',borderRadius:11,background:selectedClient.scheduleInfo ? '#eef5fb' : '#f7f7f5',border:'1px solid #e3e2de',fontSize:11.5,color:'#59616e'}}>
