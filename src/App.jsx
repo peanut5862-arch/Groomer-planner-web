@@ -1805,8 +1805,8 @@ function dayPlanTimeline(stops,legs,{start,end,buffer=15}) {
     const drive=Number(legs[index]?.minutes)
     if(!Number.isFinite(drive))throw new Error('A driving estimate is missing.')
     const earliest=cursor+Math.ceil(drive)
-    const arrival=stop.fixed?Math.max(earliest,stop.scheduled):earliest
-    if(stop.fixed && earliest>stop.scheduled)warnings.push(`${stop.owner}: the route arrives ${Math.ceil(earliest-stop.scheduled)} minutes after the fixed time.`)
+    const arrival=stop.completed?stop.scheduled:stop.fixed?Math.max(earliest,stop.scheduled):earliest
+    if(stop.fixed && !stop.completed && earliest>stop.scheduled)warnings.push(`${stop.owner}: the route arrives ${Math.ceil(earliest-stop.scheduled)} minutes after the fixed time.`)
     const windowEnd=arrival
     const finish=windowEnd+stop.duration
     cursor=finish+buffer
