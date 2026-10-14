@@ -1,3 +1,4 @@
+import GroomingReport from './GroomingReport.jsx';
 import {requestWithTimeout} from './requestWithTimeout.js';
 import React, { useEffect, useState } from 'react';
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, getBusinessContext } from './businessConfig.js';
@@ -329,6 +330,7 @@ async function shareAppointmentAddress({owner,address}) {
 }
 
 function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,completing,confirmationSaving,paymentSaving,viewerMode=false}) {
+  const [showReport,setShowReport] = useState(false)
   const [showTextMenu,setShowTextMenu] = useState(false)
   const [showLate,setShowLate] = useState(false)
   const [etaLoading,setEtaLoading] = useState(false)
@@ -507,6 +509,10 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
             {communicationError && <div className="communication-error">{communicationError}</div>}
           </>
         )}
+        {!viewerMode && completed && !inactive && getBusinessContext().role==='owner' && <div onClick={event=>event.stopPropagation()} onKeyDown={event=>event.stopPropagation()}>
+          <button type="button" className="appt-text-btn" onClick={()=>setShowReport(true)}>Grooming report</button>
+          {showReport&&<GroomingReport appt={appt} onClose={()=>setShowReport(false)}/>}
+        </div>}
         {!viewerMode && !inactive && onPayment && (
           <div
             className="appointment-payment"
