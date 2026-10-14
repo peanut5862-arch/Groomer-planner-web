@@ -1,3 +1,4 @@
+import ClientNotes from './ClientNotes.jsx';
 import GroomingReport from './GroomingReport.jsx';
 import {requestWithTimeout} from './requestWithTimeout.js';
 import React, { useEffect, useState } from 'react';
@@ -330,6 +331,7 @@ async function shareAppointmentAddress({owner,address}) {
 }
 
 function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,completing,confirmationSaving,paymentSaving,viewerMode=false}) {
+  const [showVisitNotes,setShowVisitNotes] = useState(false)
   const [showReport,setShowReport] = useState(false)
   const [showTextMenu,setShowTextMenu] = useState(false)
   const [showLate,setShowLate] = useState(false)
@@ -416,8 +418,8 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
     }
   }
   return (
-    <div className={cardClass} style={{cursor:onOpen?'pointer':'default'}} onClick={onOpen} role={onOpen?'button':undefined} tabIndex={onOpen?0:undefined}
-      onKeyDown={onOpen ? event=>{ if(event.key==='Enter' || event.key===' '){event.preventDefault();onOpen()} } : undefined}>
+    <div className={cardClass} style={{cursor:onOpen?'pointer':'default'}} onClick={onOpen} role={onOpen?'group':undefined} aria-label={onOpen?`Appointment for ${appt.owner}`:undefined} tabIndex={onOpen?0:undefined}
+      onKeyDown={onOpen ? event=>{ if(event.target===event.currentTarget && (event.key==='Enter' || event.key===' ')){event.preventDefault();onOpen()} } : undefined}>
       <div className="time-pill">{displayClockTime(appt.time)}</div>
       <div className="appt-main">
         <div className="appt-topline">
@@ -438,6 +440,10 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
         {!viewerMode && clientAddress && <div className="appt-communication-row" onPointerDown={event=>event.stopPropagation()} onTouchStart={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} onKeyDown={event=>event.stopPropagation()}>
           <button type="button" className="appt-text-btn" aria-label={`Open address for ${appt.owner}`} onClick={openClientAddress}><MapPin size={13}/> Open address</button>
         </div>}
+        {!viewerMode && !inactive && <details style={{marginTop:10}} onToggle={event=>setShowVisitNotes(event.currentTarget.open)} onClick={event=>event.stopPropagation()} onKeyDown={event=>event.stopPropagation()}>
+          <summary style={{fontWeight:800,cursor:'pointer'}}>Photos & notes</summary>
+          {showVisitNotes&&<ClientNotes householdId={row['Household ID']||row.household_id||null} appt={appt}/>}
+        </details>}
         {appt.note && (
           <div style={{fontSize:11,color:'#7b828e',marginTop:5}}>
             {appt.note}
@@ -676,6 +682,7 @@ function todayAppointments(rows, dateKey, groomer, dogs) {
       return {
         id:`${row['Household ID'] || row.Owner}-${index}`,
         sourceRow:row,
+        rowIndex:rows.indexOf(row),
         weekStart:mondayForDate(String(row.Date).slice(0,10)),
         owner:String(row.Owner).trim(),
         dogs:String(row.Dogs || '').trim(),
