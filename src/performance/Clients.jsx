@@ -1,3 +1,4 @@
+import NewDogRabies,{saveNewDogRabies} from './NewDogRabies.jsx';
 import DogBreed from './DogBreed.jsx';
 import RabiesRecord from './RabiesRecord.jsx';
 import ClientNotes from './ClientNotes.jsx';
@@ -79,7 +80,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
     // Write during each field change so an app switch need not wait for an effect.
     if (newClientOpen && next && draftKey) {
       try {
-        localStorage.setItem(draftKey, JSON.stringify({version:1, form:next}))
+        localStorage.setItem(draftKey, JSON.stringify({version:1, form:next},(key,value)=>key==='rabies_file'?undefined:value))
         setDraftMessage('Draft saved on this device.')
       } catch { setDraftMessage('Draft could not be saved on this device. Keep this form open until you save the client.') }
     }
@@ -447,12 +448,12 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
 
   const commonFrequencyOptions = ['2','4','6','8','10','12']
   const blankAdditionalDog = () => ({
-    dog:'', breed:'', service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'',
+    dog:'', breed:'', rabies_expiry:'', rabies_file:null, service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'',
     groom_minutes:'', bath_minutes:'', partial_groom_minutes:'', frequency_weeks:'', frequency_mode:'preset',
     last_groom:'', last_bath:'', prior_service:'no', first_appointment_service:'Groom', grooming_notes:'', behavior_notes:'', medical_notes:'', alternate_service:false, alternate_service_1:'Groom', alternate_service_2:'Bath Only'
   })
   const blankDogForm = (client = null) => ({
-    household_id:client?.household || '', owner:client?.owner || '', original_dog:'', dog:'', breed:'',
+    household_id:client?.household || '', owner:client?.owner || '', original_dog:'', dog:'', breed:'', rabies_expiry:'', rabies_file:null,
     phone:client?.phone || '', groomer:client?.groomer || '', area:client?.area || '', area_mode:'existing', new_area:'',
     address:client?.address || '', city:client?.city || '', state:client?.state || 'TX', zip:client?.zip || '',
     service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'', groom_minutes:'', bath_minutes:'', partial_groom_minutes:'', frequency_weeks:'', frequency_mode:'preset', last_groom:'', last_bath:'',
@@ -593,6 +594,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
         savedCount += 1
         const savedRow = Array.isArray(data) ? data[0] : data
         householdId = String(savedRow?.household_id || savedRow?.householdId || householdId || '').trim() || null
+        if(householdId)setDogEditor(current=>current?{...current,household_id:householdId}:current)
       }
 
       if (closeNew && form.preferred_payment) {
@@ -637,6 +639,8 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
           if (dogDetailsError) throw dogDetailsError
         }
       }
+
+      if(householdId){for(const dog of dogsToSave)await saveNewDogRabies(householdId,dog)}
 
       if (bookingFirstVisit) {
         const appointmentDogs = dogsToSave.map(dog => {
@@ -947,6 +951,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
               <label>Owner<input value={dogEditor.owner} onChange={e=>setDogEditor({...dogEditor,owner:e.target.value})}/></label>
               <label>Dog name<input value={dogEditor.dog} onChange={e=>setDogEditor({...dogEditor,dog:e.target.value})}/></label>
               <label>Breed (optional)<input maxLength={100} value={dogEditor.breed || ''} placeholder="Example: Poodle mix" onChange={e=>setDogEditor({...dogEditor,breed:e.target.value})}/></label>
+              {!dogEditor.original_dog&&<NewDogRabies dog={dogEditor} onChange={patch=>setDogEditor(current=>({...current,...patch}))}/>}
               <label>Phone<input value={dogEditor.phone} onChange={e=>setDogEditor({...dogEditor,phone:e.target.value})}/></label>
               <label>Groomer<select value={dogEditor.groomer} onChange={e=>{
                 const next=e.target.value
@@ -1035,6 +1040,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                   </div>
                   <label style={{gridColumn:'1 / -1'}}>Dog name<input value={extraDog.dog || ''} onChange={e=>updateAdditionalDog(index,{dog:e.target.value})}/></label>
                   <label style={{gridColumn:'1 / -1'}}>Breed (optional)<input maxLength={100} value={extraDog.breed || ''} placeholder="Example: Poodle mix" onChange={e=>updateAdditionalDog(index,{breed:e.target.value})}/></label>
+                  <NewDogRabies dog={extraDog} onChange={patch=>updateAdditionalDog(index,patch)}/>
                   <label style={{gridColumn:'1 / -1'}}>Service<select value={extraDog.service || 'Groom'} onChange={e=>{
                     const next=e.target.value
                     updateAdditionalDog(index,{service:next,first_appointment_service:appointmentServiceOptions.includes(next)?next:(extraDog.first_appointment_service || 'Groom')})
