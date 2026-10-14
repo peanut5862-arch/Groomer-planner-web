@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, getBusinessContext } from './businessConfig.js';
 import { supabase } from "../supabase.js";
 import { Capacitor } from '@capacitor/core';
+import { AppLauncher } from '@capacitor/app-launcher';
 import { ChevronRight, MapPin, Route, WalletCards, MessageCircle, Share2 } from 'lucide-react';
 
 const API_ORIGIN = 'https://groomer-planner-web.vercel.app'
@@ -359,6 +360,15 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
   const cardGroomer = String(appt?.groomer || row.Groomer || '').trim().toLowerCase()
   const cardClass = ['appt-card',cardGroomer==='jen'?'groomer-jen':'',cardGroomer==='haley'?'groomer-haley':'',completed?'completed-card':''].filter(Boolean).join(' ')
   const clientAddress = appointmentAddress(appt,clientAddressLookup(dogs || []))
+  const openClientAddress = async () => {
+    const url = googleMapsAddressUrl(clientAddress)
+    if (!url) return
+    if (Capacitor.isNativePlatform()) {
+      try { const result = await AppLauncher.openUrl({url:url.replace(/^https?:\/\//i,'comgooglemapsurl://')}); if(result?.completed!==false)return } catch {}
+      try { const result = await AppLauncher.openUrl({url}); if(result?.completed!==false)return } catch {}
+    }
+    window.location.href = url
+  }
   const copyClientAddress = async () => {
     if (!clientAddress) { setCommunicationError('No saved street address for this client.'); return }
     try { await navigator.clipboard.writeText(clientAddress); setCommunicationError('Address copied.') }
@@ -423,6 +433,9 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
             <span><WalletCards size={14}/>${Math.round(appt.price)}</span>
           )}
         </div>
+        {!viewerMode && clientAddress && <div className="appt-communication-row" onPointerDown={event=>event.stopPropagation()} onTouchStart={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} onKeyDown={event=>event.stopPropagation()}>
+          <button type="button" className="appt-text-btn" aria-label={`Open address for ${appt.owner}`} onClick={openClientAddress}><MapPin size={13}/> Open address</button>
+        </div>}
         {appt.note && (
           <div style={{fontSize:11,color:'#7b828e',marginTop:5}}>
             {appt.note}
