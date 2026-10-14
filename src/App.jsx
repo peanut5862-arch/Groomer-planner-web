@@ -714,6 +714,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
       return {
         id: `${row['Household ID'] || row.Owner}-${row.Date || index}-${index}`,
         sourceRow:row,
+        rowIndex:rawRows.indexOf(row),
         weekStart:ymd(weekStart),
         date: String(row.Date || '').slice(0,10),
         day: row.Day || '',
