@@ -30,6 +30,7 @@ function useRememberScrollPosition(key, waitForSection = false) {
     let timers = []
     let scrollTimer = 0
     let lastStored = null
+    let userInteracted = false
     // A short loading fallback can temporarily collapse the page to scroll 0.
     // Keep the saved position intact until the deferred page has committed.
     let sectionReady = !waitForSection
@@ -41,7 +42,7 @@ function useRememberScrollPosition(key, waitForSection = false) {
       lastScrollRef.current = y
       const next = String(Math.round(y))
       if (next !== lastStored) {
-        sessionStorage.setItem(storageKey, next)
+        try { sessionStorage.setItem(storageKey, next) } catch {}
         lastStored = next
       }
     }
@@ -54,14 +55,17 @@ function useRememberScrollPosition(key, waitForSection = false) {
     }
 
     const restore = () => {
-      const saved = Number(sessionStorage.getItem(storageKey) || lastScrollRef.current || 0)
+      if(userInteracted)return
+      let stored
+      try { stored=sessionStorage.getItem(storageKey) } catch {}
+      const saved = Number(stored || lastScrollRef.current || 0)
       lastStored = String(Math.round(saved || 0))
 
       timers.forEach(clearTimeout)
       timers = []
 
       const doRestore = () => {
-        if (saved > 0) window.scrollTo(0, saved)
+        if (!userInteracted && saved > 0) window.scrollTo(0, saved)
       }
 
       doRestore()
@@ -72,15 +76,16 @@ function useRememberScrollPosition(key, waitForSection = false) {
 
     const visibility = () => {
       if (document.visibilityState === 'hidden') saveNow()
-      else restore()
+      else {userInteracted=false;restore()}
     }
 
     const sectionLoaded = () => {
+      if(sectionReady)return
       sectionReady = true
       restore()
     }
 
-    const stopRestoring = () => { timers.forEach(clearTimeout); timers = [] }
+    const stopRestoring = () => { userInteracted=true;timers.forEach(clearTimeout); timers = [] }
     window.addEventListener('touchstart', stopRestoring, { passive:true })
     window.addEventListener('wheel', stopRestoring, { passive:true })
     window.addEventListener('scroll', save, { passive:true })
