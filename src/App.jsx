@@ -1,3 +1,4 @@
+import BookingNotice from './performance/BookingNotice.jsx';
 import ClientNotes from './performance/ClientNotes.jsx';
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './performance/businessConfig.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -132,7 +133,7 @@ async function openExternalUrl(url) {
   window.location.href = clean
 }
 
-function Today({onReviewDay,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppointment,completingId,confirmingId,paymentSavingId,revision,dogs,viewerMode=false}) {
+function Today({onBookingSaved,onReviewDay,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppointment,completingId,confirmingId,paymentSavingId,revision,dogs,viewerMode=false}) {
   const business = useBusinessContext()
   const [groomer,setGroomer] = useState('All')
   useEffect(() => { if (groomer !== 'All' && !groomerNames().includes(groomer)) setGroomer('All') }, [business.revision,groomer])
@@ -193,6 +194,7 @@ function Today({onReviewDay,onOpen,onComplete,onUndo,onConfirmation,onPayment,on
 
   return (
     <section>
+      {!viewerMode&&<BookingNotice dogs={dogs} revision={`${revision}:${refresh}`} onSaved={onBookingSaved}/>}
       <div className="page-head">
         <div><div className="eyebrow">{dateLabel}</div><h1>Today</h1></div>
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
@@ -1712,7 +1714,7 @@ function PlannerApp({ onReady }) {
 
   let body
   if (tab === 'Today') {
-    body = <Today onReviewDay={setCloseoutDate} dogs={dogs} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onPayment={viewerMode?viewerNotice:savePaymentFromSchedule} onAddAppointment={viewerMode?viewerNotice:date=>setAddAppointment({open:true,date,preset:null})} completingId={completingId} confirmingId={confirmingId} paymentSavingId={paymentSavingId} revision={scheduleRevision} viewerMode={viewerMode}/>
+    body = <Today onBookingSaved={()=>setScheduleRevision(value=>value+1)} onReviewDay={setCloseoutDate} dogs={dogs} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onPayment={viewerMode?viewerNotice:savePaymentFromSchedule} onAddAppointment={viewerMode?viewerNotice:date=>setAddAppointment({open:true,date,preset:null})} completingId={completingId} confirmingId={confirmingId} paymentSavingId={paymentSavingId} revision={scheduleRevision} viewerMode={viewerMode}/>
   } else if (tab === 'Week') {
     body = <Week dogs={dogs} onAsk={ask} onOpen={setEditing} onComplete={viewerMode?viewerNotice:completeFromSchedule} onUndo={viewerMode?viewerNotice:undoCompleteFromSchedule} onConfirmation={viewerMode?viewerNotice:setClientConfirmation} onPayment={viewerMode?viewerNotice:savePaymentFromSchedule} onAddAppointment={viewerMode?viewerNotice:(date,selectedGroomer)=>setAddAppointment({open:true,date,preset:groomerNames().includes(selectedGroomer)?{groomer:selectedGroomer}:null})} onFillOpening={viewerMode?viewerNotice:payload=>setFillOpening({open:true,date:payload.date,groomer:payload.groomer,appointments:payload.appointments || []})} completingId={completingId} confirmingId={confirmingId} paymentSavingId={paymentSavingId} revision={scheduleRevision} viewerMode={viewerMode}/>
   } else if (tab === 'Month') {
