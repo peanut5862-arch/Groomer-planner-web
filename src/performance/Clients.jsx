@@ -447,12 +447,12 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
 
   const commonFrequencyOptions = ['2','4','6','8','10','12']
   const blankAdditionalDog = () => ({
-    dog:'', service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'',
+    dog:'', breed:'', service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'',
     groom_minutes:'', bath_minutes:'', partial_groom_minutes:'', frequency_weeks:'', frequency_mode:'preset',
     last_groom:'', last_bath:'', prior_service:'no', first_appointment_service:'Groom', grooming_notes:'', behavior_notes:'', medical_notes:'', alternate_service:false, alternate_service_1:'Groom', alternate_service_2:'Bath Only'
   })
   const blankDogForm = (client = null) => ({
-    household_id:client?.household || '', owner:client?.owner || '', original_dog:'', dog:'',
+    household_id:client?.household || '', owner:client?.owner || '', original_dog:'', dog:'', breed:'',
     phone:client?.phone || '', groomer:client?.groomer || '', area:client?.area || '', area_mode:'existing', new_area:'',
     address:client?.address || '', city:client?.city || '', state:client?.state || 'TX', zip:client?.zip || '',
     service:'Groom', groom_price:'', bath_price:'', partial_groom_price:'', groom_minutes:'', bath_minutes:'', partial_groom_minutes:'', frequency_weeks:'', frequency_mode:'preset', last_groom:'', last_bath:'',
@@ -518,6 +518,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
     last_bath:String(valueOf(row,'last_bath','Last Bath','last_bath_date','Last Bath Date') || '').slice(0,10),
     prior_service:(valueOf(row,'last_groom','Last Groom','last_groom_date','Last Groom Date') || valueOf(row,'last_bath','Last Bath','last_bath_date','Last Bath Date')) ? 'yes' : 'no',
     first_appointment_booked:false, first_appointment_date:'', first_appointment_groomer:firstGroomer(), first_appointment_time:'09:00', first_appointment_service:'Groom', first_appointment_fixed:false, first_appointment_override:false, additional_dogs:[],
+    breed:dogDetailsLookup[normalizedKey(valueOf(row,'dog','Dog'))]?.breed || '',
     grooming_notes:dogDetailsLookup[normalizedKey(valueOf(row,'dog','Dog'))]?.grooming_notes || '',
     behavior_notes:dogDetailsLookup[normalizedKey(valueOf(row,'dog','Dog'))]?.behavior_notes || '',
     medical_notes:dogDetailsLookup[normalizedKey(valueOf(row,'dog','Dog'))]?.medical_notes || '',
@@ -624,6 +625,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
         for (const dogForm of dogsToSave) {
           const {error:dogDetailsError} = await supabase.from('dog_details').upsert({business_id:getBusinessContext().businessId,
             household_id:householdId, dog_name:String(dogForm.dog||'').trim(),
+            breed:String(dogForm.breed||'').trim() || null,
             grooming_notes:String(dogForm.grooming_notes||'').trim() || null,
             behavior_notes:String(dogForm.behavior_notes||'').trim() || null,
             medical_notes:String(dogForm.medical_notes||'').trim() || null,
@@ -944,6 +946,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
             <div className="form-grid dog-entry-form">
               <label>Owner<input value={dogEditor.owner} onChange={e=>setDogEditor({...dogEditor,owner:e.target.value})}/></label>
               <label>Dog name<input value={dogEditor.dog} onChange={e=>setDogEditor({...dogEditor,dog:e.target.value})}/></label>
+              <label>Breed (optional)<input maxLength={100} value={dogEditor.breed || ''} placeholder="Example: Poodle mix" onChange={e=>setDogEditor({...dogEditor,breed:e.target.value})}/></label>
               <label>Phone<input value={dogEditor.phone} onChange={e=>setDogEditor({...dogEditor,phone:e.target.value})}/></label>
               <label>Groomer<select value={dogEditor.groomer} onChange={e=>{
                 const next=e.target.value
@@ -1031,6 +1034,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                     <button type="button" className="secondary-btn" onClick={()=>removeAdditionalDog(index)} style={{padding:'8px 10px'}}>Remove</button>
                   </div>
                   <label style={{gridColumn:'1 / -1'}}>Dog name<input value={extraDog.dog || ''} onChange={e=>updateAdditionalDog(index,{dog:e.target.value})}/></label>
+                  <label style={{gridColumn:'1 / -1'}}>Breed (optional)<input maxLength={100} value={extraDog.breed || ''} placeholder="Example: Poodle mix" onChange={e=>updateAdditionalDog(index,{breed:e.target.value})}/></label>
                   <label style={{gridColumn:'1 / -1'}}>Service<select value={extraDog.service || 'Groom'} onChange={e=>{
                     const next=e.target.value
                     updateAdditionalDog(index,{service:next,first_appointment_service:appointmentServiceOptions.includes(next)?next:(extraDog.first_appointment_service || 'Groom')})
