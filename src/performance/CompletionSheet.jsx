@@ -1,3 +1,4 @@
+import {renderMessage} from './messageTemplates.js';
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
 import React, { useEffect, useState } from 'react';
 import { supabase } from "../supabase.js";
@@ -17,14 +18,14 @@ function textDate(value) {
 
 function backInAreaMessage({date}) {
   const dateLabel = messageDateLabel(date)
-  return `No problem! We will be back in the area ${dateLabel}.`
+  return renderMessage('area',{date:dateLabel,business:businessSettings().businessName},businessSettings().messageTemplates)
 }
 
 function rescheduleMessage({owner,date,time,fixed=false}) {
   const first = String(owner || '').trim().split(/\s+/)[0] || 'there'
   const dateLabel = messageDateLabel(date)
   const timeLabel = fixed ? displayClockTime(time) : ''
-  return `Hi ${first}! I need to move your grooming appointment. Would ${dateLabel}${timeLabel ? ` at ${timeLabel}` : ''} work for you instead?`
+  return renderMessage('reschedule',{name:first,date:dateLabel,business:businessSettings().businessName,window:fixed?arrivalWindowLabel(time):'',time_phrase:timeLabel?` between ${arrivalWindowLabel(time)}`:''},businessSettings().messageTemplates)
 }
 
 function parseAppointmentDogServices(value) {
