@@ -1,3 +1,4 @@
+import {optimizeDayRoute} from '../server/dayRoute.js'
 import {requireBusiness,routeHome} from '../server/business.js'
 function send(res, status, payload) {
   res.status(status)
@@ -110,7 +111,8 @@ export default async function handler(req, res) {
 
   if(req.body?.mode==='plan-day') {
     if(business.role==='groomer')return send(res,403,{error:'Day planning is available to the business owner.'})
-    const plannedStops=clientStops.map((stop,index)=>({...stop,fixed:req.body.stops[index]?.fixed===true}))
+    const plannedStops=clientStops.map((stop,index)=>({...stop,fixed:req.body.stops[index]?.fixed===true,completed:req.body.stops[index]?.completed===true,scheduled:Number(req.body.stops[index]?.scheduled),duration:Number(req.body.stops[index]?.duration)}))
+    if(plannedStops.some(s=>!Number.isFinite(s.scheduled)||s.scheduled<0||s.scheduled>=1440||!Number.isFinite(s.duration)||s.duration<=0||s.duration>1440))return send(res,400,{error:"Every stop needs a valid time and service length."})
     try {
       const proposal=await optimizeDayRoute(plannedStops,homeAddress,async(origin,destination,intermediates)=>{
         const response=await fetch('https://routes.googleapis.com/directions/v2:computeRoutes',{
@@ -121,7 +123,7 @@ export default async function handler(req, res) {
         const body=await response.json()
         if(!response.ok || !body.routes?.[0])throw new Error(body.error?.message || 'Google could not plan this day.')
         return body.routes[0]
-      })
+      },{start:Number.isFinite(req.body.start)?Math.max(0,Math.min(1439,req.body.start)):540,buffer:Number.isFinite(req.body.buffer)?Math.max(0,Math.min(120,req.body.buffer)):0})
       return send(res,200,{...proposal,mapsUrl:mapsUrl(homeAddress,proposal.stops),proposalOnly:true})
     }catch(error){return send(res,502,{error:error.message})}
   }
@@ -191,26 +193,3 @@ export default async function handler(req, res) {
   }
 }
 
-// Optimize only flexible stops between fixed appointments; never cross a fixed anchor.
-async function optimizeDayRoute(stops,home,compute) {
-  let origin={id:'home-start',owner:'Starting address',address:home},pending=[],ordered=[],legs=[]
-  for(const destination of [...stops.filter(stop=>stop.fixed),{id:'home-end',owner:'Return home',address:home}]) {
-    const endIndex=destination.id==='home-end'?stops.length:stops.indexOf(destination)
-    const startIndex=origin.id==='home-start'?0:stops.indexOf(origin)+1
-    pending=stops.slice(startIndex,endIndex)
-    const route=await compute(origin,destination,pending)
-    const indices=route.optimizedIntermediateWaypointIndex || pending.map((_,index)=>index)
-    if(indices.length!==pending.length || new Set(indices).size!==pending.length || indices.some(index=>!Number.isInteger(index)||index<0||index>=pending.length))throw new Error('Google returned an invalid stop order.')
-    const segment=indices.map(index=>pending[index])
-    if(route.legs?.length!==segment.length+1)throw new Error('Google did not return every driving leg.')
-    const chain=[origin,...segment,destination]
-    route.legs.forEach((leg,index)=>{
-      const match=String(leg.duration || '').match(/^([0-9.]+)s$/)
-      if(!match)throw new Error('Google did not return a driving duration.')
-      legs.push({fromId:chain[index].id,toId:chain[index+1].id,minutes:Number(match[1])/60,miles:Number(leg.distanceMeters || 0)/1609.344})
-    })
-    ordered.push(...segment,...(destination.id==='home-end'?[]:[destination]))
-    origin=destination
-  }
-  return {stops:ordered,legs,totalMinutes:legs.reduce((sum,leg)=>sum+leg.minutes,0),totalMiles:legs.reduce((sum,leg)=>sum+leg.miles,0)}
-}
