@@ -1,3 +1,5 @@
+import DogBreed from './DogBreed.jsx';
+import RabiesRecord from './RabiesRecord.jsx';
 import ClientNotes from './ClientNotes.jsx';
 import DogPhoto from './DogPhoto.jsx';
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
@@ -1338,6 +1340,8 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
                       </div>
 
                       <DogPhoto householdId={selectedClient.household} dogName={dog} editable={!viewerMode}/>
+                      <DogBreed householdId={selectedClient.household} dogName={dog}/>
+                      <RabiesRecord householdId={selectedClient.household} dogName={dog}/>
                       {!lastGroom && !lastBath ? (
                         <div style={{marginTop:10,padding:'9px 10px',borderRadius:11,background:selectedClient.scheduleInfo ? '#eef5fb' : '#f7f7f5',border:'1px solid #e3e2de',fontSize:11.5,color:'#59616e'}}>
                           {selectedClient.scheduleInfo
