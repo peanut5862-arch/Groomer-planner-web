@@ -1028,8 +1028,8 @@ function GroomerStopCard({appt,onFinish,finishing}) {
 
         <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>
           {mapsUrl && <button type="button" onClick={()=>openExternalUrl(mapsUrl)} className="day-ai" style={{display:'inline-flex',alignItems:'center',gap:6}}><MapPin size={14}/>Open address</button>}
-          {!appt.inactive && !appt.finished && <button type="button" className="save" disabled={finishing || !paymentType} onClick={()=>onFinish(appt,paymentType)}>{finishing?'Saving…':'✓ Finished'}</button>}
-          {appt.finished && <div style={{fontSize:12,fontWeight:900,color:'#267447',padding:'8px 0'}}>✓ Finished</div>}
+          {!appt.inactive && !appt.finished && <button type="button" className="primary-mini" style={{minHeight:44,padding:"11px 18px",borderRadius:12,fontSize:14,fontWeight:800,justifyContent:"center",boxShadow:"none",opacity:finishing||!paymentType?0.5:1}} aria-label={`Mark ${appt.owner} finished`} aria-busy={finishing} disabled={finishing || !paymentType} onClick={()=>onFinish(appt,paymentType)}>{finishing?'Saving…':'✓ Finished'}</button>}
+          {appt.finished && <div style={{display:'inline-flex',alignItems:'center',minHeight:44,fontSize:14,fontWeight:800,color:'#267447',padding:'10px 16px',border:'1px solid #bddcc5',borderRadius:12,background:'#edf7ef'}}>✓ Finished</div>}
         </div>
         {!appt.inactive && !appt.finished && !canFinish && <div style={{fontSize:12,color:"#68758a",marginTop:8}}>Payment and finishing are available on the appointment day.</div>}
         <ClientNotes appt={appt}/>
