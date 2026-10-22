@@ -1,3 +1,4 @@
+import {taxTotal} from './salesTax.js';
 import {renderMessage} from './messageTemplates.js';
 import ClientNotes from './ClientNotes.jsx';
 import GroomingReport from './GroomingReport.jsx';
@@ -350,6 +351,9 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
   const savedAmount = Number.isFinite(savedAmountRaw) ? savedAmountRaw : null
   const paymentPaid = savedPaymentStatus.toLowerCase() === 'paid'
   const [showPayment,setShowPayment] = useState(false)
+  const [applyTax,setApplyTax]=useState(()=>appt.sourceRow?.['Sales Tax Rate']!==undefined?Number(appt.sourceRow['Sales Tax Rate'])>0:Boolean(businessSettings().salesTax?.enabled))
+  const [taxRate,setTaxRate]=useState(()=>Number(appt.sourceRow?.['Sales Tax Rate']??businessSettings().salesTax?.rate??0))
+  const validTax=Number.isFinite(Number(taxRate))&&Number(taxRate)>=0&&Number(taxRate)<=100
   const [paymentMethod,setPaymentMethod] = useState(
     savedPaymentMethod || (['Cash','Check'].includes(groomerPaymentType) ? groomerPaymentType : '')
   )
@@ -560,6 +564,8 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
                   </select>
                 </label>
 
+                <label style={{display:'flex',alignItems:'center',gap:8}}><input type="checkbox" style={{width:20}} checked={applyTax} onChange={e=>setApplyTax(e.target.checked)}/>Add sales tax</label>{applyTax&&<label>Tax rate (%)<input type="number" min="0" max="100" step="0.0001" value={taxRate} onChange={e=>setTaxRate(e.target.value)}/></label>}
+                {Number.isFinite(appt.price)&&validTax&&<div>Sales tax: ${taxTotal(appt.price,applyTax?Number(taxRate):0).tax.toFixed(2)}</div>}
                 <label>
                   Tip
                   <div className="tip-input-wrap"><span>$</span><input inputMode="decimal" type="number" min="0" step="0.01" placeholder="0" value={tipInput} onChange={event=>setTipInput(event.target.value)}/></div>
@@ -567,7 +573,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
 
                 {Number.isFinite(appt.price) && (
                   <div className="payment-preview">
-                    Total collected if paid: <strong>${(appt.price + Math.max(0,Number(tipInput || 0) || 0)).toFixed(2)}</strong>
+                    Total collected if paid: <strong>${(taxTotal(appt.price,applyTax&&validTax?Number(taxRate):0,Math.max(0,Number(tipInput || 0) || 0)).total).toFixed(2)}</strong>
                   </div>
                 )}
 
@@ -577,11 +583,11 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
                   <button
                     type="button"
                     className="save"
-                    disabled={paymentSaving || !paymentMethod}
+                    disabled={paymentSaving || !paymentMethod || (applyTax&&!validTax)}
                     onClick={async()=>{
                       if(!paymentMethod){setPaymentError('Choose a payment method first.');return}
                       const tip=Math.max(0,Number(tipInput || 0) || 0)
-                      const ok=await onPayment(appt,'Paid',paymentMethod,tip)
+                      const ok=await onPayment(appt,'Paid',paymentMethod,tip,applyTax?Number(taxRate):0)
                       if(ok){setShowPayment(false);setPaymentError('')}
                     }}
                   >
