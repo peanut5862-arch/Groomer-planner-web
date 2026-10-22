@@ -26,6 +26,10 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
       initialDraft.current = saved?.version === 1 && saved.form && typeof saved.form === 'object' && !Array.isArray(saved.form) ? saved.form : null
     } catch { initialDraft.current = null }
   }
+  const [removedClients,setRemovedClients]=useState([]),[showRemoved,setShowRemoved]=useState(false),[removeConfirm,setRemoveConfirm]=useState(null),[removeBusy,setRemoveBusy]=useState(false),[removeError,setRemoveError]=useState('')
+  const ownerMode=getBusinessContext().role==='owner'
+  useEffect(()=>{if(!ownerMode)return;let live=true;supabase.from('planner_removed_clients').select('household_id').then(({data,error})=>{if(live){if(error)setRemoveError('Could not load removed clients. Refresh to try again.');else setRemovedClients((data||[]).map(r=>r.household_id))}});return()=>{live=false}},[revision,ownerMode])
+  async function removeClient(client,restore=false){if(removeBusy)return;setRemoveBusy(true);setRemoveError('');try{const {error}=await supabase.rpc('remove_planner_client',{p_household:client.household,p_restore:restore});if(error)throw error;setRemovedClients(current=>restore?current.filter(h=>h!==client.household):[...current,client.household]);setSelectedClient(null);setRemoveConfirm(null);onDataChanged?.(restore?'Client restored.':'Client removed. History and existing appointments were kept.')}catch(e){setRemoveError(e.message||'Could not update the client.')}finally{setRemoveBusy(false)}}
   const [query, setQuery] = useState('')
   const [clientFilter, setClientFilter] = useState('all')
   const [areaFilter, setAreaFilter] = useState('all')
@@ -275,10 +279,10 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
       const matchesSearch = haystack.includes(query.trim().toLowerCase())
       const needsScheduling = !client.dueInfo.scheduled && ['Overdue','Due today','Due this week','Due soon'].includes(client.dueInfo.status)
       const matchesArea = areaFilter === 'all' || normalizedKey(client.area) === normalizedKey(areaFilter)
-      return matchesSearch && (clientFilter === 'all' || (needsScheduling && matchesArea))
+      return (removedClients.includes(client.household)===showRemoved) && matchesSearch && (clientFilter === 'all' || (needsScheduling && matchesArea))
     })
     .sort((a,b) => String(a.owner || '').trim().localeCompare(String(b.owner || '').trim(), 'en', {sensitivity:'base', numeric:true})),
-    [preparedClients,query,clientFilter,areaFilter]
+    [preparedClients,query,clientFilter,areaFilter,removedClients,showRemoved]
   )
 
   useEffect(() => {
@@ -895,6 +899,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
           : 'Clients are listed A–Z by owner name. Already-booked clients show Scheduled instead of Overdue.'}
       </div>
 
+      {ownerMode&&<button type="button" className="secondary-btn" onClick={()=>setShowRemoved(v=>!v)}>{showRemoved?'Show current clients':`Deleted clients (${removedClients.length})`}</button>}{removeError&&<p role="alert">{removeError}</p>}
       {loading && <div className="prototype-note">Loading your clients…</div>}
       {error && <div className="login-message">{error}</div>}
       {!loading && !error && filtered.length === 0 && (
@@ -1399,6 +1404,7 @@ function Clients({ dogs, loading, error, onOpen, revision, onDataChanged, openCl
               <button type="button" className="primary-mini" onClick={() => { const form=blankDogForm(selectedClient); setDogMessage(''); setDogEditor(form); setSelectedClient(null) }}><Plus size={15}/>Add Dog</button>
             </div>}
 
+            {ownerMode&&<div style={{marginTop:16,padding:12,border:'1px solid #e1d6d6',borderRadius:12}}>{removedClients.includes(selectedClient.household)?<button className="secondary-btn" disabled={removeBusy} onClick={()=>removeClient(selectedClient,true)}>Restore client</button>:removeConfirm===selectedClient.household?<><p>Remove {selectedClient.owner} from the client list and recurring planning? Existing appointments, notes, photos and payment history stay saved. You can restore the client from Deleted clients.</p><button className="secondary-btn" disabled={removeBusy} onClick={()=>removeClient(selectedClient)}>Yes, delete client</button><button className="secondary-btn" disabled={removeBusy} onClick={()=>setRemoveConfirm(null)}>Keep client</button></>:<button className="secondary-btn" onClick={()=>setRemoveConfirm(selectedClient.household)}>Delete client</button>}{removeError&&<p role="alert">{removeError}</p>}</div>}
             <ClientNotes householdId={selectedClient.household} editable={!viewerMode}/>
             <div style={{marginTop:18}}>
               <div className="eyebrow" style={{marginBottom:8}}>Appointment history</div>
