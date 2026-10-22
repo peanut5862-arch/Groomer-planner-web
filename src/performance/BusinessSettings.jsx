@@ -28,6 +28,7 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
   if(inviteId && draft.groomers.find(g=>g.id===inviteId)?.active===false){setError('Activate this groomer before sending an invitation.');return}
   const next={...draft,businessName:draft.businessName.trim(),groomers:draft.groomers.map(g=>({...g,name:g.name.trim(),homeAddress:g.homeAddress.trim()}))}
   const errors=[...validateBusinessSettings(next),...templateErrors(next.messageTemplates)]
+  if(next.salesTax&&(!Number.isFinite(next.salesTax.rate)||next.salesTax.rate<0||next.salesTax.rate>100))errors.push("Enter a tax rate from 0 to 100 percent.")
   if(errors.length){setError(errors.join(' '));return}
   busy.current=true;setSaving(true);setError('');setInviteNotice('')
   try{
@@ -59,6 +60,7 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
     <label>Business name<input value={draft.businessName} maxLength={100} onChange={e=>patch({businessName:e.target.value})}/></label>
     <label>Time zone<select value={draft.timeZone} onChange={e=>patch({timeZone:e.target.value})}>{[...new Set([draft.timeZone,...zones])].map(zone=><option key={zone}>{zone}</option>)}</select></label>
     <p className="settings-help">Use the time zone where your business works. It controls Today and appointment dates.</p>
+    <h3>Sales tax</h3><label className="check-label"><input type="checkbox" checked={Boolean(draft.salesTax?.enabled)} onChange={e=>patch({salesTax:{...draft.salesTax,enabled:e.target.checked}})}/>Apply tax by default when recording a payment</label><label>Default tax rate (%)<input type="number" min="0" max="100" step="0.0001" value={draft.salesTax?.rate??0} onChange={e=>patch({salesTax:{...draft.salesTax,rate:Number(e.target.value)}})}/></label><p className="settings-help">Set the rate applicable to your business. You can turn tax off or change it for a specific payment. Tax is calculated on the service subtotal, excluding tips. Previous payments stay unchanged.</p>
     <h3>Payment instructions</h3><p className="settings-help">Add your own payment links or contact details. These appear in payment text drafts.</p>
     {['Venmo','PayPal','Cash App','Zelle','Apple Pay'].map(method=><label key={method}>{method}<input value={draft.paymentInstructions?.[method]||''} maxLength={500} placeholder={`Your ${method} details`} onChange={e=>patch({paymentInstructions:{...draft.paymentInstructions,[method]:e.target.value}})}/></label>)}
    </>}
