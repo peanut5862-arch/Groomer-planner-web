@@ -103,6 +103,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
   const cancelled = ['cancelled','canceled'].includes(String(row['Appointment Status'] || '').trim().toLowerCase())
   const missed = ['missed','no show','no-show','noshow'].some(value => String(row['Appointment Status'] || row.Status || '').trim().toLowerCase().includes(value))
   const householdDogs = (dogs || []).filter(dog=>String(dog.household_id || dog['Household ID'] || '').trim()===String(row['Household ID'] || '').trim())
+  useEffect(()=>{setServiceRows(current=>{const names=new Set(current.map(d=>d.name.toLowerCase()));const extra=householdDogs.filter(d=>!names.has(String(d.dog||d.Dog||'').toLowerCase())).map(d=>({name:String(d.dog||d.Dog),service:canonicalServiceLabel(d.service_pattern||d.service||'Groom'),included:false}));return extra.length?[...current,...extra]:current})},[appt.id,dogs])
   const servicePriceFor = (name,service) => {
     const dog = householdDogs.find(item=>String(item.dog || item.Dog || '').trim().toLowerCase()===String(name || '').trim().toLowerCase())
     if (!dog) return null
@@ -115,10 +116,11 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
     const raw = service==='Partial Groom' ? (dog.partial_groom_minutes ?? dog['Partial Groom Minutes']) : (service==='Bath' || service==='Bath Only') ? (dog.bath_minutes ?? dog['Bath Minutes']) : (dog.groom_minutes ?? dog['Groom Minutes'] ?? dog.minutes ?? dog.Minutes)
     const n=Number(String(raw ?? '').replace(/[^0-9.]/g,'')); return Number.isFinite(n)?n:null
   }
-  const serviceTotal = serviceRows.reduce((sum,item)=>{ const n=servicePriceFor(item.name,item.service); return sum+(Number.isFinite(n)?n:0) },0)
-  const serviceMinutesTotal = serviceRows.reduce((sum,item)=>{ const n=serviceMinutesFor(item.name,item.service); return sum+(Number.isFinite(n)?n:0) },0)
-  const missingServicePrice = serviceRows.some(item=>!Number.isFinite(servicePriceFor(item.name,item.service)))
-  const missingServiceMinutes = serviceRows.some(item=>!Number.isFinite(serviceMinutesFor(item.name,item.service)))
+  const includedServices=serviceRows.filter(item=>item.included!==false)
+  const serviceTotal = includedServices.reduce((sum,item)=>{ const n=servicePriceFor(item.name,item.service); return sum+(Number.isFinite(n)?n:0) },0)
+  const serviceMinutesTotal = includedServices.reduce((sum,item)=>{ const n=serviceMinutesFor(item.name,item.service); return sum+(Number.isFinite(n)?n:0) },0)
+  const missingServicePrice = includedServices.some(item=>!Number.isFinite(servicePriceFor(item.name,item.service)))
+  const missingServiceMinutes = includedServices.some(item=>!Number.isFinite(serviceMinutesFor(item.name,item.service)))
   const restrictions = householdDogs.map(dog=>String(dog.groomer || dog.Groomer || '').trim()).filter(name=>groomerNames().includes(name))
   const assignedGroomers = [...new Set(restrictions)]
   const groomers = groomerNames()
@@ -300,7 +302,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
       if(!groomers.includes(targetGroomer)){setError('Choose a groomer.');return}
       if (rescheduleOverrideReasons.length && !manualOverride) { setError('Turn on Manual override to save outside the normal groomer rules.'); return }
     }
-    if (mode==='services' && (!serviceRows.length || serviceRows.some(item=>!item.name || !appointmentServiceOptions.includes(item.service)))) {
+    if (mode==='services' && (!includedServices.length || includedServices.some(item=>!item.name || !appointmentServiceOptions.includes(item.service)))) {
       setError('Choose a service for every dog in this appointment.');return
     }
     if (mode==='services' && missingServicePrice) { setError('Add a price for each selected service on the dog profile first.'); return }
@@ -312,7 +314,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
       const {data,error:saveError} = mode==='missed'
           ? await supabase.rpc('mark_grooming_no_show',{...params,p_missed_date:originalDate})
           : mode==='services'
-            ? await supabase.rpc('update_grooming_appointment_services',{...params,p_dogs:formatAppointmentDogServices(serviceRows),p_price:missingServicePrice?null:serviceTotal,p_minutes:missingServiceMinutes?null:serviceMinutesTotal})
+            ? await supabase.rpc('update_grooming_appointment_services',{...params,p_dogs:formatAppointmentDogServices(includedServices),p_price:missingServicePrice?null:serviceTotal,p_minutes:missingServiceMinutes?null:serviceMinutesTotal})
           : mode==='edit'
             ? await supabase.rpc('update_grooming_appointment_details',{...params,p_time:editTime,p_groomer:editGroomer,p_fixed:editFixed,p_note:note.trim() || null})
           : mode==='reschedule'
@@ -469,10 +471,10 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
             </div>}
           </>}
           {mode==='services' && <>
-            <div className="prototype-note" style={{textAlign:'left',marginBottom:12}}>Set what each dog is getting for this appointment only. This does not change the dog’s usual service on the client profile.</div>
+            <div className="prototype-note" style={{textAlign:'left',marginBottom:12}}>Select the dogs being groomed and their services for this appointment only. This does not change the dog’s usual service on the client profile.</div>
             <div className="form-grid">
-              {serviceRows.map((item,index)=><label key={`${item.name}-${index}`} style={{gridColumn:'1 / -1'}}>{item.name}
-                <select value={item.service} disabled={saving} onChange={event=>setServiceRows(rows=>rows.map((row,i)=>i===index?{...row,service:event.target.value}:row))}>
+              {serviceRows.map((item,index)=><label key={`${item.name}-${index}`} style={{gridColumn:'1 / -1'}}><span><input type="checkbox" checked={item.included!==false} disabled={saving} onChange={event=>setServiceRows(rows=>rows.map((r,i)=>i===index?{...r,included:event.target.checked}:r))}/> {item.name}</span>
+                <select value={item.service} disabled={saving||item.included===false} onChange={event=>setServiceRows(rows=>rows.map((row,i)=>i===index?{...row,service:event.target.value}:row))}>
                   {appointmentServiceOptions.map(service=><option key={service}>{service}</option>)}
                 </select>
               </label>)}
