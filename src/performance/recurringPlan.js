@@ -30,9 +30,20 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
  }
  while(tasks.length){tasks.sort((a,b)=>a.due.localeCompare(b.due)||a.c.owner.localeCompare(b.c.owner)||a.c.dog.localeCompare(b.c.dog));const t=tasks.shift();if(t.due>until)continue
   const {c,options,either}=t;let chosen=null
+  // Reserve a household visit as one unit. Scheduling each dog separately
+  // allowed buffers or another area's preferred day to split the cards.
+  const visit=[t]
+  let sharedOptions=options
+  for(const other of tasks){
+   if(other.c.household!==c.household||other.due!==t.due)continue
+   const common=sharedOptions.filter(o=>other.options.some(candidate=>candidate.g.name===o.g.name))
+   if(common.length){visit.push(other);sharedOptions=common}
+  }
+  for(const sibling of visit.slice(1))tasks.splice(tasks.indexOf(sibling),1)
+  const required=visit.reduce((sum,item)=>sum+item.c.duration,0)
   const assignmentKey=`${c.household}|${t.due}`,assigned=householdAssignments.get(assignmentKey)
   const candidates=[]
-  for(const {g,weekdays} of options){
+  for(const {g,weekdays} of sharedOptions){
    if(either && assigned && assigned!==g.name)continue
    for(let i=0;i<8;i++){
     const date=addDays(t.due,i),wd=day(date).getUTCDay()
@@ -45,8 +56,6 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
     const returnMinutes=Number.isFinite(home)?Math.ceil(home):0
     const last=slots.at(-1)
     if(last){const lastHome=returnHome[`${last.household}|${g.name}`];if(requireReturnHome&&!Number.isFinite(lastHome))continue;if(last.end+Math.ceil(lastHome||0)>end)continue}
-    const siblings=tasks.filter(other=>other.c.household===c.household&&other.due===t.due&&other.options.some(o=>o.g.name===g.name))
-    const required=c.duration+siblings.reduce((sum,other)=>sum+other.c.duration+buffer,0)
     for(const slot of slots){if(start+required+buffer<=slot.start)break;start=Math.max(start,slot.end+buffer)}
     if(start+required+returnMinutes>end)continue
     const sameArea=[...events.filter(e=>e.active),...proposals].filter(e=>e.date===date&&e.groomer===g.name&&norm(e.area)===norm(c.area)).length
@@ -56,11 +65,17 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
   }
   candidates.sort((a,b)=>b.sameArea-a.sameArea || a.date.localeCompare(b.date) || b.weekdayStrength-a.weekdayStrength || a.load-b.load || a.groomer.localeCompare(b.groomer))
   chosen=candidates[0]
-  if(!chosen){issues.push({owner:c.owner,dog:c.dog,reason:`No opening that allows the drive home by the end time near ${t.due}.`});continue}
-  const id=`recurring:${c.household}:${norm(c.dog)}:${t.due}`
-  if(either)householdAssignments.set(assignmentKey,chosen.groomer)
-  proposals.push({...c,...chosen,id,due:t.due,assignmentReason:either?'Suggested from area weekdays and available space.':''});const k=`${chosen.date}|${chosen.groomer}`,slots=occupied.get(k)||[],start=minutes(chosen.time);slots.push({start,end:start+c.duration,household:c.household});occupied.set(k,slots)
-  tasks.push({...t,due:addDays(chosen.date,Math.round(c.frequency*7))})
+  if(!chosen){for(const item of visit)issues.push({owner:item.c.owner,dog:item.c.dog,reason:`No opening that allows the drive home by the end time near ${t.due}.`});continue}
+  let visitStart=minutes(chosen.time)
+  for(const item of visit){
+   const dog=item.c,id=`recurring:${dog.household}:${norm(dog.dog)}:${item.due}`
+   if(item.either)householdAssignments.set(`${dog.household}|${item.due}`,chosen.groomer)
+   proposals.push({...dog,...chosen,time:clock(visitStart),id,due:item.due,assignmentReason:item.either?'Suggested from area weekdays and available space.':''})
+   visitStart+=dog.duration
+   tasks.push({...item,due:addDays(chosen.date,Math.round(dog.frequency*7))})
+  }
+  const k=`${chosen.date}|${chosen.groomer}`,slots=occupied.get(k)||[],start=minutes(chosen.time)
+  slots.push({start,end:start+required,household:c.household});occupied.set(k,slots)
  }
  // Dogs due on the same day for one household are one stop.
  const groups=new Map();for(const p of proposals){const key=`${p.household}|${p.date}|${p.groomer}`;const group=[...groups.values()].find(v=>v.household===p.household&&v.date===p.date&&v.groomer===p.groomer&&minutes(v.time)+v.duration===minutes(p.time));if(group && minutes(group.time)+group.duration===minutes(p.time)){group.dogs.push({dog:p.dog,service:p.service});group.duration+=p.duration;group.price+=p.price;group.ids.push(p.id);group.servicePending=Boolean(group.servicePending||p.servicePending)}else groups.set(key+':'+p.time,{...p,dogs:[{dog:p.dog,service:p.service}],ids:[p.id]})}
