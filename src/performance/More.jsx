@@ -1,3 +1,4 @@
+import {monthRange,reportRows} from './reportingPeriod.js'
 const SalesTaxLog=lazy(()=>import('./SalesTaxLog.jsx'))
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
 import React, { lazy, Suspense, useEffect, useState } from 'react';
@@ -23,11 +24,15 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
   const today = businessDateKey()
   const [weekStart,setWeekStart] = usePlannerWeekStart()
   const [weekRecord,setWeekRecord] = useState(null)
+  const [period,setPeriod]=useState('week')
+  const [month,setMonth]=useState(today.slice(0,7))
+  const [monthWeeks,setMonthWeeks]=useState([])
+  const range=monthRange(month)
   const [futureWeeks,setFutureWeeks] = useState([])
   const [loading,setLoading] = useState(true)
   const [error,setError] = useState('')
 
-  const money = value => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(Number(value || 0))
+  const money = value => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(Number(value || 0))
   const prettyDate = key => new Date(`${key}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',month:'short',day:'numeric'})
   const shiftWeek = amount => {
     const date = new Date(`${weekStart}T12:00:00Z`)
@@ -50,26 +55,27 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
       const futureEndDate = new Date(`${today}T12:00:00Z`)
       futureEndDate.setUTCDate(futureEndDate.getUTCDate()+84)
       const futureEndWeek = mondayForDate(futureEndDate.toISOString().slice(0,10))
-      const [weekResult,futureResult] = await Promise.all([
+      const [weekResult,futureResult,monthResult] = await Promise.all([
         supabase.from('weekly_drafts').select('week_start,plan_json,status,confirmed_at').eq('week_start',weekStart).limit(1),
-        supabase.from('weekly_drafts').select('week_start,plan_json,status').gte('week_start',currentWeek).lte('week_start',futureEndWeek).order('week_start',{ascending:true})
+        supabase.from('weekly_drafts').select('week_start,plan_json,status').gte('week_start',currentWeek).lte('week_start',futureEndWeek).order('week_start',{ascending:true}),
+        period==='month'?supabase.from('weekly_drafts').select('week_start,plan_json').gte('week_start',mondayForDate(range.from)).lte('week_start',mondayForDate(range.until)).order('week_start',{ascending:true}):Promise.resolve({data:[]})
       ])
       if(cancelled) return
-      if(weekResult.error || futureResult.error){
-        setError(weekResult.error?.message || futureResult.error?.message || 'Could not load business dashboard.')
+      if(weekResult.error || futureResult.error || monthResult.error){
+        setError(weekResult.error?.message || futureResult.error?.message || monthResult.error?.message || 'Could not load business dashboard.')
         setWeekRecord(null)
-        setFutureWeeks([])
+        setFutureWeeks([]);setMonthWeeks([])
       } else {
         setWeekRecord(weekResult.data?.[0] || null)
-        setFutureWeeks(futureResult.data || [])
+        setFutureWeeks(futureResult.data || []);setMonthWeeks(monthResult.data || [])
       }
       setLoading(false)
     }
     load()
     return ()=>{cancelled=true}
-  },[weekStart,revision,today])
+  },[weekStart,revision,today,period,month])
 
-  const rows = Array.isArray(weekRecord?.plan_json) ? weekRecord.plan_json : []
+  const rows = period==='month'?reportRows(monthWeeks,range.from,range.until):(Array.isArray(weekRecord?.plan_json) ? weekRecord.plan_json : [])
   const lower = value => String(value || '').trim().toLowerCase()
   const rowState = row => {
     const appt = lower(row?.['Appointment Status'])
@@ -166,15 +172,15 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
         <div><div className="eyebrow">Business</div><h1>More</h1></div>
       </div>
 
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,marginBottom:14}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:12,marginBottom:14}}>
         <div>
-          <div style={smallLabel}>Week summary</div>
-          <div style={{fontSize:18,fontWeight:900,color:'#172038',marginTop:3}}>{prettyDate(weekStart)} – {prettyDate(endKey)}</div>
+          <div className="segmented" role="group" aria-label="Summary period" style={{marginBottom:8}}><button type="button" aria-pressed={period==='week'} className={period==='week'?'active':''} onClick={()=>setPeriod('week')}>Week</button><button type="button" aria-pressed={period==='month'} className={period==='month'?'active':''} onClick={()=>setPeriod('month')}>Month</button></div><div style={smallLabel}>{period==='month'?'Month summary':'Week summary'}</div>
+          <div style={{fontSize:18,fontWeight:900,color:'#172038',marginTop:3}}>{period==='month'?new Date(`${month}-01T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',month:'long',year:'numeric'}):`${prettyDate(weekStart)} – ${prettyDate(endKey)}`}</div>
         </div>
-        <div className="month-arrows">
+        {period==='month'?<label style={{maxWidth:'100%'}}>Month<input style={{display:'block',maxWidth:'100%'}} type="month" aria-label="Summary month" value={month} onChange={event=>{if(/^\d{4}-(0[1-9]|1[0-2])$/.test(event.target.value))setMonth(event.target.value)}}/></label>:<div className="month-arrows">
           <button className="icon-btn" type="button" onClick={()=>shiftWeek(-1)}><ChevronLeft size={18}/></button>
           <button className="icon-btn" type="button" onClick={()=>shiftWeek(1)}><ChevronRight size={18}/></button>
-        </div>
+        </div>}
       </div>
 
       {loading && <div className="prototype-note">Loading business dashboard…</div>}
@@ -193,7 +199,7 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
           <div style={{...reportCard,background:'#fff4ed'}}><div style={smallLabel}>Service revenue after commission</div><div style={metricValue}>{money(teamTotals.ownerShare)}</div><div style={{fontSize:11,color:'#8a5a3b',marginTop:5}}>completed service revenue less team commission</div></div>
         </div>
 
-        {!weekRecord && <div className="prototype-note" style={{marginTop:12}}>No saved schedule exists for this week yet.</div>}
+        {!(period==='month'?monthWeeks.length:weekRecord) && <div className="prototype-note" style={{marginTop:12}}>No saved schedule exists for this {period} yet.</div>}
 
         <div style={{...reportCard,marginTop:14}}>
           <div className="section-title" style={{margin:'0 0 12px'}}><h3>Groomer totals</h3></div>
@@ -221,11 +227,11 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
             <div style={{padding:11,borderRadius:12,background:'#f5f2ff'}}><div style={smallLabel}>Needs reply</div><strong style={{fontSize:19,color:'#5e4aa8'}}>{confirmations['Needs reply']}</strong></div>
             <div style={{padding:11,borderRadius:12,background:'#fff0f0'}}><div style={smallLabel}>Can't make it</div><strong style={{fontSize:19,color:'#a83d3d'}}>{confirmations["Can't make it"]}</strong></div>
           </div>
-          <button type="button" className="ghost" style={{width:'100%',marginTop:10}} onClick={()=>onAsk?.('Who still needs to confirm this week?')}>Ask Betty who still needs confirmation</button>
+          {period==='week'&&<button type="button" className="ghost" style={{width:'100%',marginTop:10}} onClick={()=>onAsk?.('Who still needs to confirm this week?')}>Ask Betty who still needs confirmation</button>}
         </div>
 
         <div style={{...reportCard,marginTop:14}}>
-          <div className="section-title" style={{margin:'0 0 12px'}}><h3>Changes this week</h3></div>
+          <div className="section-title" style={{margin:'0 0 12px'}}><h3>Changes this {period}</h3></div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
             <div style={{padding:12,borderRadius:12,background:'#fff5f3'}}><div style={smallLabel}>Cancelled</div><strong style={{fontSize:20,color:'#983f36'}}>{cancelledCount}</strong></div>
             <div style={{padding:12,borderRadius:12,background:'#fff5f3'}}><div style={smallLabel}>No-shows</div><strong style={{fontSize:20,color:'#983f36'}}>{noShowCount}</strong></div>
