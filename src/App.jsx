@@ -798,7 +798,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
         </div>
       </div>
 
-      <div className="segmented">
+      <div className="segmented sticky-groomer-filter" aria-label="Filter week by groomer">
         {['All',...groomerNames()].map(x=>(
           <button
             key={x}
@@ -1236,13 +1236,15 @@ const plannerThemeCss = `
   .confirmation-filter button{border:1px solid #dfe2e7;background:#fff;color:#5d6572;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:800;}
   .confirmation-filter button.active{background:#17223f;color:#fff;border-color:#17223f;}
   .confirmation-filter button.attention.active{background:#fff7e8;color:#76551b;border-color:#e6c981;}
+  .sticky-groomer-filter{position:sticky;top:76px;z-index:22;background:#ece9e3;padding:6px;margin-bottom:6px;}
+  .sticky-groomer-filter~.week-day-jump{top:126px;}
   .week-day-jump{position:sticky;top:86px;z-index:18;display:grid;grid-template-columns:repeat(auto-fit,minmax(38px,1fr));gap:6px;margin:12px -4px 6px;padding:7px;background:rgba(247,244,239,.96);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid #e6e1d9;border-radius:15px;box-shadow:0 6px 16px rgba(23,34,63,.08);}
   .week-day-jump button{min-width:0;border:1px solid #dfe2e7;background:#fff;color:#455064;border-radius:11px;padding:7px 3px 6px;font:inherit;text-align:center;}
   .week-day-jump button span{display:block;font-size:11px;font-weight:900;white-space:nowrap;}
   .week-day-jump button small{display:block;margin-top:2px;font-size:8.5px;font-weight:800;color:#8a8f99;white-space:nowrap;}
   .week-day-jump button.today{background:#17223f;color:#fff;border-color:#17223f;box-shadow:0 2px 6px rgba(23,34,63,.18);}
   .week-day-jump button.today small{color:#dbe3f2;}
-  .day-block{scroll-margin-top:155px;}
+  .day-block{scroll-margin-top:210px;}
   .appt-text-btn{display:inline-flex;align-items:center;gap:5px;margin-top:9px;margin-left:7px;padding:6px 9px;border:1px solid #d7dde6;border-radius:999px;background:#fff;color:#31415f;font-size:12px;font-weight:850;position:relative;z-index:6;}
   .appt-text-btn.reminder{background:#fff7e8;border-color:#e6c981;color:#76551b;}
   .appt-communication-row{display:flex;gap:0;align-items:center;flex-wrap:wrap;position:relative;z-index:6;}
@@ -1507,19 +1509,20 @@ function PlannerApp({ onReady }) {
       setConfirmingId('')
     }
   }
-  const savePaymentFromSchedule = async (appt,status,method,tip) => {
+  const savePaymentFromSchedule = async (appt,status,method,tip,taxRate=0) => {
     if (!appt || paymentSavingId) return false
     dismissFormKeyboard()
     setPaymentSavingId(appt.id)
     setSaveMessage('')
     try {
       if (!supabase) throw new Error('Your schedule connection is not configured.')
-      const {data,error} = await supabase.rpc('save_grooming_payment',{
+      const {data,error} = await supabase.rpc('save_grooming_payment_with_tax',{
         p_week_start:appt.weekStart,
         p_expected_row:appt.sourceRow || {},
         p_payment_status:status,
         p_payment_method:status==='Paid' ? method : null,
-        p_tip:status==='Paid' ? Math.max(0,Number(tip || 0) || 0) : 0
+        p_tip:status==='Paid' ? Math.max(0,Number(tip || 0) || 0) : 0,
+        p_tax_rate:status==='Paid'?taxRate:0
       })
       if (error) {
         if (error.code==='PGRST202' || error.code==='42883') throw new Error('Payment tracking needs its one-time Supabase setup first.')
