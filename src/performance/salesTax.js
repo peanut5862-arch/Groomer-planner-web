@@ -1,0 +1,1 @@
+export function taxTotal(subtotal,rate=0,tip=0){const cents=Math.round(Number(subtotal)*100),r=Number(rate),t=Number(tip)||0;if(!Number.isFinite(cents)||cents<0||!Number.isFinite(r)||r<0||r>100)throw Error('Enter a valid service total and tax rate.');const taxCents=Math.round(cents*r/100);return {subtotal:cents/100,tax:taxCents/100,total:(cents+taxCents+Math.round(t*100))/100}}
