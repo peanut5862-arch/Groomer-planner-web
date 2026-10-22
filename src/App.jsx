@@ -1,3 +1,4 @@
+import {readScheduleWeek,clearScheduleReads,queueRouteRead} from './performance/scheduleReads.js';
 import {routeApplyBlock} from './performance/routeApplyGuard.js';
 import BookingNotice from './performance/BookingNotice.jsx';
 import ClientNotes from './performance/ClientNotes.jsx';
@@ -161,17 +162,12 @@ function Today({onBookingSaved,onReviewDay,onOpen,onComplete,onUndo,onConfirmati
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
+    if(result?.dateKey!==dateKey)setLoading(true)
     setError('')
-    setResult(null)
     const load = async () => {
       try {
         if (!supabase) throw new Error('Your schedule connection is not configured.')
-        const {data,error:loadError} = await supabase
-          .from('weekly_drafts')
-          .select('week_start,plan_json,status,confirmed_at')
-          .eq('week_start',mondayForDate(dateKey))
-          .limit(1)
+        const {data,error:loadError} = await readScheduleWeek({businessId:business.businessId,role:business.role,week:mondayForDate(dateKey),revision,refresh,load:()=>supabase.from('weekly_drafts').select('week_start,plan_json,status,confirmed_at').eq('week_start',mondayForDate(dateKey)).limit(1)})
         if (loadError) throw loadError
         if (!cancelled) setResult({dateKey,record:data?.[0] || null})
       } catch (err) {
@@ -432,11 +428,12 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
     setLoading(true)
     setError('')
     try {
-      const response = await apiFetch('/api/google-route',{
+      const fetchRoute=()=>apiFetch('/api/google-route',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({stops,groomer:routeGroomer})
       })
+      const response = await (force?fetchRoute():queueRouteRead(fetchRoute))
       const payload = await response.json().catch(()=>({}))
       if (!response.ok) throw new Error(payload?.error || `Route check failed (${response.status}).`)
       const savedAt = Date.now()
@@ -657,11 +654,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
       if (loadedWeekRef.current !== requestedWeek) setLoading(true)
       setError('')
 
-      const {data,error} = await supabase
-        .from('weekly_drafts')
-        .select('week_start,plan_json,status,confirmed_at')
-        .eq('week_start', requestedWeek)
-        .limit(1)
+      const {data,error} = await readScheduleWeek({businessId:business.businessId,role:business.role,week:requestedWeek,revision,refresh:routeRefresh,load:()=>supabase.from('weekly_drafts').select('week_start,plan_json,status,confirmed_at').eq('week_start',requestedWeek).limit(1)})
 
       if (cancelled) return
 
@@ -976,6 +969,7 @@ function groomerAppointmentFromRow(row,weekStart) {
 }
 
 function GroomerStopCard({appt,onFinish,finishing}) {
+  const [notesOpened,setNotesOpened]=useState(false)
   const address=appointmentAddress(appt,{})
   const today=businessDateKey()
   const canFinish=!appt.inactive && !appt.finished && appt.date===today
@@ -1037,7 +1031,7 @@ function GroomerStopCard({appt,onFinish,finishing}) {
           {appt.finished && <div style={{display:'inline-flex',alignItems:'center',minHeight:44,fontSize:14,fontWeight:800,color:'#267447',padding:'10px 16px',border:'1px solid #bddcc5',borderRadius:12,background:'#edf7ef'}}>✓ Finished</div>}
         </div>
         {!appt.inactive && !appt.finished && !canFinish && <div style={{fontSize:12,color:"#68758a",marginTop:8}}>Payment and finishing are available on the appointment day.</div>}
-        <ClientNotes appt={appt}/>
+        <details onToggle={event=>{if(event.currentTarget.open)setNotesOpened(true)}}><summary>Photos &amp; notes</summary>{notesOpened&&<ClientNotes appt={appt}/>}</details>
       </div>
     </div>
   )
@@ -1623,7 +1617,7 @@ function PlannerApp({ onReady }) {
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (_event, nextSession) => {
         if(_event==='PASSWORD_RECOVERY'){sessionStorage.setItem('hey-betty-recovery','1');setRecovering(true)}
-        if(_event==='SIGNED_OUT'){sessionStorage.removeItem('hey-betty-recovery');setRecovering(false)}
+        if(_event==='SIGNED_OUT'){clearScheduleReads();sessionStorage.removeItem('hey-betty-recovery');setRecovering(false)}
         setSession(nextSession)
         setAuthReady(true)
       }
@@ -1762,19 +1756,6 @@ function PlannerApp({ onReady }) {
         </div>}
         {body}
       </main>
-
-      <button
-        type="button"
-        className="floating-ai"
-        aria-label="Ask Betty"
-        title="Ask Betty"
-        onPointerDown={event=>event.stopPropagation()}
-        onTouchStart={event=>event.stopPropagation()}
-        onClick={event=>{event.preventDefault();event.stopPropagation();ask()}}
-        style={{zIndex:90,pointerEvents:'auto',touchAction:'manipulation',WebkitTapHighlightColor:'transparent',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,lineHeight:1,color:'#fff'}}
-      >
-        🐾
-      </button>
 
       <nav className="bottom-nav">
         {nav.map(([name,Icon])=>(
