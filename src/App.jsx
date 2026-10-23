@@ -17,6 +17,7 @@ import { usePlannerWeekStart } from './performance/plannerWeek.js'
 const Month = createLazyFeature(() => import('./performance/Month.jsx'), { sheet: false })
 const Clients = createLazyFeature(() => import('./performance/Clients.jsx'), { sheet: false })
 const DailyCloseout = createLazyFeature(() => import('./performance/DailyCloseout.jsx'), { sheet: true })
+const BusinessExpenses = createLazyFeature(() => import('./performance/BusinessExpenses.jsx'), {sheet:true})
 const More = createLazyFeature(() => import('./performance/More.jsx'), { sheet: false })
 const AssistantSheet = createLazyFeature(() => import('./performance/AssistantSheet.jsx'), { sheet: true })
 const AddAppointmentSheet = createLazyFeature(() => import('./performance/AddAppointmentSheet.jsx'), { sheet: true })
@@ -1038,6 +1039,7 @@ function GroomerStopCard({appt,onFinish,finishing}) {
 }
 
 function GroomerPortal({session,groomer}) {
+  const [showExpenses,setShowExpenses]=useState(false)
   const business=useBusinessContext()
   const [tab,setTab]=useState('Today')
   const [weekStart,setWeekStart]=usePlannerWeekStart()
@@ -1136,7 +1138,7 @@ function GroomerPortal({session,groomer}) {
 
   let body=null
   if(tab==='More'){
-    body=(<section><div className="page-head"><div><div className="eyebrow">{groomer}</div><h1>Groomer mode</h1></div></div><div style={{display:"flex",justifyContent:"center",gap:20,flexWrap:"wrap",marginTop:20,fontSize:14}}><a href="mailto:HeyBetty.support@gmail.com">Contact support</a><a href="https://app.pawpular.dog/privacy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a></div><div className="menu-list" style={{marginTop:16}}><button type="button" onClick={async()=>{await supabase?.auth?.signOut?.()}}><LogOut size={19}/><span>Sign out</span><ChevronRight size={17}/></button></div></section>)
+    body=(<section><div className="page-head"><div><div className="eyebrow">{groomer}</div><h1>Groomer mode</h1></div></div><div style={{display:"flex",justifyContent:"center",gap:20,flexWrap:"wrap",marginTop:20,fontSize:14}}><a href="mailto:HeyBetty.support@gmail.com">Contact support</a><a href="https://app.pawpular.dog/privacy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a></div><div className="menu-list" style={{marginTop:16}}><button type="button" onClick={()=>setShowExpenses(true)}><WalletCards size={19}/><span>Gas &amp; supplies</span><ChevronRight size={17}/></button><button type="button" onClick={async()=>{await supabase?.auth?.signOut?.()}}><LogOut size={19}/><span>Sign out</span><ChevronRight size={17}/></button></div></section>)
   }else if(tab==='Today'){
     const todayAppointments=appointments.filter(appt=>appt.date===today)
     const label=new Date(`${today}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric',year:'numeric'})
@@ -1175,6 +1177,7 @@ function GroomerPortal({session,groomer}) {
     <div className="app-shell">
       <style>{plannerThemeCss}</style>
       <header className="topbar"><div className="brand-mark">HB</div><div><strong>Hey Betty</strong><span>{groomer} · Groomer mode</span></div></header>
+      {showExpenses&&<BusinessExpenses onClose={()=>setShowExpenses(false)}/>}
       <main key={business.businessId}>{notice&&<div className="prototype-note" style={{marginBottom:14}}>{notice} <button className="text-btn" onClick={()=>setNotice('')}>Dismiss</button></div>}{body}</main>
       <nav className="bottom-nav">{nav.map(([name,Icon])=><button key={name} className={tab===name?'active':''} onClick={()=>setTab(name)}><Icon size={20}/><span>{name}</span></button>)}</nav>
     </div>
