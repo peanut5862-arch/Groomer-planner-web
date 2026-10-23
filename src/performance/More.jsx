@@ -1,3 +1,4 @@
+const BusinessExpenses=lazy(()=>import('./BusinessExpenses.jsx'))
 import {monthRange,reportRows} from './reportingPeriod.js'
 const SalesTaxLog=lazy(()=>import('./SalesTaxLog.jsx'))
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
@@ -18,6 +19,7 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
   const [settingsTab,setSettingsTab]=useState(null)
   const [showVehicles,setShowVehicles]=useState(false)
   const [showTaxLog,setShowTaxLog]=useState(false)
+  const [showExpenses,setShowExpenses]=useState(false)
   const [showCloseout,setShowCloseout]=useState(false)
   const [showBookings,setShowBookings]=useState(false)
   const [showReminders,setShowReminders]=useState(false)
@@ -254,6 +256,7 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
         {showPushSetup && <OwnerPushNotifications session={session}/>}
 
         <div className="menu-list" style={{marginTop:16}}>
+          {business.role==='owner'&&<button className="more-btn" onClick={()=>setShowExpenses(true)}>Business expenses</button>}
           {business.role==='owner'&&<button className="more-btn" onClick={()=>setShowTaxLog(true)}>Sales tax log</button>}
       {business.role==='owner'&&<button type="button" onClick={()=>setShowBookings(true)}><WalletCards size={19}/><span>Booking requests</span><ChevronRight size={17}/></button>}
           {business.role==='owner'&&<button type="button" onClick={()=>setShowReminders(true)}><WalletCards size={19}/><span>Client reminders</span><ChevronRight size={17}/></button>}
@@ -269,6 +272,7 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
       {showBookings&&<Suspense fallback={<div className="sheet-backdrop"><div className="sheet">Loading booking requests…</div></div>}><BookingRequests dogs={dogs} onClose={()=>setShowBookings(false)} onSaved={onSettingsSaved}/></Suspense>}
       {showReminders&&business.role==='owner'&&<Suspense fallback={<p role="status">Opening reminders…</p>}><ReminderQueue dogs={dogs} revision={revision} onClose={()=>setShowReminders(false)}/></Suspense>}
       {showCloseout&&business.role==='owner'&&<Suspense fallback={<p role="status">Opening daily closeout…</p>}><DailyCloseout dogs={dogs} revision={revision} onClose={()=>setShowCloseout(false)} onOpen={onOpen}/></Suspense>}
+      {showExpenses&&business.role==='owner'&&<Suspense fallback={<p role="status">Opening expenses…</p>}><BusinessExpenses onClose={()=>setShowExpenses(false)}/></Suspense>}
       {showTaxLog&&<Suspense fallback={<p>Loading sales tax log…</p>}><SalesTaxLog onClose={()=>setShowTaxLog(false)}/></Suspense>}
       {showVehicles&&business.role==='owner'&&<Suspense fallback={<div role="status" className="prototype-note">Opening vehicle maintenance…</div>}><VehicleMaintenance onClose={()=>setShowVehicles(false)}/></Suspense>}
       {settingsTab&&<Suspense fallback={<div role="status" className="prototype-note">Opening settings…</div>}><BusinessSettings initialTab={settingsTab} onClose={()=>setSettingsTab(null)} onSaved={onSettingsSaved}/></Suspense>}
