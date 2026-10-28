@@ -229,3 +229,64 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #8b
 .dog-photo-actions{display:flex;gap:6px;flex-wrap:wrap;}
 .dog-photo-actions .secondary-btn{font-size:11px;padding:7px 9px;}
 .photo-message{font-size:12px;line-height:1.45;color:#59616e;margin-top:6px;}
+
+/* Approved Betty palette and compact weekly board. */
+:root{--brand-navy:#022550;--brand-teal:#006876;--brand-cream:#fdfaf2;--brand-gold:#f6bf63;--brand-light-teal:#edf6f3}
+html body,body .app-shell{background:var(--brand-cream)!important;color:var(--brand-navy)}
+body .topbar,body .bottom-nav,body .week-day-jump{background:#fffdf8!important}
+body .day-block{background:var(--brand-cream);border-color:#e4ddcf}
+body .save,body .primary-mini,body .login-button{background:var(--brand-teal)!important;color:#fff!important}
+body .top-ai,body .day-ai,body .time-pill{background:#d9ebe5!important;color:var(--brand-navy)!important}
+body .week-day-jump button.today,body .confirmation-filter button.active:not(.attention){background:var(--brand-navy)!important;border-color:var(--brand-navy)!important;color:#fff!important}
+body .week-day-jump button.today small{color:#fff!important}
+body .route-card{background:var(--brand-light-teal)!important;border-color:#bddbd2!important}
+body .appt-card.completed-card{background:#ffffff!important}
+body .stat.money,body .stat.completed{background:#fff!important;border-color:#e4ddcf!important}
+body .appt-card.completed-card .appt-complete-btn,body .appt-card.completed-card .completed-pill{background:var(--brand-gold)!important;color:var(--brand-navy)!important;border-color:#e6b86b!important}
+body .bottom-nav button.active,body .secondary-btn,body .text-btn,body .appt-text-btn{color:var(--brand-teal)!important}
+body .client-notes{background:#edf6f3;border-color:#c4ded8}
+body .business-tools{background:#fff;border:1px solid #e4ddcf;border-radius:18px;padding:16px;overflow:hidden}
+body .business-tools h3{margin:0 0 8px;color:var(--brand-navy)}
+body .business-tools button{border-radius:0;background:#fff!important;border-bottom:1px solid #eee7dc!important;color:var(--brand-navy)!important}
+body .business-tools button:last-child{border-bottom:0!important}
+body .meta,body .dogs,body .settings-help{color:#59636d!important}
+
+body .topbar>div:first-child{min-width:0;display:flex;flex-direction:column}
+body .completed-pill{display:inline-block;padding:6px 10px;border:1px solid #e6b86b;border-radius:10px;background:#f6bf63!important;color:#022550!important}
+/* Distinct summary cards, as requested. */
+body .stat.money{background:#fff0d5!important;border-color:#edc47d!important}
+body .stat.completed{background:#e0efea!important;border-color:#8ebbb0!important}
+body .stat span{color:#56616c!important}
+body .business-tools button{appearance:none;-webkit-appearance:none;display:flex;align-items:center;gap:10px;width:100%;min-height:46px;padding:13px 0;margin:0;border:0;border-bottom:1px solid #eee7dc!important;box-shadow:none;font:inherit;font-size:13px;font-weight:700;text-align:left}
+body .business-tools button span{flex:1}
+body .business-tools button svg:last-child{margin-left:auto}
+
+body .completed-pill,body .appt-card.completed-card .completed-pill,body .appt-card.completed-card .appt-complete-btn{background:#f2cbaa!important;color:#022550!important;border-color:#dfb08b!important}
+body .stat.money{background:#fcf0e5!important;border-color:#e7c4a9!important}
+/* No green fills: status and payment details use brand teal and peach. */
+body .stat.completed{background:#edf6f3!important;border-color:#a8cec5!important}
+body .confirmation-control.confirmed,body .payment-chip.paid{background:#edf6f3!important;border-color:#a8cec5!important;color:#006876!important}
+body .status-dot.confirmed{background:#006876!important}
+.week-board{display:grid;grid-template-columns:repeat(var(--week-columns,5),minmax(0,1fr));gap:6px;margin:18px 0 8px}
+.week-board-day{min-width:0;display:flex;flex-direction:column;gap:7px}
+.week-board button{font:inherit;cursor:pointer;box-sizing:border-box;min-width:0}
+.week-board-heading{display:grid;gap:3px;width:100%;padding:10px 2px;border:1px solid #e4ddcf;border-radius:12px;background:#fff;color:#022550;text-align:center}
+.week-board-heading span{text-transform:uppercase;font-size:11px;font-weight:700}
+.week-board-heading strong{font-size:22px}
+.week-board-heading small{font-size:10px}
+.week-board-heading.is-today{background:#022550;color:#fff;border-color:#022550}
+.week-board-stops{display:flex;flex-direction:column;gap:7px}
+.week-board-stop{width:100%;min-height:92px;border:1px solid #dcded8;border-left:4px solid var(--groomer-color);border-radius:9px;background:var(--groomer-tint);color:#022550;padding:7px 4px;text-align:left;display:flex;flex-direction:column;gap:3px;overflow:hidden}
+.week-board-stop span,.week-board-stop strong,.week-board-stop small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;font-size:11px}
+.week-board-stop strong{font-weight:800}
+.week-board-stop small{margin-top:auto;font-size:10px}
+.week-board-stop.is-completed{background:#fff}
+.week-board-stop.is-completed small{color:#022550;background:#f2cbaa;border-radius:4px;padding:2px 3px}
+.week-board-add{border:1px dashed #c4b9a6;border-radius:8px;background:#fffdf8;color:#006876;min-height:36px;font-size:21px!important}
+.week-board-total{font-size:12px;text-align:center;font-weight:800;color:#022550}
+.week-board-route{border:0;background:transparent;color:#006876;font-size:10px!important;padding:7px 0;min-height:36px;font-weight:700!important}
+@media(max-width:480px){.week-board{gap:4px;margin-left:-7px;margin-right:-7px}.week-board-stop{padding:7px 3px;border-left-width:3px}.week-board-stop span,.week-board-stop strong{font-size:10px}.week-board-stop small{font-size:10px}}
+
+body .save,body .primary-mini{appearance:none;-webkit-appearance:none;border:0;border-radius:12px;padding:11px 16px;font:inherit;font-weight:750;min-height:44px}
+
+body .appt-payment-btn.paid{background:#edf6f3!important;border-color:#a8cec5!important;color:#006876!important}
