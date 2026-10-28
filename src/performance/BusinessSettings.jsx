@@ -49,7 +49,7 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
     setInviteEmails(values=>({...values,[inviteId]:''}))
    }else if((data.settings.timeOff || []).length){
     setInviteNotice('Settings saved. Checking appointments on closed days…')
-    try{const result=await moveAppointmentsOffClosures(data.settings,setInviteNotice);onSaved?.();setInviteNotice(`${result.visits || result.moved} household visits moved off closed days. Review the new routes and reconfirm changed appointments.${result.issues.length?' Still needs review: '+result.issues.map(issue=>issue.owner+': '+issue.reason).join(' '):''}`)}catch(moveError){throw Error('Settings saved, but holiday moves need attention: '+moveError.message)}
+    try{const result=await moveAppointmentsOffClosures(data.settings,setInviteNotice,business);onSaved?.();setInviteNotice(`${result.visits || result.moved} household visits moved off closed days. Review the new routes and reconfirm changed appointments.${result.issues.length?' Still needs review: '+result.issues.map(issue=>issue.owner+': '+issue.reason).join(' '):''}`)}catch(moveError){throw Error('Settings saved, but holiday moves need attention: '+moveError.message)}
    }else onClose()
   }catch(e){setError(e.message||'Could not save your settings.')}finally{busy.current=false;setSaving(false)}
  }
