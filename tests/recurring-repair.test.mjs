@@ -100,3 +100,16 @@ test('different household frequencies do not get merged into the same cycle',()=
  assert.ok(frequent.length>lessFrequent.length)
  for(const [dates,days] of [[frequent,14],[lessFrequent,42]])for(let i=1;i<dates.length;i++)assert.ok(new Date(dates[i])-new Date(dates[i-1])>=days*86400000)
 })
+import {proposeRecurringRebuild} from '../src/performance/recurringRebuildPlan.js'
+test('incomplete household keeps all old bookings while complete households rebuild',()=>{
+ const oldA=event('2026-12-22','a','One','Montgomery'),oldB=event('2026-12-22','b','Two','Tomball')
+ const clients=[{...client,household:'a',owner:'a',dog:'One',frequency:0,area:'Montgomery',due:'2026-12-22',service:'Groom',duration:60,price:80},{...client,household:'b',owner:'b',dog:'Two',frequency:6,area:'Tomball',due:'2026-12-22',service:'Groom',duration:60,price:80}]
+ const plan=proposeRecurringRebuild({today,events:[oldA,oldB],clients,groomers})
+ assert.ok(plan.retained.includes(oldA));assert.ok(!plan.replaced.includes(oldA));assert.ok(plan.replaced.includes(oldB));assert.ok(plan.appointments.some(stop=>stop.household==='b'))
+ assert.ok(plan.appointments.every(stop=>stop.household!=='a'))
+})
+test('a missing sibling profile preserves the whole household',()=>{
+ const old=event('2026-12-22','a','One','Montgomery',{dogs:['One','Missing sibling']})
+ const plan=proposeRecurringRebuild({today,events:[old],clients:[{...client,household:'a',dog:'One',area:'Montgomery',service:'Groom',duration:60,price:80}],groomers})
+ assert.equal(plan.replaced.length,0);assert.deepEqual(plan.retained,[old]);assert.equal(plan.appointments.length,0)
+})
