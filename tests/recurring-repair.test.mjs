@@ -52,9 +52,9 @@ test('rebuild groups nearby due dates for same-frequency household dogs',()=>{
  for(let i=1;i<plan.appointments.length;i++)assert.ok(new Date(plan.appointments[i].date)-new Date(plan.appointments[i-1].date)>=14*86400000)
 })
 test('rebuild fills before protected anchors without booking too close',()=>{
- const anchor=event('2026-12-04')
+ const anchor=event('2026-12-11')
  const plan=proposeRecurring({today,clients:[{...client,due:'2026-10-30',area:'Montgomery',service:'Groom',duration:60,price:80}],events:[anchor],groomers,rebuild:true})
- assert.ok(plan.appointments.some(a=>a.date<'2026-12-04'))
+ assert.ok(plan.appointments.some(a=>a.date<'2026-12-11'))
  const dates=[anchor.date,...plan.appointments.map(a=>a.date)].sort()
  for(let i=1;i<dates.length;i++)assert.ok(new Date(dates[i])-new Date(dates[i-1])>=14*86400000,`${dates[i-1]} / ${dates[i]}`)
 })
@@ -112,4 +112,36 @@ test('a missing sibling profile preserves the whole household',()=>{
  const old=event('2026-12-22','a','One','Montgomery',{dogs:['One','Missing sibling']})
  const plan=proposeRecurringRebuild({today,events:[old],clients:[{...client,household:'a',dog:'One',area:'Montgomery',service:'Groom',duration:60,price:80}],groomers})
  assert.equal(plan.replaced.length,0);assert.deepEqual(plan.retained,[old]);assert.equal(plan.appointments.length,0)
+})
+
+test('moving a planned appointment does not reset the six-week cycle',()=>{
+ const dog={...client,frequency:6,lastServiceDate:'2026-10-24',due:'2026-12-05',area:'Montgomery',service:'Groom',duration:60,price:80}
+ const moved=event('2026-12-08','p','Bo','Montgomery',{sourceRow:{'Recurring IDs':['recurring:p:bo:2026-12-05']}})
+ const plan=proposeRecurring({today,clients:[dog],events:[moved],groomers})
+ assert.ok(plan.appointments.length)
+ assert.equal(plan.appointments[0].due,'2027-01-16')
+ assert.ok(!plan.appointments.some(stop=>stop.due==='2027-01-19'))
+})
+test('a late suggested day does not shift subsequent planned due dates',()=>{
+ const dog={...client,frequency:6,lastServiceDate:'2026-10-24',area:'Montgomery',service:'Groom',duration:60,price:80}
+ const plan=proposeRecurring({today,clients:[dog],events:[],groomers,rebuild:true})
+ assert.equal(plan.appointments[0].due,'2026-12-05')
+ assert.equal(plan.appointments[1].due,'2027-01-16')
+})
+test('a groom completed one week late resets six weeks from actual completion',()=>{
+ const dog={...client,frequency:6,due:'2026-12-15'}
+ const late=event('2026-11-03','p','Bo','Montgomery',{sourceRow:{'Completion Status':'Completed','Completed Date':'2026-11-10'}})
+ assert.equal(dueFromCompletedService(dog,[late],'2026-11-11'),'2026-12-22')
+})
+import {proposeClosureMoves} from '../src/performance/closureMoves.js'
+test('saved Thanksgiving closure moves the household together past both closed dates',()=>{
+ const events=[event('2026-11-26','p','Bo'),event('2026-11-26','p','Bella','Montgomery',{time:'10:05'})]
+ const plan=proposeClosureMoves({today,events,clients:[{...client,groomer:'Haley'},{...client,dog:'Bella',groomer:'Haley'}],groomers,timeOff:[{start:'2026-11-26',end:'2026-11-27',groomerId:''}],returnHome:{'p|Haley':15},buffer:5})
+ assert.equal(plan.moves.length,2);assert.ok(plan.moves.every(move=>move.date==='2026-11-30'&&move.groomer==='Haley'))
+ assert.deepEqual(plan.moves.map(move=>move.time),['09:00','10:05'])
+})
+test('Christmas closure includes December 28 and does not move completed work',()=>{
+ const events=[event('2026-12-28'),event('2026-12-25','done','Dog','Montgomery',{sourceRow:{'Completion Status':'Completed'}})]
+ const plan=proposeClosureMoves({today,events,clients:[client],groomers,timeOff:[{start:'2026-12-25',end:'2026-12-28',groomerId:''}],returnHome:{'p|Haley':15}})
+ assert.equal(plan.moves.length,1);assert.equal(plan.moves[0].date,'2026-12-29')
 })
