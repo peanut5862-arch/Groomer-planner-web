@@ -1,4 +1,5 @@
 import MessageTemplates from './MessageTemplates.jsx'
+import {groomerColor,BRAND_COLORS} from './groomerColors.js'
 import {templateErrors} from './messageTemplates.js'
 import React,{useEffect,useState,useRef} from 'react'
 import {apiFetch} from './shared.jsx'
@@ -69,6 +70,9 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
     <p className="settings-help">Used when finding openings. Saved appointments stay where you placed them.</p>
     {draft.groomers.map(g=><div className="settings-card" key={g.id}>
      <label>Groomer name<input value={g.name} maxLength={50} onChange={e=>changeGroomer(g.id,{name:e.target.value})}/></label>
+     <label>Schedule color<input type="color" aria-label={`${g.name || 'New groomer'} schedule color`} value={groomerColor(g)} onChange={e=>changeGroomer(g.id,{color:e.target.value})} style={{width:72,height:48,padding:4}}/></label>
+     <div role="group" aria-label={`${g.name || 'New groomer'} brand colors`} style={{display:'flex',gap:8}}>{['navy','teal','gold'].map(name=><button type="button" key={name} aria-label={`Use ${name} for ${g.name || 'new groomer'}`} aria-pressed={groomerColor(g)===BRAND_COLORS[name]} onClick={()=>changeGroomer(g.id,{color:BRAND_COLORS[name]})} style={{width:44,height:44,borderRadius:10,background:BRAND_COLORS[name],border:groomerColor(g)===BRAND_COLORS[name]?'3px solid #111':'1px solid #aaa'}}/>)}</div>
+     <p className="settings-help">Used on appointment borders, calendar entries, and the groomer selector. Payment and completion colors stay consistent for everyone.</p>
      <label>Email for app invitation (optional)<input type="email" value={inviteEmails[g.id]||''} autoCapitalize="none" autoCorrect="off" maxLength={254} placeholder="groomer@example.com" onChange={e=>{setError('');setInviteNotice('');setInviteEmails(values=>({...values,[g.id]:e.target.value}))}}/></label>
      <button type="button" className="primary-mini" disabled={saving||loading||!inviteEmails[g.id]?.trim()||g.active===false} onClick={event=>save(event,g.id)}>Save &amp; send invitation</button>
      <p className="settings-help">Saves your settings, then emails this groomer a link to create their own login. Manage pending invitations in Team.</p>
