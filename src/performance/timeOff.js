@@ -4,6 +4,7 @@ export function timeOffReason(settings,groomer,date) {
   return entry ? entry.label || (entry.groomerId ? 'Groomer time off' : 'Business closed') : ''
 }
 export function timeOffErrors(settings) {
+  if(!settings || !Array.isArray(settings.groomers))return ['Choose valid business settings.']
   if(settings.timeOff!==undefined&&!Array.isArray(settings.timeOff))return ['Invalid time-off entries.']
   return (settings.timeOff || []).flatMap(item=>{
     const errors=[]
