@@ -1,3 +1,4 @@
+import { monthVisits } from './monthVisits.js';
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
 import {groomerColorStyle} from './groomerColors.js';
 import RecurringPlanSheet from './RecurringPlanSheet.jsx';
@@ -86,6 +87,7 @@ function Month({onOpen,revision,dogs,viewerMode=false,onAddAppointment,onFillOpe
   const monthly = useMemo(()=>days.filter(day=>day.startsWith(month)).flatMap(day=>appointmentsByDay[day] || []),[days,month,appointmentsByDay])
   const total = useMemo(()=>monthly.reduce((sum,appt)=>sum+(Number.isFinite(appt.price)?appt.price:0),0),[monthly])
   const selectedAppointments = appointmentsOn(selected)
+  const selectedVisits = monthVisits(selectedAppointments)
   const selectedWeek = weeks.find(week=>String(week.week_start).slice(0,10)===mondayForDate(selected))
   const label = new Date(`${month}-01T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC',month:'long',year:'numeric'})
   const changeMonth = offset => {
@@ -122,14 +124,15 @@ function Month({onOpen,revision,dogs,viewerMode=false,onAddAppointment,onFillOpe
           {days.map(day=>{
             const inMonth = day.startsWith(month)
             const appointments = inMonth ? appointmentsOn(day) : []
+            const visitCount = monthVisits(appointments).length
             return <button type="button" key={day} disabled={!inMonth}
               className={`cal-day ${appointments.length?'busy':''}`}
-              aria-pressed={selected===day} aria-label={`${day}, ${appointments.length} appointments`}
+              aria-pressed={selected===day} aria-label={`${day}, ${visitCount} stops`}
               onClick={()=>setSelected(day)}
               style={{textAlign:'left',font:'inherit',minWidth:0,cursor:inMonth?'pointer':'default',
                 opacity:inMonth?1:0.3,outline:selected===day?'2px solid #006876':'none',outlineOffset:-2}}>
               <span className="day-num">{Number(day.slice(8))}</span>
-              <strong className="month-count">{appointments.length} {appointments.length===1?'stop':'stops'}</strong>
+              <strong className="month-count">{visitCount} {visitCount===1?'stop':'stops'}</strong>
               <span className="month-cell-total">{new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(appointments.reduce((sum,a)=>sum+(Number(a.price)||0),0))}</span>
               <span className="month-load" aria-hidden="true" style={{background:appointments.length?'#006876':'#ddd'}}/>
               {chosenClient && appointments.some(a=>canonicalAreaLabel(a.area)===chosenClient.area) && <small>Same area</small>}
@@ -138,7 +141,7 @@ function Month({onOpen,revision,dogs,viewerMode=false,onAddAppointment,onFillOpe
           })}
         </div>
         <div className="month-summary">
-          <Stat label="Scheduled stops" value={monthly.length}/>
+          <Stat label="Scheduled stops" value={monthVisits(monthly).length}/>
           <Stat label="Scheduled total" value={new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(total)}/>
         </div>
         <div className="prototype-note">Saved drafts and confirmed weeks. Counts show stops, not available capacity. Check route suggestions before promising a time.
@@ -151,7 +154,11 @@ function Month({onOpen,revision,dogs,viewerMode=false,onAddAppointment,onFillOpe
         </div>}
         {chosenClient && <div className="prototype-note">{chosenClient.owner}: dates marked Same area share an existing route area. Drive time and appointment fit still need checking. <button className="text-btn" onClick={()=>setChosenClient(null)}>Clear selection</button></div>}
         {selectedWeek && <div className="eyebrow" style={{marginBottom:12}}>{selectedWeek.status==='confirmed'?'Confirmed week':'Draft week'}</div>}
-        <div className="appt-list">{selectedAppointments.map(appt=><ApptCard key={appt.id} appt={appt} dogs={dogs} viewerMode={viewerMode} onOpen={(mode)=>onOpen({...appt,_initialMode:mode || 'edit'})}/>)}</div>
+        <div className="appt-list">{selectedVisits.map(visit=>visit.appointments.length===1 ? <ApptCard key={visit.key} appt={visit.appointments[0]} dogs={dogs} viewerMode={viewerMode} onOpen={mode=>onOpen({...visit.appointments[0],_initialMode:mode || 'edit'})}/> : <div className="appt-card groomer-colored month-household" key={visit.key} style={groomerColorStyle(groomerConfig(visit.groomer))}>
+          <h3>{visit.owner}</h3><p>{visit.groomer} · {visit.appointments.map(appt=>appt.dogs).join(' · ')}</p>
+          <strong>{new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(visit.appointments.reduce((sum,appt)=>sum+(Number(appt.price)||0),0))} total</strong>
+          <div className="month-visit-details">{visit.appointments.map(appt=><button className="ghost" key={appt.id} onClick={()=>onOpen({...appt,_initialMode:'edit'})}>{appt.time} · {appt.dogs}{appt.completed?' · Completed':''} · View details</button>)}</div>
+        </div>)}</div>
         {!selectedAppointments.length && <div className="prototype-note">{selectedWeek
           ? `No appointments scheduled${groomer==='All'?'':` for ${groomer}`} on this date.`
           : 'No saved schedule for this week yet.'}</div>}
