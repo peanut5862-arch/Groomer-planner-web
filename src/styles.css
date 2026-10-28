@@ -290,3 +290,16 @@ body .status-dot.confirmed{background:#006876!important}
 body .save,body .primary-mini{appearance:none;-webkit-appearance:none;border:0;border-radius:12px;padding:11px 16px;font:inherit;font-weight:750;min-height:44px}
 
 body .appt-payment-btn.paid{background:#edf6f3!important;border-color:#a8cec5!important;color:#006876!important}
+
+/* Compact month planner */
+.month-planner-grid .cal-day { min-height:88px; padding:8px 3px; background:#fff; border:1px solid #e1dfd8; border-radius:12px; text-align:center!important; }
+.month-planner-grid .cal-day[aria-pressed=true] {background:#edf6f3;}
+.month-count,.month-cell-total {display:block;font-size:11px;margin-top:5px;color:#022550;}
+.month-load {display:block;height:4px;margin:8px 5px 0;border-radius:4px;}
+.month-planner-grid small {font-size:9px;color:#006876;}
+.month-actions {display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;}
+.month-needs {background:#fff;border:1px solid #e1dfd8;border-radius:18px;padding:16px;margin-top:22px;}
+.month-needs input {width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:10px;padding:12px;margin-bottom:12px;font:inherit;}
+.month-client {display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 0;border-top:1px solid #eee;}
+.month-client .text-btn {text-align:left;display:grid;gap:5px;}
+.month-client span,.month-client small {font-size:12px;color:#536170;}
