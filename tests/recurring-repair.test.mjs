@@ -145,3 +145,13 @@ test('Christmas closure includes December 28 and does not move completed work',(
  const plan=proposeClosureMoves({today,events,clients:[client],groomers,timeOff:[{start:'2026-12-25',end:'2026-12-28',groomerId:''}],returnHome:{'p|Haley':15}})
  assert.equal(plan.moves.length,1);assert.equal(plan.moves[0].date,'2026-12-29')
 })
+test('holiday preference moves the whole household before Thanksgiving',()=>{
+ const events=[event('2026-11-26','p','Bo'),event('2026-11-27','p','Bella','Montgomery',{time:'10:05'})]
+ const plan=proposeClosureMoves({today,events,clients:[client,{...client,dog:'Bella'}],groomers,timeOff:[{start:'2026-11-26',end:'2026-11-27'}],returnHome:{'p|Haley':15},buffer:5,preferBefore:true})
+ assert.equal(plan.moves.length,2);assert.ok(plan.moves.every(move=>move.date==='2026-11-25'))
+})
+test('a visit previously moved after Christmas can be moved before Christmas',()=>{
+ const moved=event('2026-12-29','p','Bo','Montgomery',{closureDate:'2026-12-25',closureGroomer:'Haley'})
+ const plan=proposeClosureMoves({today,events:[moved],clients:[client],groomers,timeOff:[{start:'2026-12-25',end:'2026-12-28'}],returnHome:{'p|Haley':15},preferBefore:true})
+ assert.equal(plan.moves.length,1);assert.equal(plan.moves[0].date,'2026-12-24')
+})
