@@ -1,18 +1,18 @@
-const BusinessExpenses=lazy(()=>import('./BusinessExpenses.jsx'))
-import {monthRange,reportRows} from './reportingPeriod.js'
-const SalesTaxLog=lazy(()=>import('./SalesTaxLog.jsx'))
-import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
 import React, { lazy, Suspense, useEffect, useState } from 'react';
+import {monthRange,reportRows} from './reportingPeriod.js'
+const SalesTaxLog=React.lazy(()=>import('./SalesTaxLog.jsx'))
+import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
+const BusinessExpenses=React.lazy(()=>import('./BusinessExpenses.jsx'))
 import { usePlannerWeekStart } from './plannerWeek.js'
 import { supabase } from "../supabase.js";
 import { ChevronLeft, ChevronRight, Route, Settings, WalletCards, LogOut } from 'lucide-react';
 import { clientConfirmationStatus, businessDateKey, mondayForDate, clientDueInfo, plannerClientGroups, plannerActiveRow , apiFetch } from './shared.jsx'
 
-const BookingRequests=lazy(()=>import('./BookingRequests.jsx'))
-const ReminderQueue=lazy(()=>import('./ReminderQueue.jsx'))
-const DailyCloseout=lazy(()=>import('./DailyCloseout.jsx'))
-const VehicleMaintenance=lazy(()=>import('./VehicleMaintenance.jsx'))
-const BusinessSettings=lazy(()=>import('./BusinessSettings.jsx'))
+const BookingRequests=React.lazy(()=>import('./BookingRequests.jsx'))
+const ReminderQueue=React.lazy(()=>import('./ReminderQueue.jsx'))
+const DailyCloseout=React.lazy(()=>import('./DailyCloseout.jsx'))
+const VehicleMaintenance=React.lazy(()=>import('./VehicleMaintenance.jsx'))
+const BusinessSettings=React.lazy(()=>import('./BusinessSettings.jsx'))
 
 function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettingsSaved,onOpen}) {
   const business=useBusinessContext()
@@ -190,15 +190,15 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
 
       {!loading && !error && <>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-          <div style={{...reportCard,background:'#fff9ec'}}><div style={smallLabel}>Scheduled revenue</div><div style={metricValue}>{money(scheduledRevenue)}</div><div style={{fontSize:11,color:'#7b828e',marginTop:5}}>{bookedRows.length} appointment{bookedRows.length===1?'':'s'}</div></div>
-          <div style={{...reportCard,background:'#effaf2'}}><div style={smallLabel}>Completed revenue</div><div style={metricValue}>{money(completedRevenue)}</div><div style={{fontSize:11,color:'#4c7259',marginTop:5}}>{completedRows.length} completed</div></div>
+          <div style={{...reportCard,background:'#fcf0e5'}}><div style={smallLabel}>Scheduled revenue</div><div style={metricValue}>{money(scheduledRevenue)}</div><div style={{fontSize:11,color:'#7b828e',marginTop:5}}>{bookedRows.length} appointment{bookedRows.length===1?'':'s'}</div></div>
+          <div style={{...reportCard,background:'#e0efea'}}><div style={smallLabel}>Completed revenue</div><div style={metricValue}>{money(completedRevenue)}</div><div style={{fontSize:11,color:'#425d63',marginTop:5}}>{completedRows.length} completed</div></div>
           <div style={reportCard}><div style={smallLabel}>Service received</div><div style={metricValue}>{money(serviceReceived)}</div><div style={{fontSize:11,color:'#7b828e',marginTop:5}}>paid service only</div></div>
           <div style={reportCard}><div style={smallLabel}>Tips received</div><div style={metricValue}>{money(tipsReceived)}</div><div style={{fontSize:11,color:'#7b828e',marginTop:5}}>recorded tips</div></div>
-          <div style={{...reportCard,background:'#f5f2ff'}}><div style={smallLabel}>Total received</div><div style={metricValue}>{money(totalReceived)}</div><div style={{fontSize:11,color:'#66579a',marginTop:5}}>service + tips</div></div>
+          <div style={{...reportCard,background:'#edf6f3'}}><div style={smallLabel}>Total received</div><div style={metricValue}>{money(totalReceived)}</div><div style={{fontSize:11,color:'#425d63',marginTop:5}}>service + tips</div></div>
           <div style={reportCard}><div style={smallLabel}>Remaining</div><div style={metricValue}>{money(remainingRevenue)}</div><div style={{fontSize:11,color:'#7b828e',marginTop:5}}>scheduled, not completed</div></div>
           <div style={reportCard}><div style={smallLabel}>Dogs</div><div style={metricValue}>{dogCount}</div><div style={{fontSize:11,color:'#7b828e',marginTop:5}}>across {bookedRows.length} stops</div></div>
-          <div style={{...reportCard,background:'#eef7ff'}}><div style={smallLabel}>Team payout</div><div style={metricValue}>{money(teamTotals.payout)}</div><div style={{fontSize:11,color:'#52657a',marginTop:5}}>service commission + received tips</div></div>
-          <div style={{...reportCard,background:'#fff4ed'}}><div style={smallLabel}>Service revenue after commission</div><div style={metricValue}>{money(teamTotals.ownerShare)}</div><div style={{fontSize:11,color:'#8a5a3b',marginTop:5}}>completed service revenue less team commission</div></div>
+          <div style={{...reportCard,background:'#edf6f3'}}><div style={smallLabel}>Team payout</div><div style={metricValue}>{money(teamTotals.payout)}</div><div style={{fontSize:11,color:'#425d63',marginTop:5}}>service commission + received tips</div></div>
+          <div style={{...reportCard,background:'#fcf0e5'}}><div style={smallLabel}>Service revenue after commission</div><div style={metricValue}>{money(teamTotals.ownerShare)}</div><div style={{fontSize:11,color:'#425d63',marginTop:5}}>completed service revenue less team commission</div></div>
         </div>
 
         {!(period==='month'?monthWeeks.length:weekRecord) && <div className="prototype-note" style={{marginTop:12}}>No saved schedule exists for this {period} yet.</div>}
@@ -206,16 +206,16 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
         <div style={{...reportCard,marginTop:14}}>
           <div className="section-title" style={{margin:'0 0 12px'}}><h3>Groomer totals</h3></div>
           <div style={{display:'grid',gap:10}}>
-            {groomerTotals.map(item=><div key={item.name} style={{display:'grid',gridTemplateColumns:'1fr auto',gap:10,alignItems:'center',padding:12,borderRadius:14,background:item.name==='Jen'?'#f1f3ff':'#eff8f0',border:`1px solid ${item.name==='Jen'?'#dfe3ff':'#d9ecdc'}`}}>
+            {groomerTotals.map(item=><div key={item.name} style={{display:'grid',gridTemplateColumns:'1fr auto',gap:10,alignItems:'center',padding:12,borderRadius:14,background:item.name==='Jen'?'#edf6f3':'#edf6f3',border:`1px solid ${item.name==='Jen'?'#bddbd2':'#bddbd2'}`}}>
               <div>
                 <strong style={{fontSize:14,color:'#172038'}}>{item.name}</strong>
                 <div style={{fontSize:11,color:'#7b828e',marginTop:3}}>{item.appointments} appointment{item.appointments===1?'':'s'}</div>
-                {item.rate>0 && <div style={{fontSize:10.5,color:'#52657a',marginTop:4}}>{item.rate}% service commission · keeps 100% of tips</div>}
+                {item.rate>0 && <div style={{fontSize:10.5,color:'#425d63',marginTop:4}}>{item.rate}% service commission · keeps 100% of tips</div>}
               </div>
               <div style={{textAlign:'right'}}>
                 <strong style={{fontSize:16,color:'#172038'}}>{money(item.scheduled)}</strong>
                 <div style={{fontSize:10,color:'#6b7280',marginTop:2}}>{money(item.completed)} completed</div>
-                {item.rate>0 && <div style={{fontSize:10,color:'#267447',marginTop:3,fontWeight:800}}>{money(item.commission)} commission + {money(item.tips)} tips = {money(item.payout)} pay</div>}
+                {item.rate>0 && <div style={{fontSize:10,color:'#006876',marginTop:3,fontWeight:800}}>{money(item.commission)} commission + {money(item.tips)} tips = {money(item.payout)} pay</div>}
               </div>
             </div>)}
           </div>
@@ -224,9 +224,9 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
         <div style={{...reportCard,marginTop:14}}>
           <div className="section-title" style={{margin:'0 0 12px'}}><h3>Client confirmations</h3></div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-            <div style={{padding:11,borderRadius:12,background:'#effaf2'}}><div style={smallLabel}>Confirmed</div><strong style={{fontSize:19,color:'#267447'}}>{confirmations['Confirmed']}</strong></div>
-            <div style={{padding:11,borderRadius:12,background:'#fff9ec'}}><div style={smallLabel}>Unconfirmed</div><strong style={{fontSize:19,color:'#8a651e'}}>{confirmations['Unconfirmed']}</strong></div>
-            <div style={{padding:11,borderRadius:12,background:'#f5f2ff'}}><div style={smallLabel}>Needs reply</div><strong style={{fontSize:19,color:'#5e4aa8'}}>{confirmations['Needs reply']}</strong></div>
+            <div style={{padding:11,borderRadius:12,background:'#e0efea'}}><div style={smallLabel}>Confirmed</div><strong style={{fontSize:19,color:'#006876'}}>{confirmations['Confirmed']}</strong></div>
+            <div style={{padding:11,borderRadius:12,background:'#fcf0e5'}}><div style={smallLabel}>Unconfirmed</div><strong style={{fontSize:19,color:'#8a651e'}}>{confirmations['Unconfirmed']}</strong></div>
+            <div style={{padding:11,borderRadius:12,background:'#edf6f3'}}><div style={smallLabel}>Needs reply</div><strong style={{fontSize:19,color:'#006876'}}>{confirmations['Needs reply']}</strong></div>
             <div style={{padding:11,borderRadius:12,background:'#fff0f0'}}><div style={smallLabel}>Can't make it</div><strong style={{fontSize:19,color:'#a83d3d'}}>{confirmations["Can't make it"]}</strong></div>
           </div>
           {period==='week'&&<button type="button" className="ghost" style={{width:'100%',marginTop:10}} onClick={()=>onAsk?.('Who still needs to confirm this week?')}>Ask Betty who still needs confirmation</button>}
@@ -255,7 +255,7 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
 
         {showPushSetup && <OwnerPushNotifications session={session}/>}
 
-        <div className="menu-list" style={{marginTop:16}}>
+        <div className="menu-list business-tools" style={{marginTop:16}}><h3>Business tools</h3>
           {business.role==='owner'&&<button className="more-btn" onClick={()=>setShowExpenses(true)}>Business expenses</button>}
           {business.role==='owner'&&<button className="more-btn" onClick={()=>setShowTaxLog(true)}>Sales tax log</button>}
       {business.role==='owner'&&<button type="button" onClick={()=>setShowBookings(true)}><WalletCards size={19}/><span>Booking requests</span><ChevronRight size={17}/></button>}
@@ -365,7 +365,7 @@ function OwnerPushNotifications({session}) {
           <strong style={{display:'block',fontSize:14,color:'#172038'}}>Groomer finish notifications</strong>
           <span style={{display:'block',fontSize:11,color:'#7b828e',marginTop:4,lineHeight:1.45}}>Get a phone notification when a groomer taps Finished, even when you are not watching the planner.</span>
         </div>
-        <span style={{fontSize:10,fontWeight:900,padding:'5px 8px',borderRadius:999,background:state.enabled?'#edf7ef':'#f2f3f5',color:state.enabled?'#267447':'#67707d',whiteSpace:'nowrap'}}>{state.enabled?'ON':'OFF'}</span>
+        <span style={{fontSize:10,fontWeight:900,padding:'5px 8px',borderRadius:999,background:state.enabled?'#edf7ef':'#f2f3f5',color:state.enabled?'#006876':'#67707d',whiteSpace:'nowrap'}}>{state.enabled?'ON':'OFF'}</span>
       </div>
       <button type="button" className={state.enabled?'ghost':'save'} disabled={state.loading || state.enabled} onClick={enable} style={{width:'100%',marginTop:12}}>
         {state.loading?'Checking…':state.enabled?'✓ Notifications enabled':'Enable finish notifications'}
