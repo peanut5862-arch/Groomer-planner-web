@@ -28,17 +28,25 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
   const reason=c.paused?'Client is paused or inactive.':!c.household?'Missing client ID.':!c.area?'Missing area.':!eligible.length?'Choose an active assigned groomer.':!c.frequency || c.frequency<1?'Missing grooming frequency.':!c.duration || c.duration<1?'Missing service length.':!c.service?'Choose a recurring service.':!options.length?'No working day available for an active groomer.':''
   if(reason){issues.push({owner:c.owner,dog:c.dog,reason});continue}
   const history=events.filter(e=>e.active && e.household===c.household && e.dogs.some(d=>norm(d)===norm(c.dog))).sort((a,b)=>a.date.localeCompare(b.date))
-  const last=history.filter(event=>event.date>today).at(-1)?.date
   const completedDue=dueFromCompletedService(c,events,today)
-  let due=rebuild?completedDue:(last?[completedDue,addDays(last,Math.round(c.frequency*7))].filter(Boolean).sort().at(-1):completedDue)
-  if(!due){issues.push({owner:c.owner,dog:c.dog,reason:'No service history or next due date.'});continue}
-  const anchors=rebuild?history.filter(e=>e.date>=from).map(e=>e.date):[]
+  if(!completedDue){issues.push({owner:c.owner,dog:c.dog,reason:'No service history or next due date.'});continue}
+  const interval=Math.round(c.frequency*7)
+  const cycleIndex=date=>Math.round((day(date)-day(completedDue))/86400000/interval)
+  const anchors=history.filter(event=>event.date>=from)
+  const bookedCycles=new Set(anchors.map(event=>{
+   const prefix=`recurring:${c.household}:${norm(c.dog)}:`
+   const id=(event.sourceRow?.['Recurring IDs'] || []).find?.(value=>String(value).startsWith(prefix))
+   const originalDue=String(id || '').match(/(\d{4}-\d{2}-\d{2})$/)?.[1]
+   return (originalDue || event.date)<completedDue?-1:cycleIndex(originalDue || event.date)
+  }).filter(index=>index>=0))
   const normalizeDue=date=>{
-   let next=date<from?from:date
-   for(const anchor of anchors){if(anchor<next){next=[next,addDays(anchor,Math.round(c.frequency*7))].sort().at(-1)}else if(anchor<addDays(next,Math.round(c.frequency*7)))next=addDays(anchor,Math.round(c.frequency*7))}
+   let next=date
+   while(addDays(next,interval)<from)next=addDays(next,interval)
+   // Advance by the completed-service cycle, never by a moved appointment.
+   while(bookedCycles.has(cycleIndex(next)))next=addDays(next,interval)
    return next
   }
-  tasks.push({c,options,either,anchors,normalizeDue,due:normalizeDue(due)})
+  tasks.push({c,options,either,anchors:[],normalizeDue,due:normalizeDue(completedDue)})
  }
  while(tasks.length){tasks.sort((a,b)=>a.due.localeCompare(b.due)||a.c.owner.localeCompare(b.c.owner)||a.c.dog.localeCompare(b.c.dog));const t=tasks.shift();if(t.due>until)continue
   const {c,options,either}=t;let chosen=null
@@ -59,7 +67,7 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
   for(const {g,weekdays} of sharedOptions){
    if(either && assigned && assigned!==g.name)continue
    for(let i=0;i<8;i++){
-    const date=addDays(visitDue,i),wd=day(date).getUTCDay()
+    const date=addDays(visitDue<from?from:visitDue,i),wd=day(date).getUTCDay()
     if(timeOffReason({timeOff},g,date) || date>until || !g.workDays.includes(wd) || !weekdays.has(wd))continue
     if(visit.some(item=>item.anchors.some(anchor=>anchor>=item.due && date>addDays(anchor,-Math.round(item.c.frequency*7)))))continue
     const existingAreas=[...events.filter(e=>e.active),...proposals].filter(e=>e.date===date&&e.groomer===g.name).map(e=>areaDayKey(e.area)).filter(Boolean)
@@ -88,7 +96,7 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
    if(item.either)householdAssignments.set(`${dog.household}|${item.due}`,chosen.groomer)
    proposals.push({...dog,...chosen,time:clock(visitStart),id,due:item.due,assignmentReason:item.either?'Suggested to group matching areas with available space.':''})
    visitStart+=dog.duration
-   tasks.push({...item,due:item.normalizeDue(addDays(chosen.date,Math.round(dog.frequency*7)))})
+   tasks.push({...item,due:item.normalizeDue(addDays(item.due,Math.round(dog.frequency*7)))})
   }
   const k=`${chosen.date}|${chosen.groomer}`,slots=occupied.get(k)||[],start=minutes(chosen.time)
   slots.push({start,end:start+required,household:c.household});occupied.set(k,slots)
