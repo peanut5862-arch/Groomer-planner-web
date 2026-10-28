@@ -71,6 +71,7 @@ test('six weeks comes from the completed groom, never an old draft',()=>{
  const done=event('2026-10-24','p','Bo','Montgomery',{sourceRow:{'Completion Status':'Completed'}})
  const staleDraft=event('2026-10-26')
  assert.equal(dueFromCompletedService(dog,[done,staleDraft],today),'2026-12-05')
+ assert.equal(dueFromCompletedService({...dog,due:'2027-01-05'},[done,staleDraft],today),'2026-12-05')
 })
 test('completion history belongs to the dog, not the other dog in its household',()=>{
  const dog={...client,frequency:6,due:'2026-12-05'}
