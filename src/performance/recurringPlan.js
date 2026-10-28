@@ -42,12 +42,12 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
  }
  while(tasks.length){tasks.sort((a,b)=>a.due.localeCompare(b.due)||a.c.owner.localeCompare(b.c.owner)||a.c.dog.localeCompare(b.c.dog));const t=tasks.shift();if(t.due>until)continue
   const {c,options,either}=t;let chosen=null
-  // Reserve a household visit as one unit. Scheduling each dog separately
-  // allowed buffers or another area's preferred day to split the cards.
+  // Same-frequency household dogs share a visit by default when their
+  // due windows align. Keep offset rotations and different frequencies separate.
   const visit=[t]
   let sharedOptions=options
   for(const other of tasks){
-   if(other.c.household!==c.household || other.c.frequency!==c.frequency || other.due>addDays(t.due,7))continue
+   if(other.c.household!==c.household || other.c.frequency!==c.frequency || norm(other.c.area)!==norm(c.area) || other.due>addDays(t.due,7))continue
    const common=sharedOptions.filter(o=>other.options.some(candidate=>candidate.g.name===o.g.name))
    if(common.length){visit.push(other);sharedOptions=common}
   }
