@@ -78,3 +78,25 @@ test('completion history belongs to the dog, not the other dog in its household'
  const sibling=event('2026-10-27','p','Other dog','Montgomery',{sourceRow:{'Completion Status':'Completed'}})
  assert.equal(dueFromCompletedService(dog,[sibling],today),'2026-12-05')
 })
+test('household visit adds each dog’s service time and price with one groomer',()=>{
+ const dogs=[{...client,dog:'Bo',area:'Montgomery',due:'2026-11-02',service:'Groom',duration:90,price:110,groomer:'Haley'},{...client,dog:'Bella',area:'Montgomery',due:'2026-11-02',service:'Bath',duration:45,price:50,groomer:'Either'}]
+ const plan=proposeRecurring({today,clients:dogs,events:[],groomers,rebuild:true})
+ assert.ok(plan.appointments.length>0)
+ for(const stop of plan.appointments){assert.equal(stop.groomer,'Haley');assert.equal(stop.dogs.length,2);assert.equal(stop.duration,135);assert.equal(stop.price,160)}
+})
+test('same household with intentionally offset four-week cycles stays separate',()=>{
+ const dogs=['Doodle','Shih Tzu'].map((dog,i)=>({...client,household:'wear',dog,frequency:4,area:'Montgomery',due:i?'2026-11-16':'2026-11-02',service:'Groom',duration:60,price:80}))
+ const plan=proposeRecurring({today,clients:dogs,events:[],groomers,rebuild:true})
+ assert.ok(plan.appointments.length>1)
+ assert.ok(plan.appointments.every(stop=>stop.dogs.length===1))
+ const visits=plan.appointments.slice(0,2).map(stop=>stop.dogs[0].dog)
+ assert.deepEqual(visits,['Doodle','Shih Tzu'])
+})
+test('different household frequencies do not get merged into the same cycle',()=>{
+ const dogs=[2,6].map((frequency,i)=>({...client,dog:`Dog ${i}`,frequency,area:'Montgomery',due:'2026-11-02',service:'Groom',duration:60,price:80}))
+ const plan=proposeRecurring({today,clients:dogs,events:[],groomers,rebuild:true})
+ const datesFor=name=>plan.appointments.filter(stop=>stop.dogs.some(dog=>dog.dog===name)).map(stop=>stop.date)
+ const frequent=datesFor('Dog 0'),lessFrequent=datesFor('Dog 1')
+ assert.ok(frequent.length>lessFrequent.length)
+ for(const [dates,days] of [[frequent,14],[lessFrequent,42]])for(let i=1;i<dates.length;i++)assert.ok(new Date(dates[i])-new Date(dates[i-1])>=days*86400000)
+})
