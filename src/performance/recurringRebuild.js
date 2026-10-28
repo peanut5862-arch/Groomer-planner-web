@@ -9,5 +9,5 @@ export function dueFromCompletedService(client,events,today) {
  const last=[client.lastServiceDate,...completed].filter(date=>/^\d{4}-\d{2}-\d{2}$/.test(date || '')&&date<=today).sort().at(-1)
  if(!last || !(client.frequency>0))return client.due
  const date=new Date(`${last}T12:00:00Z`);date.setUTCDate(date.getUTCDate()+Math.round(client.frequency*7))
- return [client.due,date.toISOString().slice(0,10)].filter(Boolean).sort().at(-1)
+ return date.toISOString().slice(0,10)
 }
