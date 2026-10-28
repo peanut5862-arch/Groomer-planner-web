@@ -5,7 +5,7 @@ export function replaceableRecurring(event,today,until) {
 
 export function dueFromCompletedService(client,events,today) {
  const norm=value=>String(value || '').trim().toLowerCase()
- const completed=events.filter(event=>event.date<=today && String(event.sourceRow?.['Completion Status'] || '').toLowerCase()==='completed' && (client.household?event.household===client.household:norm(event.owner)===norm(client.owner)) && event.dogs.some(dog=>norm(dog)===norm(client.dog))).map(event=>event.date)
+ const completed=events.filter(event=>String(event.sourceRow?.['Completion Status'] || '').toLowerCase()==='completed' && (client.household?event.household===client.household:norm(event.owner)===norm(client.owner)) && event.dogs.some(dog=>norm(dog)===norm(client.dog))).map(event=>String(event.sourceRow?.['Completed Date'] || event.date).slice(0,10))
  const last=[client.lastServiceDate,...completed].filter(date=>/^\d{4}-\d{2}-\d{2}$/.test(date || '')&&date<=today).sort().at(-1)
  if(!last || !(client.frequency>0))return client.due
  const date=new Date(`${last}T12:00:00Z`);date.setUTCDate(date.getUTCDate()+Math.round(client.frequency*7))
