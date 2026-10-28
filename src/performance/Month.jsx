@@ -34,6 +34,7 @@ function moveMonth(monthKey,offset) {
 function Month({onOpen,revision,dogs,viewerMode=false,onAddAppointment,onFillOpening}) {
   const business = useBusinessContext()
   const [recurringOpen,setRecurringOpen] = useState(false)
+  const [repairMode,setRepairMode] = useState(false)
   const [notice,setNotice] = useState('')
   const [search,setSearch] = useState('')
   const [dueFilter,setDueFilter] = useState('Due soon')
@@ -114,9 +115,10 @@ function Month({onOpen,revision,dogs,viewerMode=false,onAddAppointment,onFillOpe
         <button className="text-btn" onClick={()=>{setMonth(businessDateKey().slice(0,7));setSelected(businessDateKey())}}>This month</button>
         <button className="text-btn" disabled={loading} onClick={()=>setRefresh(value=>value+1)}>Refresh</button>
       </div>
-      {!viewerMode && ['owner','editor'].includes(business.role) && <button className="primary-mini" style={{marginBottom:12}} onClick={()=>setRecurringOpen(true)}>Plan next 3 months</button>}
+      {!viewerMode && ['owner','editor'].includes(business.role) && <button className="primary-mini" style={{marginBottom:12}} onClick={()=>{setRepairMode(false);setRecurringOpen(true)}}>Plan next 3 months</button>}
+      {!viewerMode && ['owner','editor'].includes(business.role) && <button className="ghost" style={{marginBottom:12,marginLeft:8}} onClick={()=>{setRepairMode(true);setRecurringOpen(true)}}>Review area grouping</button>}
       {notice && <div className="prototype-note" role="status">{notice}</div>}
-      {recurringOpen && <RecurringPlanSheet dogs={dogs} onClose={()=>setRecurringOpen(false)} onSaved={message=>{setNotice(message);setRefresh(v=>v+1)}}/>}
+      {recurringOpen && <RecurringPlanSheet initialRepair={repairMode} dogs={dogs} onClose={()=>setRecurringOpen(false)} onSaved={message=>{setNotice(message);setRefresh(v=>v+1)}}/>}
       {loading && <div className="prototype-note" role="status">Loading your month…</div>}
       {error && <div className="login-message" role="alert">{error}</div>}
       {ready && <>
