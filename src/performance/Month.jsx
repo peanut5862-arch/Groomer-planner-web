@@ -1,3 +1,4 @@
+import {timeOffReason} from './timeOff.js';
 import { monthVisits } from './monthVisits.js';
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
 import {groomerColorStyle} from './groomerColors.js';
@@ -153,10 +154,11 @@ function Month({onOpen,revision,dogs,viewerMode=false,onAddAppointment,onFillOpe
           <button className="ghost" onClick={()=>onFillOpening?.({date:selected,groomer,appointments:selectedAppointments})}>Find clients for this day</button>
         </div>}
         {chosenClient && <div className="prototype-note">{chosenClient.owner}: dates marked Same area share an existing route area. Drive time and appointment fit still need checking. <button className="text-btn" onClick={()=>setChosenClient(null)}>Clear selection</button></div>}
+        {[...new Set((groomer==='All'?groomerNames():[groomer]).map(name=>{const reason=timeOffReason(business.settings,groomerConfig(name),selected);return reason?`${name}: ${reason}`:''}).filter(Boolean))].map(reason=><div className="login-message" key={reason}>Time off · {reason}{selectedAppointments.length?' — Review existing bookings.':''}</div>)}
         {selectedWeek && <div className="eyebrow" style={{marginBottom:12}}>{selectedWeek.status==='confirmed'?'Confirmed week':'Draft week'}</div>}
         <div className="appt-list">{selectedVisits.map(visit=>visit.appointments.length===1 ? <ApptCard key={visit.key} appt={visit.appointments[0]} dogs={dogs} viewerMode={viewerMode} onOpen={mode=>onOpen({...visit.appointments[0],_initialMode:mode || 'edit'})}/> : <div className="appt-card groomer-colored month-household" key={visit.key} style={groomerColorStyle(groomerConfig(visit.groomer))}>
           <h3>{visit.owner}</h3><p>{visit.groomer} · {visit.appointments.map(appt=>appt.dogs).join(' · ')}</p>
-          <strong>{new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(visit.appointments.reduce((sum,appt)=>sum+(Number(appt.price)||0),0))} total</strong>
+          <strong>{visit.appointments.some(appt=>/to confirm/i.test(appt.dogs)) ? 'Service and price to confirm' : `${new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(visit.appointments.reduce((sum,appt)=>sum+(Number(appt.price)||0),0))} total`}</strong>
           <div className="month-visit-details">{visit.appointments.map(appt=><button className="ghost" key={appt.id} onClick={()=>onOpen({...appt,_initialMode:'edit'})}>{appt.time} · {appt.dogs}{appt.completed?' · Completed':''} · View details</button>)}</div>
         </div>)}</div>
         {!selectedAppointments.length && <div className="prototype-note">{selectedWeek
