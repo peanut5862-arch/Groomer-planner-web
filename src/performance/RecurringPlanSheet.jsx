@@ -30,7 +30,7 @@ export default function RecurringPlanSheet({dogs,onClose,onSaved}){
     }catch{}finally{completed++;if(live)setProgress(`Checking drives home… ${completed}/${jobs.size}`)}
    }}))
    if(!live)return
-   const result=proposeRecurring({today,clients,events,groomers,buffer:businessSettings().bufferMinutes,returnHome,requireReturnHome:true})
+   const result=proposeRecurring({today,clients,events,groomers,buffer:businessSettings().bufferMinutes,returnHome,requireReturnHome:true,timeOff:businessSettings().timeOff || []})
    for(const c of clients){if(c.paused||!c.frequency)continue;const relevant=[...jobs.entries()].filter(([,job])=>job.c.household===c.household);if(relevant.length&&relevant.every(([key])=>!Number.isFinite(returnHome[key]))) {const issue=result.issues.find(i=>i.owner===c.owner&&i.dog===c.dog);if(issue&&issue.reason.startsWith('No opening'))issue.reason='Could not check the drive home. Check the client and groomer starting addresses.'}}
    const expected={};for(let week=mondayForDate(addDays(today,1));week<=until;week=addDays(week,7))expected[week]=(weeks.data||[]).find(w=>w.week_start===week)?.plan_json || null
    setSnapshot(expected);setPlan(result);setSelected(new Set(result.appointments.map(a=>a.id)))
