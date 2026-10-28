@@ -78,7 +78,7 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
   }
   candidates.sort((a,b)=>b.sameArea-a.sameArea || a.date.localeCompare(b.date) || b.weekdayStrength-a.weekdayStrength || a.load-b.load || a.groomer.localeCompare(b.groomer))
   chosen=candidates[0]
-  if(!chosen){for(const item of visit)issues.push({owner:item.c.owner,dog:item.c.dog,reason:`No matching area-day opening that allows the drive home by the end time near ${t.due}.`});continue}
+  if(!chosen){for(const item of visit){issues.push({owner:item.c.owner,dog:item.c.dog,reason:`No matching area-day opening that allows the drive home by the end time near ${item.due}.`});tasks.push({...item,due:item.normalizeDue(addDays(item.due,Math.round(item.c.frequency*7)))})}continue}
   let visitStart=minutes(chosen.time)
   for(const item of visit){
    const dog=item.c,id=`recurring:${dog.household}:${norm(dog.dog)}:${item.due}`
