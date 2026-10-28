@@ -65,3 +65,15 @@ test('rebuild never mixes service areas on a groomer day',()=>{
  for(const a of plan.appointments){const key=a.date+'|'+a.groomer;if(!days.has(key))days.set(key,new Set());days.get(key).add(a.area)}
  assert.ok([...days.values()].every(areas=>areas.size===1))
 })
+import {dueFromCompletedService} from '../src/performance/recurringRebuild.js'
+test('six weeks comes from the completed groom, never an old draft',()=>{
+ const dog={...client,frequency:6,due:'2026-10-01'}
+ const done=event('2026-10-24','p','Bo','Montgomery',{sourceRow:{'Completion Status':'Completed'}})
+ const staleDraft=event('2026-10-26')
+ assert.equal(dueFromCompletedService(dog,[done,staleDraft],today),'2026-12-05')
+})
+test('completion history belongs to the dog, not the other dog in its household',()=>{
+ const dog={...client,frequency:6,due:'2026-12-05'}
+ const sibling=event('2026-10-27','p','Other dog','Montgomery',{sourceRow:{'Completion Status':'Completed'}})
+ assert.equal(dueFromCompletedService(dog,[sibling],today),'2026-12-05')
+})
