@@ -1,4 +1,6 @@
+import {timeOffReason,timeOffErrors} from './timeOff.js'
 import { useSyncExternalStore } from 'react'
+import { validGroomerColor } from './groomerColors.js'
 
 export const DEFAULT_SETTINGS = {
   businessName:'My grooming business', timeZone:'America/Chicago', bufferMinutes:15,
@@ -26,7 +28,7 @@ export function groomerConfig(name) { return businessSettings().groomers.find(g=
 export function firstGroomer() { return groomerNames()[0] || '' }
 export function groomerWorksOn(name,dateKey) {
   const g=groomerConfig(name)
-  return Boolean(g && g.active!==false && g.workDays.includes(new Date(`${dateKey}T12:00:00Z`).getUTCDay()))
+  return Boolean(g && g.active!==false && !timeOffReason(businessSettings(),g,dateKey) && g.workDays.includes(new Date(`${dateKey}T12:00:00Z`).getUTCDay()))
 }
 export function chooseGroomer(dateKey,{preferred='',assigned=[],counts={}}={}) {
   if (preferred) return groomerWorksOn(preferred,dateKey) ? preferred : ''
@@ -38,7 +40,7 @@ export function calendarWorkDays() {
   return [1,2,3,4,5,6,0].filter(day=>day>=1 && day<=5 || days.has(day))
 }
 export function validateBusinessSettings(value) {
-  const errors=[]
+  const errors=[...timeOffErrors(value)]
   if (!String(value?.businessName || '').trim()) errors.push('Enter your business name.')
   if (String(value?.businessName || '').length>100) errors.push('Keep the business name under 100 characters.')
   if (!value?.timeZone) errors.push('Choose a valid time zone.')
@@ -56,6 +58,7 @@ export function validateBusinessSettings(value) {
     const valid=/^([01]\d|2[0-3]):[0-5]\d$/
     if (!valid.test(g.startTime)||!valid.test(g.endTime)||g.startTime>=g.endTime) errors.push(`${name || 'Each groomer'} needs an end time after the start time.`)
     if (String(g.homeAddress || '').length>500) errors.push('Keep starting addresses under 500 characters.')
+    if (!validGroomerColor(g.color)) errors.push('Choose a valid groomer color.')
     if (!Number.isFinite(g.commissionPercent)||g.commissionPercent<0||g.commissionPercent>100) errors.push('Service commission must be 0–100%.')
   }
   return [...new Set(errors)]
