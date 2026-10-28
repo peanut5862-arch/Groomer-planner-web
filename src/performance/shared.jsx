@@ -1,4 +1,5 @@
 import {taxTotal} from './salesTax.js';
+import {groomerColorStyle} from './groomerColors.js';
 import {renderMessage} from './messageTemplates.js';
 import ClientNotes from './ClientNotes.jsx';
 import GroomingReport from './GroomingReport.jsx';
@@ -366,8 +367,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
   const canComplete = Boolean(onComplete) && !completed && !inactive && /^\d{4}-\d{2}-\d{2}$/.test(date)
   const hasUndoSnapshot = Boolean(row['Completion Snapshot'] && typeof row['Completion Snapshot'] === 'object')
   const canUndo = Boolean(onUndo) && completed && !inactive && hasUndoSnapshot
-  const cardGroomer = String(appt?.groomer || row.Groomer || '').trim().toLowerCase()
-  const cardClass = ['appt-card',cardGroomer==='jen'?'groomer-jen':'',cardGroomer==='haley'?'groomer-haley':'',completed?'completed-card':''].filter(Boolean).join(' ')
+  const cardClass = ['appt-card','groomer-colored',completed?'completed-card':''].filter(Boolean).join(' ')
   const clientAddress = appointmentAddress(appt,clientAddressLookup(dogs || []))
   const openClientAddress = async () => {
     const url = googleMapsAddressUrl(clientAddress)
@@ -423,7 +423,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
     }
   }
   return (
-    <div className={cardClass} style={{cursor:onOpen?'pointer':'default'}} onClick={onOpen} role={onOpen?'group':undefined} aria-label={onOpen?`Appointment for ${appt.owner}`:undefined} tabIndex={onOpen?0:undefined}
+    <div className={cardClass} style={{...groomerColorStyle(groomerConfig(appt?.groomer || row.Groomer)),cursor:onOpen?'pointer':'default'}} onClick={onOpen} role={onOpen?'group':undefined} aria-label={onOpen?`Appointment for ${appt.owner}`:undefined} tabIndex={onOpen?0:undefined}
       onKeyDown={onOpen ? event=>{ if(event.target===event.currentTarget && (event.key==='Enter' || event.key===' ')){event.preventDefault();onOpen()} } : undefined}>
       <div className="time-pill">{displayClockTime(appt.time)}</div>
       <div className="appt-main">
@@ -434,6 +434,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
         <div className="dogs">{appt.dogs}</div>
         {appt.services && appt.services !== appt.dogs && <div style={{fontSize:11,color:'#59616e',marginTop:4}}><strong>Services:</strong> {appt.services}</div>}
         <div className="meta">
+          {(appt.groomer || row.Groomer) && <span>{appt.groomer || row.Groomer}</span>}
           {appt.area && <span><MapPin size={14}/>{appt.area}</span>}
           {Number.isFinite(appt.drive) && appt.drive > 0 && (
             <span><Route size={14}/>{Math.round(appt.drive)} min</span>
@@ -630,6 +631,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
         )}
         {!viewerMode && !inactive && completed && canUndo && (
           <button
+            className="completed-pill"
             type="button"
             disabled={completing}
             onPointerDown={event=>event.stopPropagation()}
@@ -648,7 +650,7 @@ function ApptCard({appt,dogs,onOpen,onComplete,onUndo,onConfirmation,onPayment,c
           </button>
         )}
         {!inactive && completed && !canUndo && (
-          <div style={{marginTop:9,fontSize:12,fontWeight:800,color:'#267447'}}>✓ Completed</div>
+          <div className="completed-pill" style={{marginTop:9,fontSize:12,fontWeight:800,color:'#267447'}}>✓ Completed</div>
         )}
       </div>
       <div style={{display:'flex',alignItems:'center',gap:8,marginLeft:'auto'}}>
@@ -1045,4 +1047,3 @@ function plannerActiveRow(row,todayKey=businessDateKey()) {
 }
 
 export { API_ORIGIN, apiUrl, apiFetch, dismissFormKeyboard, Stat, clientConfirmationStatus, confirmationTone, needsClientConfirmation, normalizedPhone, clientContactLookupCache, clientContactLookup, phoneForScheduleRow, arrivalWindowLabel, messageDateLabel, naturalPetNames, confirmationMessage, reminderMessage, runningLateMessage, onMyWayMessage, imHereMessage, needAccessMessage, finishedReadyMessage, paymentPreferenceKey, paymentMethodDetails, preferredPaymentForAppointment, paymentReminderMessage, appointmentContactKey, readAppointmentContact, saveAppointmentContact, contactLabel, currentPosition, googleEtaToAppointment, etaArrivalClock, openSms, openCall, googleMapsAddressUrl, shareAppointmentAddress, ApptCard, businessDateKey, mondayForDate, todayAppointments, clockMinutesForDisplay, displayClockTime, compareAppointmentTimes, routeValue, routeKey, fullClientAddress, clientAddressLookupCache, clientAddressLookup, appointmentAddress, serviceDefaultsForDog, defaultFirstStopTime, schedulingOverrideReasons, fillClockValue, appointmentDurationMinutes, openingForDuration, canonicalServiceLabel, appointmentServiceOptions, dogDueInfo, clientDueInfo, canonicalAreaLabel, completionBlockReason, appointmentTimeInput, scheduleRowDuration, plannerClientGroups, plannerActiveRow }
-
