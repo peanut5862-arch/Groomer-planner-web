@@ -1,3 +1,4 @@
+import {monthVisits} from './performance/monthVisits.js';
 import {readScheduleWeek,clearScheduleReads,queueRouteRead} from './performance/scheduleReads.js';
 import {routeApplyBlock} from './performance/routeApplyGuard.js';
 import BookingNotice from './performance/BookingNotice.jsx';
@@ -833,8 +834,8 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
               const key=ymd(dayDate),items=visibleAppointments.filter(a=>a.date===key).slice().sort(compareAppointmentTimes)
               const total=items.reduce((sum,a)=>sum+(Number.isFinite(a.price)?a.price:0),0)
               return <section className="week-board-day" key={key} aria-label={displayDate(dayDate)}>
-                <button className={`week-board-heading ${key===todayKey?'is-today':''}`} onClick={()=>setSelectedDay(key)} aria-label={`Open ${displayDay(dayDate)} ${displayDate(dayDate)} for route planning`}><span>{displayDay(dayDate)}</span><strong>{dayDate.getDate()}</strong><small>{items.length} stops</small></button>
-                <div className="week-board-stops">{items.map(appt=><button type="button" key={appt.id} className={`week-board-stop ${appt.completed?'is-completed':''}`} style={groomerColorStyle(groomerConfig(appt.groomer))} onClick={()=>onOpen({...appt,_initialMode:'edit'})} aria-label={`${displayDay(dayDate)}, ${appt.time}, ${appt.owner}, ${appt.dogs}, ${appt.groomer}${appt.completed?', completed':''}`} title={`${appt.owner} · ${appt.dogs} · ${appt.area}`}><span>{displayClockTime(appt.time)}</span><strong>{appt.owner}</strong><span>{appt.dogs.replace(/\s*\([^)]*\)/g,'')}</span><small>{appt.groomer}{appt.completed?' ✓':''}</small></button>)}</div>
+                <button className={`week-board-heading ${key===todayKey?'is-today':''}`} onClick={()=>setSelectedDay(key)} aria-label={`Open ${displayDay(dayDate)} ${displayDate(dayDate)} for route planning`}><span>{displayDay(dayDate)}</span><strong>{dayDate.getDate()}</strong><small>{monthVisits(items).length} stops</small></button>
+                <div className="week-board-stops">{monthVisits(items).map(visit=>{const appt=visit.appointments[0],completed=visit.appointments.every(a=>a.completed);return <button type="button" key={visit.key} className={`week-board-stop ${completed?'is-completed':''}`} style={groomerColorStyle(groomerConfig(visit.groomer))} onClick={()=>visit.appointments.length>1?setSelectedDay(key):onOpen({...appt,_initialMode:'edit'})} aria-label={`${displayDay(dayDate)}, ${visit.owner}, ${visit.appointments.map(a=>a.dogs).join(', ')}, ${visit.groomer}`}><span>{displayClockTime(appt.time)}</span><strong>{visit.owner}</strong><span>{visit.appointments.map(a=>a.dogs).join(', ')}</span><small>{visit.groomer}{completed?' ✓':''}</small></button>})}</div>
                 {!viewerMode&&<button type="button" className="week-board-add" onClick={()=>onAddAppointment?.(key,groomer)} aria-label={`Add appointment on ${displayDay(dayDate)} ${displayDate(dayDate)}`}>+</button>}
                 <div className="week-board-total">${Math.round(total)}</div>
                 <button type="button" className="week-board-route" onClick={()=>setSelectedDay(key)}>Day &amp; route</button>
@@ -890,16 +891,14 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
             {dayAppointments.length > 0 ? (
               <>
                 <div style={{fontSize:11,color:'#8a8f99',margin:'0 0 8px 2px'}}>
-                  {activeAppointments.length} stop{activeAppointments.length===1?'':'s'} · ${Math.round(revenue)}
+                  {monthVisits(activeAppointments).length} stop{monthVisits(activeAppointments).length===1?'':'s'} · ${Math.round(revenue)}
                 </div>
                 <GoogleRoutePanel appointments={activeAppointments} dogs={dogs} selectedGroomer={groomer} dateLabel={`${displayDay(dayDate)} ${displayDate(dayDate)}`} dateKey={dateKey} viewerMode={viewerMode} onRouteApplied={()=>setRouteRefresh(v=>v+1)}/>
                 <div className="appt-list">
-                  {dayAppointments
-                    .slice()
-                    .sort(compareAppointmentTimes)
-                    .map(appt=>(
-                      <ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={(mode)=>onOpen({...appt,_initialMode:mode || 'edit'})} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} onPayment={onPayment} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id} paymentSaving={paymentSavingId===appt.id} viewerMode={viewerMode}/>
-                    ))}
+                  {monthVisits(dayAppointments.slice().sort(compareAppointmentTimes)).map(visit=>{
+                    const card=appt=><ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={mode=>onOpen({...appt,_initialMode:mode || 'edit'})} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} onPayment={onPayment} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id} paymentSaving={paymentSavingId===appt.id} viewerMode={viewerMode}/>;
+                    return visit.appointments.length===1?card(visit.appointments[0]):<div className="appt-card groomer-colored month-household" key={visit.key} style={groomerColorStyle(groomerConfig(visit.groomer))}><h3>{visit.owner}</h3><p>{visit.groomer} · {visit.appointments.map(a=>a.dogs).join(' · ')}</p><strong>${visit.appointments.reduce((sum,a)=>sum+(Number(a.price)||0),0).toFixed(2)} total</strong>{visit.appointments.map(appt=><details key={appt.id}><summary style={{padding:'12px 0',cursor:'pointer'}}>{appt.time} · {appt.dogs} · Details &amp; actions</summary>{card(appt)}</details>)}</div>
+                  })}
                 </div>
               </>
             ) : (
