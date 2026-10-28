@@ -1,7 +1,7 @@
 -- Replace only generated, flexible, unconfirmed future rows. The existing
 -- recurring-save function validates and inserts the replacement rows in the
 -- same transaction; a stale preview or any error rolls everything back.
-create or replace function public.rebuild_recurring_grooming_plan(p_rows jsonb,p_expected_weeks jsonb,p_until date)
+create or replace function public.rebuild_recurring_grooming_plan(p_rows jsonb,p_expected_weeks jsonb,p_until date,p_replace_rows jsonb)
 returns jsonb language plpgsql security invoker set search_path to public,pg_temp as $fn$
 declare
  bid uuid:=planner_private.business_id();
@@ -11,6 +11,7 @@ declare
 begin
  if auth.uid() is null or bid is null or coalesce(planner_private.role(),'') not in ('owner','editor') then raise exception 'Owner or editor access required'; end if;
  if jsonb_typeof(p_rows) is distinct from 'array' or jsonb_array_length(p_rows)=0 or jsonb_array_length(p_rows)>1000 then raise exception 'Review and select replacement appointments first'; end if;
+ if jsonb_typeof(p_replace_rows) is distinct from 'array' or jsonb_array_length(p_replace_rows)=0 or jsonb_array_length(p_replace_rows)>1000 then raise exception 'Reviewed source appointments are required'; end if;
  if jsonb_typeof(p_expected_weeks) is distinct from 'object' then raise exception 'A schedule snapshot is required'; end if;
  if p_until is null or p_until<=today or p_until>(today+interval '3 months')::date then raise exception 'Choose the next three months'; end if;
  -- All replacement dates must be inside the reviewed range.
@@ -31,7 +32,7 @@ begin
  for wk in select week_start,plan_json,status from public.weekly_drafts where business_id=bid and week_start>=date_trunc('week',today+1)::date and week_start<=p_until order by week_start loop
   revised:='[]'::jsonb;
   for row_value in select value from jsonb_array_elements(coalesce(wk.plan_json,'[]'::jsonb)) loop
-   if wk.status is distinct from 'confirmed' and coalesce(row_value->>'Date','') ~ '^\d{4}-\d{2}-\d{2}$'
+   if exists(select 1 from jsonb_array_elements(p_replace_rows) reviewed where reviewed=row_value) and wk.status is distinct from 'confirmed' and coalesce(row_value->>'Date','') ~ '^\d{4}-\d{2}-\d{2}$'
       and (row_value->>'Date')::date>today and (row_value->>'Date')::date<=p_until
       and lower(coalesce(row_value->>'Appointment Status','')) not in ('cancelled','canceled','moved to another week','no-show','no show')
       and coalesce(row_value->'Locked Time','null'::jsonb) in ('null'::jsonb,'false'::jsonb,'0'::jsonb,'""'::jsonb)
@@ -48,6 +49,7 @@ begin
    next_expected:=jsonb_set(next_expected,array[wk.week_start::text],revised,true);
   end if;
  end loop;
+ if replaced<>jsonb_array_length(p_replace_rows) then raise exception 'A reviewed source appointment changed or is protected. Rebuild the preview'; end if;
  result:=public.save_recurring_grooming_plan(p_rows,next_expected);
  if result->>'status' is distinct from 'saved' then raise exception 'Replacement appointments could not be saved'; end if;
  -- Check each rebuilt destination against the entire resulting day,
@@ -70,5 +72,5 @@ begin
  return result || jsonb_build_object('replaced',replaced);
 end;
 $fn$;
-revoke all on function public.rebuild_recurring_grooming_plan(jsonb,jsonb,date) from public,anon;
-grant execute on function public.rebuild_recurring_grooming_plan(jsonb,jsonb,date) to authenticated;
+revoke all on function public.rebuild_recurring_grooming_plan(jsonb,jsonb,date,jsonb) from public,anon;
+grant execute on function public.rebuild_recurring_grooming_plan(jsonb,jsonb,date,jsonb) to authenticated;
