@@ -4,6 +4,7 @@ import BookingNotice from './performance/BookingNotice.jsx';
 import ClientNotes from './performance/ClientNotes.jsx';
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './performance/businessConfig.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {groomerColorStyle} from './performance/groomerColors.js';
 import { supabase } from './supabase.js';
 import { AppLauncher } from '@capacitor/app-launcher';
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Ellipsis, Home, MapPin, Plus, Route, Sparkles, Users, WalletCards, LogOut } from 'lucide-react';
@@ -212,7 +213,7 @@ function Today({onBookingSaved,onReviewDay,onOpen,onComplete,onUndo,onConfirmati
 
       <div className="segmented" aria-label="Filter by groomer">
         {['All',...groomerNames()].map(name=>(
-          <button key={name} className={groomer===name?'active':''}
+          <button key={name} className={`${groomer===name?'active ':''}${name!=='All'?'groomer-colored':''}`} style={name!=='All'?groomerColorStyle(groomerConfig(name)):undefined}
             aria-pressed={groomer===name} onClick={()=>setGroomer(name)}>{name}</button>
         ))}
       </div>
@@ -614,6 +615,8 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
   const [loading,setLoading]=useState(true)
   const [error,setError]=useState('')
   const [confirmationFilter,setConfirmationFilter]=useState('All')
+  const [selectedDay,setSelectedDay]=useState(null)
+  useEffect(()=>setSelectedDay(null),[weekStart,groomer])
   const loadedWeekRef=useRef('')
   const dayRefs=useRef({})
 
@@ -796,7 +799,9 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
         {['All',...groomerNames()].map(x=>(
           <button
             key={x}
-            className={`${groomer===x?'active ':''}${x==='Jen'?'seg-jen':x==='Haley'?'seg-haley':'seg-all'}`}
+            className={`${groomer===x?'active ':''}${x==='All'?'seg-all':'groomer-colored'}`}
+            style={x!=='All'?groomerColorStyle(groomerConfig(x)):undefined}
+            aria-pressed={groomer===x}
             onClick={()=>setGroomer(x)}
           >
             {x}
@@ -823,25 +828,20 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
               Tomorrow reminders{tomorrowReminderCount ? ` (${tomorrowReminderCount})` : ''}
             </button>
           </div>
-          <div className="week-day-jump" aria-label="Jump to a day">
-            {days.map(dayDate => {
-              const dateKey = ymd(dayDate)
-              const dayRows = groomerAppointments.filter(appt=>appt.date===dateKey)
-              const done = dayRows.filter(appt=>appt.completed).length
-              return (
-                <button
-                  key={dateKey}
-                  type="button"
-                  className={dateKey===todayKey?'today':''}
-                  onClick={()=>jumpToDay(dateKey)}
-                >
-                  <span>{displayDay(dayDate)} {dayDate.getDate()}</span>
-                  <small>{dayRows.length ? `${done}/${dayRows.length} done` : 'No stops'}</small>
-                  <small>{new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(dayRows.reduce((sum,appt)=>sum+(Number.isFinite(appt.price)?appt.price:0),0))}</small>
-                </button>
-              )
+          <div className="week-board" style={{'--week-columns':days.length}} aria-label="Weekly appointment overview">
+            {days.map(dayDate=>{
+              const key=ymd(dayDate),items=visibleAppointments.filter(a=>a.date===key).slice().sort(compareAppointmentTimes)
+              const total=items.reduce((sum,a)=>sum+(Number.isFinite(a.price)?a.price:0),0)
+              return <section className="week-board-day" key={key} aria-label={displayDate(dayDate)}>
+                <button className={`week-board-heading ${key===todayKey?'is-today':''}`} onClick={()=>setSelectedDay(key)} aria-label={`Open ${displayDay(dayDate)} ${displayDate(dayDate)} for route planning`}><span>{displayDay(dayDate)}</span><strong>{dayDate.getDate()}</strong><small>{items.length} stops</small></button>
+                <div className="week-board-stops">{items.map(appt=><button type="button" key={appt.id} className={`week-board-stop ${appt.completed?'is-completed':''}`} style={groomerColorStyle(groomerConfig(appt.groomer))} onClick={()=>onOpen({...appt,_initialMode:'edit'})} aria-label={`${displayDay(dayDate)}, ${appt.time}, ${appt.owner}, ${appt.dogs}, ${appt.groomer}${appt.completed?', completed':''}`} title={`${appt.owner} · ${appt.dogs} · ${appt.area}`}><span>{displayClockTime(appt.time)}</span><strong>{appt.owner}</strong><span>{appt.dogs.replace(/\s*\([^)]*\)/g,'')}</span><small>{appt.groomer}{appt.completed?' ✓':''}</small></button>)}</div>
+                {!viewerMode&&<button type="button" className="week-board-add" onClick={()=>onAddAppointment?.(key,groomer)} aria-label={`Add appointment on ${displayDay(dayDate)} ${displayDate(dayDate)}`}>+</button>}
+                <div className="week-board-total">${Math.round(total)}</div>
+                <button type="button" className="week-board-route" onClick={()=>setSelectedDay(key)}>Day &amp; route</button>
+              </section>
             })}
           </div>
+          {selectedDay&&<button type="button" className="secondary-btn" style={{marginTop:15}} onClick={()=>setSelectedDay(null)}>Close day details</button>}
           {weeklyMissingPrices && <div className="prototype-note">Some appointments have no price saved; the week total includes known prices only.</div>}
         </>
       )}
@@ -855,7 +855,7 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
         </div>
       )}
 
-      {!loading && !error && weekRecord && days.map(dayDate => {
+      {!loading && !error && weekRecord && days.filter(day=>ymd(day)===selectedDay).map(dayDate => {
         const dateKey = ymd(dayDate)
         const dayAppointments = visibleAppointments.filter(a => a.date === dateKey)
         const activeAppointments = dayAppointments.filter(appt=>!appt.inactive)
@@ -982,7 +982,7 @@ function GroomerStopCard({appt,onFinish,finishing}) {
   },[appt.id,appt.groomerPaymentType])
 
   return (
-    <div className={`appt-card groomer-haley ${appt.finished?'completed-card':''}`} style={{cursor:'default'}}>
+    <div className={`appt-card groomer-colored ${appt.finished?'completed-card':''}`} style={{...groomerColorStyle(groomerConfig(appt.groomer || appt.sourceRow?.Groomer || getBusinessContext().groomer)),cursor:'default'}}>
       <div className="time-pill">{displayClockTime(appt.time)}</div>
       <div className="appt-main">
         <div className="appt-topline"><strong>{appt.owner}</strong><span className={`status-dot ${appt.finished?'confirmed':'locked'}`}/></div>
@@ -1176,7 +1176,7 @@ function GroomerPortal({session,groomer}) {
   return (
     <div className="app-shell">
       <style>{plannerThemeCss}</style>
-      <header className="topbar"><div className="brand-mark">HB</div><div><strong>Hey Betty</strong><span>{groomer} · Groomer mode</span></div></header>
+      <header className="topbar"><div><strong>Hey Betty</strong><span>{groomer} · Groomer mode</span></div></header>
       {showExpenses&&<BusinessExpenses onClose={()=>setShowExpenses(false)}/>}
       <main key={business.businessId}>{notice&&<div className="prototype-note" style={{marginBottom:14}}>{notice} <button className="text-btn" onClick={()=>setNotice('')}>Dismiss</button></div>}{body}</main>
       <nav className="bottom-nav">{nav.map(([name,Icon])=><button key={name} className={tab===name?'active':''} onClick={()=>setTab(name)}><Icon size={20}/><span>{name}</span></button>)}</nav>
@@ -1210,6 +1210,10 @@ const plannerThemeCss = `
   .appt-card.groomer-haley{border-left:5px solid var(--gp-haley-line)!important;}
   .appt-card.completed-card{background:var(--gp-success)!important;}
   .route-card{box-shadow:0 5px 14px rgba(83,117,155,.06);}
+  body .appt-card.groomer-colored{border-left:5px solid var(--groomer-color)!important;}
+  body .tiny-appt.groomer-colored{background:var(--groomer-tint)!important;color:#17223f!important;border-left:3px solid var(--groomer-color);}
+  body .segmented button.groomer-colored{box-shadow:inset 0 -3px var(--groomer-color);}
+  body .segmented button.active.groomer-colored{background:var(--groomer-color)!important;color:var(--groomer-ink)!important;}
   .stat{background:#fff!important;border-color:#e5e2dc!important;}
   .stat.money{background:var(--gp-money)!important;border-color:var(--gp-money-line)!important;}
   .stat.completed{background:var(--gp-success)!important;border-color:#b9d8c1!important;}
@@ -1741,7 +1745,7 @@ function PlannerApp({ onReady }) {
     <div className="app-shell">
       <style>{plannerThemeCss}</style>
       <header className="topbar">
-        <div className="brand-mark">HB</div>
+
         <div><strong>Hey Betty</strong><span>{viewerMode ? 'Viewer demo · read only' : business.settings.businessName}</span></div>
         <button
           type="button"
