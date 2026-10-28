@@ -1,3 +1,4 @@
+import TimeOffSettings from './TimeOffSettings.jsx'
 import MessageTemplates from './MessageTemplates.jsx'
 import {groomerColor,BRAND_COLORS} from './groomerColors.js'
 import {templateErrors} from './messageTemplates.js'
@@ -66,6 +67,7 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
     {['Venmo','PayPal','Cash App','Zelle','Apple Pay'].map(method=><label key={method}>{method}<input value={draft.paymentInstructions?.[method]||''} maxLength={500} placeholder={`Your ${method} details`} onChange={e=>patch({paymentInstructions:{...draft.paymentInstructions,[method]:e.target.value}})}/></label>)}
    </>}
    {tab==='schedule'&&<>
+    <TimeOffSettings settings={draft} onChange={timeOff=>patch({timeOff})}/>
     <label>Gap between appointments (minutes)<input type="number" min={0} max={120} value={draft.bufferMinutes} onChange={e=>patch({bufferMinutes:Number(e.target.value)})}/></label>
     <p className="settings-help">Used when finding openings. Saved appointments stay where you placed them.</p>
     {draft.groomers.map(g=><div className="settings-card" key={g.id}>
