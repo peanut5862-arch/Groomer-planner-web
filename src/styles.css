@@ -303,3 +303,8 @@ body .appt-payment-btn.paid{background:#edf6f3!important;border-color:#a8cec5!im
 .month-client {display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 0;border-top:1px solid #eee;}
 .month-client .text-btn {text-align:left;display:grid;gap:5px;}
 .month-client span,.month-client small {font-size:12px;color:#536170;}
+
+.month-household {display:block;padding:18px;border-left:6px solid var(--groomer-color);}
+.month-household h3 {margin:0 0 8px;}
+.month-visit-details {display:grid;gap:8px;margin-top:12px;}
+.month-visit-details button {text-align:left;}
