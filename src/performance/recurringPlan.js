@@ -1,3 +1,4 @@
+import {dueFromCompletedService} from './recurringRebuild.js'
 import {timeOffReason} from './timeOff.js'
 const day = value => new Date(`${value}T12:00:00Z`)
 export const addDays = (value,n) => {const d=day(value);d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
@@ -27,7 +28,9 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
   const reason=c.paused?'Client is paused or inactive.':!c.household?'Missing client ID.':!c.area?'Missing area.':!eligible.length?'Choose an active assigned groomer.':!c.frequency || c.frequency<1?'Missing grooming frequency.':!c.duration || c.duration<1?'Missing service length.':!c.service?'Choose a recurring service.':!options.length?'No working day available for an active groomer.':''
   if(reason){issues.push({owner:c.owner,dog:c.dog,reason});continue}
   const history=events.filter(e=>e.active && e.household===c.household && e.dogs.some(d=>norm(d)===norm(c.dog))).sort((a,b)=>a.date.localeCompare(b.date))
-  const last=history.at(-1)?.date;let due=rebuild?c.due:(last?addDays(last,Math.round(c.frequency*7)):c.due)
+  const last=history.filter(event=>event.date>today).at(-1)?.date
+  const completedDue=dueFromCompletedService(c,events,today)
+  let due=rebuild?completedDue:(last?[completedDue,addDays(last,Math.round(c.frequency*7))].filter(Boolean).sort().at(-1):completedDue)
   if(!due){issues.push({owner:c.owner,dog:c.dog,reason:'No service history or next due date.'});continue}
   const anchors=rebuild?history.filter(e=>e.date>=from).map(e=>e.date):[]
   const normalizeDue=date=>{
