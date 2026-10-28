@@ -13,7 +13,7 @@ returns jsonb language plpgsql security invoker set search_path to '' as $fn$
 declare
  bid uuid:=planner_private.business_id(); today date:=(now() at time zone coalesce(planner_private.settings()->>'timeZone','America/Chicago'))::date;
  entry record; m jsonb; src jsonb; target jsonb; plans jsonb:=p_expected_weeks; current_plan jsonb; plan jsonb; target_day jsonb; profile jsonb;
- sw date; tw date; target_date date; n integer; changed integer:=0; gap integer:=coalesce((planner_private.settings()->>'bufferMinutes')::integer,0);
+ sw date; tw date; target_date date; closed_date date; closed_groomer text; n integer; changed integer:=0; gap integer:=coalesce((planner_private.settings()->>'bufferMinutes')::integer,0);
 begin
  if auth.uid() is null or bid is null or coalesce(planner_private.role(),'') not in ('owner','editor') then raise exception 'Owner or editor access required';end if;
  if jsonb_typeof(p_moves) is distinct from 'array' or jsonb_array_length(p_moves)>1000 or jsonb_typeof(p_expected_weeks) is distinct from 'object' then raise exception 'Invalid closure move plan';end if;
@@ -27,14 +27,16 @@ begin
  -- Validate and remove every source before inserting any destination, so
  -- multiple dog rows from one household move together in one transaction.
  for m in select value from jsonb_array_elements(p_moves) loop
-  src:=m->'expectedRow';sw:=(m->>'weekStart')::date;target_date:=(m->>'date')::date;
+  src:=m->'expectedRow';sw:=(m->>'weekStart')::date;target_date:=(m->>'date')::date;closed_date:=coalesce((m->>'closedDate')::date,(src->>'Date')::date);closed_groomer:=coalesce(m->>'closedGroomer',src->>'Groomer');
   tw:=date_trunc('week',target_date)::date;
   if not plans ? sw::text or not plans ? tw::text then raise exception 'A required week is missing';end if;
   select count(*) into n from jsonb_array_elements(plans->sw::text) e where e=src;
   if n<>1 then raise exception 'A source appointment changed';end if;
   if lower(coalesce(src->>'Completion Status',''))='completed' or lower(coalesce(src->>'Appointment Status','')) in ('cancelled','canceled','moved to another week','no-show','no show') then raise exception 'A source appointment is no longer active';end if;
-  if (src->>'Date')::date<today or planner_private.closed_reason((src->>'Date')::date,src->>'Groomer') is null then raise exception 'Only appointments on saved closed dates can move automatically';end if;
-  if target_date<today or target_date<=(src->>'Date')::date or target_date>(src->>'Date')::date+21 or planner_private.closed_reason(target_date,m->>'groomer') is not null then raise exception 'The destination must be an open date within 21 days';end if;
+  if (src->>'Date')::date<today or planner_private.closed_reason(closed_date,closed_groomer) is null then raise exception 'A saved closed date is required';end if;
+  if closed_date=(src->>'Date')::date and closed_groomer is distinct from src->>'Groomer' then raise exception 'The closed groomer does not match the source';end if;
+  if closed_date<>(src->>'Date')::date and not exists(select 1 from jsonb_each(p_expected_weeks) w cross join lateral jsonb_array_elements(coalesce(nullif(w.value,'null'::jsonb),'[]'::jsonb)) old where old->>'Date'=closed_date::text and old->>'Groomer'=closed_groomer and old->>'Rescheduled To'=src->>'Date' and old->>'Dogs'=src->>'Dogs' and coalesce(old->>'Household ID',old->>'Owner')=coalesce(src->>'Household ID',src->>'Owner')) then raise exception 'The original holiday appointment could not be verified';end if;
+  if target_date<today or target_date<closed_date-7 or target_date>closed_date+21 or planner_private.closed_reason(target_date,m->>'groomer') is not null then raise exception 'The destination must be an open date near the holiday';end if;
   select value into profile from jsonb_array_elements(planner_private.settings()->'groomers') where value->>'name'=m->>'groomer' and coalesce((value->>'active')::boolean,true);
   if profile is null or not (profile->'workDays') @> to_jsonb(array[extract(dow from target_date)::integer]) then raise exception 'Groomer does not work on the destination date';end if;
   if coalesce(m->>'time','') !~ '^([01][0-9]|2[0-3]):[0-5][0-9]$' or coalesce((src->>'Minutes')::integer,0)<1 or (m->>'time')::time<(profile->>'startTime')::time or (m->>'time')::time+make_interval(mins=>(src->>'Minutes')::integer)>(profile->>'endTime')::time then raise exception 'Invalid destination time';end if;
