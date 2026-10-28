@@ -1,12 +1,13 @@
+import {timeOffReason} from './timeOff.js'
 const day = value => new Date(`${value}T12:00:00Z`)
 export const addDays = (value,n) => {const d=day(value);d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
 export function horizonDate(today){const d=day(today);const date=d.getUTCDate();d.setUTCDate(1);d.setUTCMonth(d.getUTCMonth()+3);const last=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,0)).getUTCDate();d.setUTCDate(Math.min(date,last));return d.toISOString().slice(0,10)}
 const norm = value => String(value || '').trim().toLowerCase()
-// Woodlands subdivisions share an area; Magnolia is a separate route day.
-const areaDayKey = value => /\bwoodlands\b/.test(norm(value)) ? 'woodlands' : norm(value)
+// Keep each saved service area on its own route day.
+const areaDayKey = value => norm(value)
 const minutes = value => {const m=/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i.exec(String(value || '').trim());if(!m)return NaN;let h=Number(m[1]);if(m[3])h=h%12+(m[3].toUpperCase()==='PM'?12:0);return h*60+Number(m[2])}
 const clock = value => `${String(Math.floor(value/60)).padStart(2,'0')}:${String(value%60).padStart(2,'0')}`
-export function proposeRecurring({today,clients,events,groomers,buffer=0,returnHome={},requireReturnHome=false}){
+export function proposeRecurring({today,clients,events,groomers,buffer=0,returnHome={},requireReturnHome=false,timeOff=[]}){
  const until=horizonDate(today),from=addDays(today,1),proposals=[],issues=[],rules=new Map(),occupied=new Map()
  for(const e of events){if(!e.active)continue;const key=`${e.groomer}|${norm(e.area)}`;if(e.area && e.date<=today && e.date>=addDays(today,-84)){const weekdays=rules.get(key)||new Map();const wd=day(e.date).getUTCDay();weekdays.set(wd,(weekdays.get(wd)||0)+1);rules.set(key,weekdays)}
   const slot=minutes(e.time);if(e.date>=from){const k=`${e.date}|${e.groomer}`,list=occupied.get(k)||[];list.push(Number.isFinite(slot)&&e.duration>0?{start:slot,end:slot+e.duration,household:e.household}:{start:0,end:1440});occupied.set(k,list)}
@@ -49,7 +50,7 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
    if(either && assigned && assigned!==g.name)continue
    for(let i=0;i<8;i++){
     const date=addDays(t.due,i),wd=day(date).getUTCDay()
-    if(date>until || !g.workDays.includes(wd) || !weekdays.has(wd))continue
+    if(timeOffReason({timeOff},g,date) || date>until || !g.workDays.includes(wd) || !weekdays.has(wd))continue
     const existingAreas=[...events.filter(e=>e.active),...proposals].filter(e=>e.date===date&&e.groomer===g.name).map(e=>areaDayKey(e.area)).filter(Boolean)
     if(existingAreas.some(area=>area!==areaDayKey(c.area)))continue
     const slots=[...(occupied.get(`${date}|${g.name}`)||[])].sort((a,b)=>a.start-b.start)
