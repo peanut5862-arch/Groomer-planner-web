@@ -37,7 +37,7 @@ export function proposeAreaRepair({today,events,groomers,clients=[],returnHome={
      const home=returnHome[`${first.household}|${g.name}`];if(!Number.isFinite(home))continue
      for(let offset=0;offset<=7;offset++) {
       const date=addDays(baseDate,offset),wd=new Date(`${date}T12:00:00Z`).getUTCDay()
-      if(date>cadenceCeiling)continue
+      if(date>cadenceCeiling || date>addDays(first.date,7))continue
       if(!g.workDays.includes(wd)||timeOffReason({timeOff},g,date))continue
       if(others.some(e=>sameClient(e,first)&&weekOf(e.date)===weekOf(date)))continue
       const sameDay=others.filter(e=>e.date===date&&e.groomer===g.name)
@@ -60,7 +60,7 @@ export function proposeAreaRepair({today,events,groomers,clients=[],returnHome={
     }
     candidates.sort((a,b)=>(a.date===first.date?-1:0)-(b.date===first.date?-1:0)||b.sameArea-a.sameArea||a.date.localeCompare(b.date)||(a.groomer===first.groomer?-1:0)-(b.groomer===first.groomer?-1:0))
     const chosen=candidates[0]
-    if(!chosen){issues.push({owner:first.owner,reason:`No matching-area space within 7 days of ${baseDate}.`});active.push(...visit);continue}
+    if(!chosen){issues.push({owner:first.owner,reason:cadenceFloor>addDays(first.date,7)?'The frequency conflicts with other saved bookings. Review the series together.':`No matching-area opening within 7 days of ${first.date} that preserves this dog’s frequency.`});active.push(...visit);continue}
     let start=chosen.start
     for(const event of visit.slice().sort((a,b)=>minute(a.time)-minute(b.time))) {
       const time=clock(start)
