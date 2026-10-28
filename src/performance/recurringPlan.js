@@ -21,9 +21,9 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
    c.duration=previous?Math.ceil(previous.duration/Math.max(1,previous.dogs.length)):(c.duration>0?c.duration:60)
   }
   const clientKey=`${c.household}|${norm(c.dog)}`;if(seenClients.has(clientKey))continue;seenClients.add(clientKey)
-  const either=norm(c.groomer)==='either'
+  const either=!norm(c.groomer)||norm(c.groomer)==='either'
   const eligible=groomers.filter(g=>g.active!==false&&(either||g.name===c.groomer))
-  const options=eligible.map(g=>({g,weekdays:rules.get(`${g.name}|${norm(c.area)}`)})).filter(o=>o.weekdays?.size)
+  const options=eligible.map(g=>({g,weekdays:new Map(g.workDays.map(wd=>[wd,1]))}))
   const reason=c.paused?'Client is paused or inactive.':!c.household?'Missing client ID.':!c.area?'Missing area.':!eligible.length?'Choose an active assigned groomer.':!c.frequency || c.frequency<1?'Missing grooming frequency.':!c.duration || c.duration<1?'Missing service length.':!c.service?'Choose a recurring service.':!options.length?'No area weekday found in the existing schedule.':''
   if(reason){issues.push({owner:c.owner,dog:c.dog,reason});continue}
   const history=events.filter(e=>e.active && e.household===c.household && e.dogs.some(d=>norm(d)===norm(c.dog))).sort((a,b)=>a.date.localeCompare(b.date))
