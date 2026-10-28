@@ -33,7 +33,7 @@ function parseAppointmentDogServices(value) {
     const match = part.match(/^(.*?)\s*\(([^()]*)\)\s*$/)
     const name = (match?.[1] || part).trim()
     const service = canonicalServiceLabel(match?.[2] || '')
-    return {name,service:appointmentServiceOptions.includes(service)?service:'Groom'}
+    return {name,service:appointmentServiceOptions.includes(service)?service:''}
   })
 }
 
@@ -103,7 +103,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
   const cancelled = ['cancelled','canceled'].includes(String(row['Appointment Status'] || '').trim().toLowerCase())
   const missed = ['missed','no show','no-show','noshow'].some(value => String(row['Appointment Status'] || row.Status || '').trim().toLowerCase().includes(value))
   const householdDogs = (dogs || []).filter(dog=>String(dog.household_id || dog['Household ID'] || '').trim()===String(row['Household ID'] || '').trim())
-  useEffect(()=>{setServiceRows(current=>{const names=new Set(current.map(d=>d.name.toLowerCase()));const extra=householdDogs.filter(d=>!names.has(String(d.dog||d.Dog||'').toLowerCase())).map(d=>({name:String(d.dog||d.Dog),service:canonicalServiceLabel(d.service_pattern||d.service||'Groom'),included:false}));return extra.length?[...current,...extra]:current})},[appt.id,dogs])
+  useEffect(()=>{setServiceRows(current=>{const names=new Set(current.map(d=>d.name.toLowerCase()));const extra=householdDogs.filter(d=>!names.has(String(d.dog||d.Dog||'').toLowerCase())).map(d=>({name:String(d.dog||d.Dog),service:appointmentServiceOptions.includes(canonicalServiceLabel(d.service_pattern||d.service))?canonicalServiceLabel(d.service_pattern||d.service):'',included:false}));return extra.length?[...current,...extra]:current})},[appt.id,dogs])
   const servicePriceFor = (name,service) => {
     const dog = householdDogs.find(item=>String(item.dog || item.Dog || '').trim().toLowerCase()===String(name || '').trim().toLowerCase())
     if (!dog) return null
@@ -475,7 +475,7 @@ function CompletionSheet({appt,dogs,onClose,onSaved,onConfirmation,viewerMode=fa
             <div className="form-grid">
               {serviceRows.map((item,index)=><label key={`${item.name}-${index}`} style={{gridColumn:'1 / -1'}}><span><input type="checkbox" checked={item.included!==false} disabled={saving} onChange={event=>setServiceRows(rows=>rows.map((r,i)=>i===index?{...r,included:event.target.checked}:r))}/> {item.name}</span>
                 <select value={item.service} disabled={saving||item.included===false} onChange={event=>setServiceRows(rows=>rows.map((row,i)=>i===index?{...row,service:event.target.value}:row))}>
-                  {appointmentServiceOptions.map(service=><option key={service}>{service}</option>)}
+                  <option value="">Choose service…</option>{appointmentServiceOptions.map(service=><option key={service}>{service}</option>)}
                 </select>
               </label>)}
             </div>
