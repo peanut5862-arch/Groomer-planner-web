@@ -1,3 +1,4 @@
+import {timeOffReason} from './performance/timeOff.js';
 import {monthVisits} from './performance/monthVisits.js';
 import {readScheduleWeek,clearScheduleReads,queueRouteRead} from './performance/scheduleReads.js';
 import {routeApplyBlock} from './performance/routeApplyGuard.js';
@@ -313,6 +314,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
   useEffect(()=>{setDayProposal(null);setAllowLateReturn(false);setAcceptRouteWarnings(false)},[signature,dateKey])
   const planDay=async()=>{
     if(!canCheck || planning)return
+    const off=timeOffReason(businessSettings(),groomerConfig(routeGroomer),dateKey);if(off){setError(`Cannot plan this day: ${off}. Review or move the existing appointments.`);return}
     setPlanning(true);setError('');setDayProposal(null);setAcceptRouteWarnings(false);setAllowLateReturn(false)
     try{
       const profile=groomerConfig(routeGroomer)
@@ -333,6 +335,7 @@ function GoogleRoutePanel({appointments,dogs,selectedGroomer,dateLabel,dateKey,v
 
   const applyRoute=async()=>{
     if(!dayProposal || applyingRoute)return
+    const off=timeOffReason(businessSettings(),groomerConfig(routeGroomer),dateKey);if(off){setError(`Cannot apply route: ${off}.`);return}
     const block=routeApplyBlock({proposal:dayProposal,end:clockMinutesForDisplay(groomerConfig(routeGroomer)?.endTime || '17:30'),role:getBusinessContext().role,allowLate:allowLateReturn,acceptedWarnings:acceptRouteWarnings})
     if(block){setError(block);return}
     setApplyingRoute(true);setError('')
@@ -894,10 +897,11 @@ function Week({onAsk,onOpen,onComplete,onUndo,onConfirmation,onPayment,onAddAppo
                   {monthVisits(activeAppointments).length} stop{monthVisits(activeAppointments).length===1?'':'s'} · ${Math.round(revenue)}
                 </div>
                 <GoogleRoutePanel appointments={activeAppointments} dogs={dogs} selectedGroomer={groomer} dateLabel={`${displayDay(dayDate)} ${displayDate(dayDate)}`} dateKey={dateKey} viewerMode={viewerMode} onRouteApplied={()=>setRouteRefresh(v=>v+1)}/>
+                {[...new Set(activeAppointments.map(a=>timeOffReason(businessSettings(),groomerConfig(a.groomer),dateKey)).filter(Boolean))].map(reason=><div className="login-message" role="alert" key={reason}>Time-off conflict: {reason}. Existing appointments need review.</div>)}
                 <div className="appt-list">
                   {monthVisits(dayAppointments.slice().sort(compareAppointmentTimes)).map(visit=>{
                     const card=appt=><ApptCard key={appt.id} appt={appt} dogs={dogs} onOpen={mode=>onOpen({...appt,_initialMode:mode || 'edit'})} onComplete={onComplete} onUndo={onUndo} onConfirmation={onConfirmation} onPayment={onPayment} completing={completingId===appt.id} confirmationSaving={confirmingId===appt.id} paymentSaving={paymentSavingId===appt.id} viewerMode={viewerMode}/>;
-                    return visit.appointments.length===1?card(visit.appointments[0]):<div className="appt-card groomer-colored month-household" key={visit.key} style={groomerColorStyle(groomerConfig(visit.groomer))}><h3>{visit.owner}</h3><p>{visit.groomer} · {visit.appointments.map(a=>a.dogs).join(' · ')}</p><strong>${visit.appointments.reduce((sum,a)=>sum+(Number(a.price)||0),0).toFixed(2)} total</strong>{visit.appointments.map(appt=><details key={appt.id}><summary style={{padding:'12px 0',cursor:'pointer'}}>{appt.time} · {appt.dogs} · Details &amp; actions</summary>{card(appt)}</details>)}</div>
+                    return visit.appointments.length===1?card(visit.appointments[0]):<div className="appt-card groomer-colored month-household" key={visit.key} style={groomerColorStyle(groomerConfig(visit.groomer))}><h3>{visit.owner}</h3><p>{visit.groomer} · {visit.appointments.map(a=>a.dogs).join(' · ')}</p><strong>{visit.appointments.some(a=>/to confirm/i.test(a.dogs))?'Service and price to confirm':`$${visit.appointments.reduce((sum,a)=>sum+(Number(a.price)||0),0).toFixed(2)} total`}</strong>{visit.appointments.map(appt=><details key={appt.id}><summary style={{padding:'12px 0',cursor:'pointer'}}>{appt.time} · {appt.dogs} · Details &amp; actions</summary>{card(appt)}</details>)}</div>
                   })}
                 </div>
               </>
