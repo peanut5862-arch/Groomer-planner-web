@@ -1,4 +1,5 @@
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
+import {groomerColorStyle} from './groomerColors.js';
 import RecurringPlanSheet from './RecurringPlanSheet.jsx';
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from "../supabase.js";
@@ -118,8 +119,8 @@ function Month({onOpen,revision,dogs,viewerMode=false}) {
               style={{textAlign:'left',font:'inherit',minWidth:0,cursor:inMonth?'pointer':'default',
                 opacity:inMonth?1:0.3,outline:selected===day?'2px solid #405847':'none',outlineOffset:-2}}>
               <span className="day-num">{Number(day.slice(8))}</span>
-              {appointments.slice(0,2).map(appt=><div key={appt.id} className="tiny-appt"
-                style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{appt.dogs || appt.owner}</div>)}
+              {appointments.slice(0,2).map(appt=><div key={appt.id} className="tiny-appt groomer-colored" title={`${appt.groomer || appt.sourceRow?.Groomer || 'Unassigned'} · ${appt.dogs || appt.owner}`}
+                style={{...groomerColorStyle(groomerConfig(appt.groomer || appt.sourceRow?.Groomer)),overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{appt.groomer || appt.sourceRow?.Groomer || 'Unassigned'} · {appt.dogs || appt.owner}</div>)}
               {appointments.length>2 && <div style={{fontSize:10}}>+{appointments.length-2} more</div>}
             </button>
           })}
@@ -143,4 +144,3 @@ function Month({onOpen,revision,dogs,viewerMode=false}) {
 }
 
 export default Month
-
