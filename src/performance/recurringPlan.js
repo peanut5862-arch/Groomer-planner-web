@@ -7,7 +7,7 @@ const norm = value => String(value || '').trim().toLowerCase()
 const areaDayKey = value => norm(value)
 const minutes = value => {const m=/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i.exec(String(value || '').trim());if(!m)return NaN;let h=Number(m[1]);if(m[3])h=h%12+(m[3].toUpperCase()==='PM'?12:0);return h*60+Number(m[2])}
 const clock = value => `${String(Math.floor(value/60)).padStart(2,'0')}:${String(value%60).padStart(2,'0')}`
-export function proposeRecurring({today,clients,events,groomers,buffer=0,returnHome={},requireReturnHome=false,timeOff=[]}){
+export function proposeRecurring({today,clients,events,groomers,buffer=0,returnHome={},requireReturnHome=false,timeOff=[],rebuild=false}){
  const until=horizonDate(today),from=addDays(today,1),proposals=[],issues=[],occupied=new Map()
  for(const e of events){if(!e.active)continue;
   const slot=minutes(e.time);if(e.date>=from){const k=`${e.date}|${e.groomer}`,list=occupied.get(k)||[];list.push(Number.isFinite(slot)&&e.duration>0?{start:slot,end:slot+e.duration,household:e.household}:{start:0,end:1440});occupied.set(k,list)}
@@ -27,9 +27,15 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
   const reason=c.paused?'Client is paused or inactive.':!c.household?'Missing client ID.':!c.area?'Missing area.':!eligible.length?'Choose an active assigned groomer.':!c.frequency || c.frequency<1?'Missing grooming frequency.':!c.duration || c.duration<1?'Missing service length.':!c.service?'Choose a recurring service.':!options.length?'No working day available for an active groomer.':''
   if(reason){issues.push({owner:c.owner,dog:c.dog,reason});continue}
   const history=events.filter(e=>e.active && e.household===c.household && e.dogs.some(d=>norm(d)===norm(c.dog))).sort((a,b)=>a.date.localeCompare(b.date))
-  const last=history.at(-1)?.date;let due=last?addDays(last,Math.round(c.frequency*7)):c.due
+  const last=history.at(-1)?.date;let due=rebuild?c.due:(last?addDays(last,Math.round(c.frequency*7)):c.due)
   if(!due){issues.push({owner:c.owner,dog:c.dog,reason:'No service history or next due date.'});continue}
-  tasks.push({c,options,either,due:due<from?from:due})
+  const anchors=rebuild?history.filter(e=>e.date>=from).map(e=>e.date):[]
+  const normalizeDue=date=>{
+   let next=date<from?from:date
+   for(const anchor of anchors){if(anchor<next){next=[next,addDays(anchor,Math.round(c.frequency*7))].sort().at(-1)}else if(anchor<addDays(next,Math.round(c.frequency*7)))next=addDays(anchor,Math.round(c.frequency*7))}
+   return next
+  }
+  tasks.push({c,options,either,anchors,normalizeDue,due:normalizeDue(due)})
  }
  while(tasks.length){tasks.sort((a,b)=>a.due.localeCompare(b.due)||a.c.owner.localeCompare(b.c.owner)||a.c.dog.localeCompare(b.c.dog));const t=tasks.shift();if(t.due>until)continue
   const {c,options,either}=t;let chosen=null
@@ -38,19 +44,21 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
   const visit=[t]
   let sharedOptions=options
   for(const other of tasks){
-   if(other.c.household!==c.household||other.due!==t.due)continue
+   if(other.c.household!==c.household || other.c.frequency!==c.frequency || other.due>addDays(t.due,7))continue
    const common=sharedOptions.filter(o=>other.options.some(candidate=>candidate.g.name===o.g.name))
    if(common.length){visit.push(other);sharedOptions=common}
   }
   for(const sibling of visit.slice(1))tasks.splice(tasks.indexOf(sibling),1)
+  const visitDue=visit.map(item=>item.due).sort().at(-1)
   const required=visit.reduce((sum,item)=>sum+item.c.duration,0)
-  const assignmentKey=`${c.household}|${t.due}`,assigned=householdAssignments.get(assignmentKey)
+  const assignmentKey=`${c.household}|${visitDue}`,assigned=householdAssignments.get(assignmentKey)
   const candidates=[]
   for(const {g,weekdays} of sharedOptions){
    if(either && assigned && assigned!==g.name)continue
    for(let i=0;i<8;i++){
-    const date=addDays(t.due,i),wd=day(date).getUTCDay()
+    const date=addDays(visitDue,i),wd=day(date).getUTCDay()
     if(timeOffReason({timeOff},g,date) || date>until || !g.workDays.includes(wd) || !weekdays.has(wd))continue
+    if(visit.some(item=>item.anchors.some(anchor=>anchor>=item.due && date>addDays(anchor,-Math.round(item.c.frequency*7)))))continue
     const existingAreas=[...events.filter(e=>e.active),...proposals].filter(e=>e.date===date&&e.groomer===g.name).map(e=>areaDayKey(e.area)).filter(Boolean)
     if(existingAreas.some(area=>area!==areaDayKey(c.area)))continue
     const slots=[...(occupied.get(`${date}|${g.name}`)||[])].sort((a,b)=>a.start-b.start)
@@ -77,7 +85,7 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
    if(item.either)householdAssignments.set(`${dog.household}|${item.due}`,chosen.groomer)
    proposals.push({...dog,...chosen,time:clock(visitStart),id,due:item.due,assignmentReason:item.either?'Suggested to group matching areas with available space.':''})
    visitStart+=dog.duration
-   tasks.push({...item,due:addDays(chosen.date,Math.round(dog.frequency*7))})
+   tasks.push({...item,due:item.normalizeDue(addDays(chosen.date,Math.round(dog.frequency*7)))})
   }
   const k=`${chosen.date}|${chosen.groomer}`,slots=occupied.get(k)||[],start=minutes(chosen.time)
   slots.push({start,end:start+required,household:c.household});occupied.set(k,slots)
