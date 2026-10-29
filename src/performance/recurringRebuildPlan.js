@@ -6,7 +6,7 @@ const key=record=>record.household || `owner:${norm(record.owner)}`
 // household's entire saved series and retry the others around those bookings.
 export function proposeRecurringRebuild(options) {
  const {today,events,clients}=options,until=horizonDate(today)
- const candidates=events.filter(event=>replaceableRecurring(event,today,until))
+ const candidates=events.filter(event=>replaceableRecurring(event,today,until,events))
  const households=new Set(candidates.map(key)),retained=new Map()
  for(const event of candidates)for(const dog of event.dogs){
   if(!clients.some(client=>key(client)===key(event)&&norm(client.dog)===norm(dog)))retained.set(key(event),'A scheduled dog could not be matched to its client profile.')
