@@ -1,7 +1,7 @@
 export function replaceableRecurring(event,today,until,events=[]) {
  const row=event.sourceRow
  const norm=value=>String(value||'').trim().toLowerCase()
- const moved=events.some(previous=>previous!==event&&previous.sourceRow?.['Rescheduled To']===event.date&&/moved to another week/i.test(previous.sourceRow?.['Appointment Status']||'')&&(event.household?previous.household===event.household:norm(previous.owner)===norm(event.owner))&&previous.dogs.some(dog=>event.dogs.some(current=>norm(current)===norm(dog))))
+ const moved=!/Moved automatically off a closed day|Regrouped by reviewed area repair/i.test(row?.['Status Note']||'')&&events.some(previous=>previous!==event&&previous.sourceRow?.['Rescheduled To']===event.date&&/moved to another week/i.test(previous.sourceRow?.['Appointment Status']||'')&&(event.household?previous.household===event.household:norm(previous.owner)===norm(event.owner))&&previous.dogs.some(dog=>event.dogs.some(current=>norm(current)===norm(dog))))
  return Boolean(!moved && event.weekStatus!=='confirmed' && event.active && event.date>today && event.date<=until && row && !row['Locked Time'] && !/completed/i.test(row['Completion Status'] || '') && !/^(confirmed|yes)$/i.test(String(row['Client Confirmation'] || '').trim()) && (Array.isArray(row['Recurring IDs']) || /^Recurring draft/i.test(row['Status Note'] || '')))
 }
 
