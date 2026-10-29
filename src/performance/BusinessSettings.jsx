@@ -50,7 +50,7 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
     setInviteEmails(values=>({...values,[inviteId]:''}))
    }else if((data.settings.timeOff || []).length){
     setInviteNotice('Settings saved. Checking appointments on closed days…')
-    try{const result=await moveAppointmentsOffClosures(data.settings,setInviteNotice,business);onSaved?.();setClosureIssues(result.issues);setInviteNotice(`${result.visits || result.moved} household visits moved before the holidays. ${result.issues.length?result.issues.length+' households still need scheduling. Their existing appointments remain saved.':'Review the new routes and reconfirm changed appointments.'}`)}catch(moveError){throw Error('Settings saved, but holiday moves need attention: '+moveError.message)}
+    try{const result=await moveAppointmentsOffClosures(data.settings,setInviteNotice,business);onSaved?.();setClosureIssues(result.issues);setInviteNotice(`${result.visits || result.moved} household visits moved off closed days. ${result.issues.length?result.issues.length+' households still need scheduling. Their existing appointments remain saved.':'Review the new routes and reconfirm changed appointments.'}`)}catch(moveError){throw Error('Settings saved, but time-off moves need attention: '+moveError.message)}
    }else onClose()
   }catch(e){setError(e.message||'Could not save your settings.')}finally{busy.current=false;setSaving(false)}
  }
@@ -101,7 +101,7 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
     <p className="settings-help">0 means no limit. Suggestions with a calculated Google route over this limit are marked for review.</p>
    </>}
    </fieldset>
-   {inviteNotice&&<div role="status" className="prototype-note">{inviteNotice}</div>}{closureIssues.length>0&&<div className="login-message"><strong>Needs an earlier opening</strong><ul>{closureIssues.map((issue,index)=><li key={index}>{issue.owner}: {issue.reason}</li>)}</ul></div>}
+   {inviteNotice&&<div role="status" className="prototype-note">{inviteNotice}</div>}{closureIssues.length>0&&<div className="login-message"><strong>Needs an open working day</strong><ul>{closureIssues.map((issue,index)=><li key={index}>{issue.owner}: {issue.reason}</li>)}</ul></div>}
    {error&&<div className="login-message" role="alert">{error}</div>}
    <div className="settings-actions"><button type="button" className="ghost" disabled={saving} onClick={onClose}>Close</button>{editable&&<button type="submit" className="primary-mini" disabled={saving||loading}>{saving?'Saving…':'Save settings'}</button>}</div>
   </form>
