@@ -70,7 +70,7 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
     const date=addDays(visitDue<from?from:visitDue,i),wd=day(date).getUTCDay()
     if(timeOffReason({timeOff},g,date) || date>until || !g.workDays.includes(wd) || !weekdays.has(wd))continue
     if(visit.some(item=>item.anchors.some(anchor=>anchor>=item.due && date>addDays(anchor,-Math.round(item.c.frequency*7)))))continue
-    const existingAreas=[...events.filter(e=>e.active),...proposals].filter(e=>e.date===date&&e.groomer===g.name).map(e=>areaDayKey(e.area)).filter(Boolean)
+    const existingAreas=[...events.filter(e=>e.active),...proposals].filter(e=>e.date===date&&norm(e.groomer)===norm(g.name)).map(e=>areaDayKey(e.area))
     if(existingAreas.some(area=>area!==areaDayKey(c.area)))continue
     const slots=[...(occupied.get(`${date}|${g.name}`)||[])].sort((a,b)=>a.start-b.start)
     let start=minutes(g.startTime),end=minutes(g.endTime)
@@ -82,7 +82,7 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
     if(last){const lastHome=returnHome[`${last.household}|${g.name}`];if(requireReturnHome&&!Number.isFinite(lastHome))continue;if(last.end+Math.ceil(lastHome||0)>end)continue}
     for(const slot of slots){if(start+required+buffer<=slot.start)break;start=Math.max(start,slot.end+buffer)}
     if(start+required+returnMinutes>end)continue
-    const sameArea=[...events.filter(e=>e.active),...proposals].filter(e=>e.date===date&&e.groomer===g.name&&norm(e.area)===norm(c.area)).length
+    const sameArea=[...events.filter(e=>e.active),...proposals].filter(e=>e.date===date&&norm(e.groomer)===norm(g.name)&&norm(e.area)===norm(c.area)).length
     const load=slots.reduce((sum,slot)=>sum+slot.end-slot.start,0)
     candidates.push({date,time:clock(start),groomer:g.name,sameArea,weekdayStrength:weekdays.get(wd),load,returnMinutes,homeBy:g.endTime})
    }
