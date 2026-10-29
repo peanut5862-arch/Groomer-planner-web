@@ -1,3 +1,4 @@
+import {needsReschedulingRow} from './closureQueue.js'
 const norm=value=>String(value||'').trim().toLowerCase()
 const date=value=>String(value||'').slice(0,10)
 const shift=(key,days)=>{const value=new Date(`${key}T12:00:00Z`);value.setUTCDate(value.getUTCDate()+days);return value.toISOString().slice(0,10)}
@@ -11,10 +12,11 @@ export function rebookingNeed(client,due,rows,today){
   const pet=norm(info.row.dog||info.row.Dog),booked=active.filter(row=>names(row).includes(pet))
   const overdue=['Overdue','Due today','Due this week','Due soon'].includes(info.status)
   const coversDue=booked.some(row=>!info.dueDate||date(row.Date)<=shift(info.dueDate>today?info.dueDate:today,14))
-  const cancellations=householdRows.filter(row=>names(row).includes(pet)&&state(row).some(value=>['cancelled','canceled'].includes(value))&&/^\d{4}-\d{2}-\d{2}$/.test(date(row.Date))&&(!info.dueDate||date(row.Date)>=shift(info.dueDate,-14)))
+  const cancellations=householdRows.filter(row=>names(row).includes(pet)&&(needsReschedulingRow(row)||state(row).some(value=>['cancelled','canceled'].includes(value)))&&/^\d{4}-\d{2}-\d{2}$/.test(date(row.Date))&&(!info.dueDate||date(row.Date)>=shift(info.dueDate,-14)))
+  const queued=cancellations.some(row=>needsReschedulingRow(row)&&!booked.some(booking=>Math.abs((new Date(date(booking.Date))-new Date(date(row.Date)))/86400000)<=14))
   const unresolved=cancellations.some(row=>!booked.some(booking=>Math.abs((new Date(date(booking.Date))-new Date(date(row.Date)))/86400000)<=14))
   if(overdue&&!coversDue)missing.push(info)
-  else if(unresolved)missing.push({...info,status:'Needs rebooking',detail:'Cancelled · needs rebooking',rank:info.status==='Overdue'?0:2})
+  else if(unresolved)missing.push({...info,status:'Needs rebooking',detail:queued?'Needs rescheduling · time off':'Cancelled · needs rebooking',rank:info.status==='Overdue'?0:2})
  }
  if(!missing.length)return null
  missing.sort((a,b)=>a.rank-b.rank||(a.dueDate||'').localeCompare(b.dueDate||''))
