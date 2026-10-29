@@ -17,6 +17,7 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
  const [draft,setDraft]=useState(()=>structuredClone(business.settings))
  const [saving,setSaving]=useState(false),[error,setError]=useState(''),[loading,setLoading]=useState(true)
  useEffect(()=>{let live=true;supabase.rpc('get_business_context').then(({data,error})=>{if(!live)return;if(error)setError(error.message);else if(data?.businessId){setBusinessContext(data);setDraft(structuredClone(data.settings))}setLoading(false)}).catch(e=>{if(live){setError(e.message);setLoading(false)}});return()=>{live=false}},[])
+ const [closureIssues,setClosureIssues]=useState([])
  const [deleteId,setDeleteId]=useState(null)
  const [inviteEmails,setInviteEmails]=useState({}),[inviteNotice,setInviteNotice]=useState('')
  const busy=useRef(false)
@@ -33,7 +34,7 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
   const errors=[...validateBusinessSettings(next),...templateErrors(next.messageTemplates)]
   if(next.salesTax&&(!Number.isFinite(next.salesTax.rate)||next.salesTax.rate<0||next.salesTax.rate>100))errors.push("Enter a tax rate from 0 to 100 percent.")
   if(errors.length){setError(errors.join(' '));return}
-  busy.current=true;setSaving(true);setError('');setInviteNotice('')
+  busy.current=true;setSaving(true);setError('');setInviteNotice('');setClosureIssues([])
   try{
    const {data,error}=await supabase.rpc('save_business_settings',{p_settings:next,p_expected_revision:business.revision})
    if(error)throw error
@@ -49,7 +50,7 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
     setInviteEmails(values=>({...values,[inviteId]:''}))
    }else if((data.settings.timeOff || []).length){
     setInviteNotice('Settings saved. Checking appointments on closed days…')
-    try{const result=await moveAppointmentsOffClosures(data.settings,setInviteNotice,business);onSaved?.();setInviteNotice(`${result.visits || result.moved} household visits moved off closed days. Review the new routes and reconfirm changed appointments.${result.issues.length?' Still needs review: '+result.issues.map(issue=>issue.owner+': '+issue.reason).join(' '):''}`)}catch(moveError){throw Error('Settings saved, but holiday moves need attention: '+moveError.message)}
+    try{const result=await moveAppointmentsOffClosures(data.settings,setInviteNotice,business);onSaved?.();setClosureIssues(result.issues);setInviteNotice(`${result.visits || result.moved} household visits moved before the holidays. ${result.issues.length?result.issues.length+' households still need scheduling. Their existing appointments remain saved.':'Review the new routes and reconfirm changed appointments.'}`)}catch(moveError){throw Error('Settings saved, but holiday moves need attention: '+moveError.message)}
    }else onClose()
   }catch(e){setError(e.message||'Could not save your settings.')}finally{busy.current=false;setSaving(false)}
  }
@@ -79,7 +80,7 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
      <label>Schedule color<input type="color" aria-label={`${g.name || 'New groomer'} schedule color`} value={groomerColor(g)} onChange={e=>changeGroomer(g.id,{color:e.target.value})} style={{width:72,height:48,padding:4}}/></label>
      <div role="group" aria-label={`${g.name || 'New groomer'} brand colors`} style={{display:'flex',gap:8}}>{['navy','teal','gold'].map(name=><button type="button" key={name} aria-label={`Use ${name} for ${g.name || 'new groomer'}`} aria-pressed={groomerColor(g)===BRAND_COLORS[name]} onClick={()=>changeGroomer(g.id,{color:BRAND_COLORS[name]})} style={{width:44,height:44,borderRadius:10,background:BRAND_COLORS[name],border:groomerColor(g)===BRAND_COLORS[name]?'3px solid #111':'1px solid #aaa'}}/>)}</div>
      <p className="settings-help">Used on appointment borders, calendar entries, and the groomer selector. Payment and completion colors stay consistent for everyone.</p>
-     <label>Email for app invitation (optional)<input type="email" value={inviteEmails[g.id]||''} autoCapitalize="none" autoCorrect="off" maxLength={254} placeholder="groomer@example.com" onChange={e=>{setError('');setInviteNotice('');setInviteEmails(values=>({...values,[g.id]:e.target.value}))}}/></label>
+     <label>Email for app invitation (optional)<input type="email" value={inviteEmails[g.id]||''} autoCapitalize="none" autoCorrect="off" maxLength={254} placeholder="groomer@example.com" onChange={e=>{setError('');setInviteNotice('');setClosureIssues([]);setInviteEmails(values=>({...values,[g.id]:e.target.value}))}}/></label>
      <button type="button" className="primary-mini" disabled={saving||loading||!inviteEmails[g.id]?.trim()||g.active===false} onClick={event=>save(event,g.id)}>Save &amp; send invitation</button>
      <p className="settings-help">Saves your settings, then emails this groomer a link to create their own login. Manage pending invitations in Team.</p>
      <label className="check-label"><input type="checkbox" checked={g.active!==false} onChange={e=>changeGroomer(g.id,{active:e.target.checked})}/>Active groomer</label>
@@ -100,7 +101,7 @@ export default function BusinessSettings({initialTab='schedule',onClose,onSaved}
     <p className="settings-help">0 means no limit. Suggestions with a calculated Google route over this limit are marked for review.</p>
    </>}
    </fieldset>
-   {inviteNotice&&<div role="status" className="prototype-note">{inviteNotice}</div>}
+   {inviteNotice&&<div role="status" className="prototype-note">{inviteNotice}</div>}{closureIssues.length>0&&<div className="login-message"><strong>Needs an earlier opening</strong><ul>{closureIssues.map((issue,index)=><li key={index}>{issue.owner}: {issue.reason}</li>)}</ul></div>}
    {error&&<div className="login-message" role="alert">{error}</div>}
    <div className="settings-actions"><button type="button" className="ghost" disabled={saving} onClick={onClose}>Close</button>{editable&&<button type="submit" className="primary-mini" disabled={saving||loading}>{saving?'Saving…':'Save settings'}</button>}</div>
   </form>
