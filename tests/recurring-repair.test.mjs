@@ -209,3 +209,16 @@ test('a completed new cycle clears an old cancelled visit',()=>{
 test('an unrebooked cancelled dog becomes overdue on its original due date',()=>{
  assert.equal(rebookingNeed(client,dueFor('Bo',{dueDate:'2026-10-20',status:'Overdue',rank:0,detail:'8 days overdue'}),[booking('2026-10-20','Bo (Groom)','Cancelled')],today).status,'Overdue')
 })
+import {unplacedClosureRows,needsReschedulingRow} from '../src/performance/closureQueue.js'
+test('only unplaced closure visits enter the rescheduling queue',()=>{
+ const first=event('2026-11-10'),second=event('2026-11-10','q','Other dog')
+ assert.deepEqual(unplacedClosureRows({affected:[first,second],moves:[{event:first,date:'2026-11-06'}]}),[second])
+})
+test('queued time-off visits are inactive calendar history but remain available for rebooking',()=>{
+ const queued={...booking('2026-11-10','Bo (Groom)','Moved to another week'),Status:'Needs rescheduling','Needs Rescheduling Reason':'Jen vacation'}
+ const saved=JSON.stringify(queued)
+ assert.equal(needsReschedulingRow(queued),true)
+ assert.equal(rebookingNeed(client,dueFor(),[queued],today).detail,'Needs rescheduling · time off')
+ assert.equal(rebookingNeed(client,dueFor(),[queued,booking('2026-11-12','Bo (Groom)')],today),null)
+ assert.equal(JSON.stringify(queued),saved)
+})
