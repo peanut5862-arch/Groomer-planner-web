@@ -15,7 +15,7 @@ export async function moveAppointmentsOffClosures(settings,onProgress=()=>{},pre
  for(const event of events)if(!event.household){const matching=clients.filter(client=>client.owner===event.owner);if(new Set(matching.map(client=>client.household)).size===1)event.household=matching[0]?.household}
  // Recheck visits this feature previously moved after the holiday, too.
  for(const event of events.filter(event=>event.active&&String(event.sourceRow['Status Note']||'').includes('Moved automatically off a closed day'))){
-  const origin=events.find(old=>!old.active&&old.sourceRow['Rescheduled To']===event.date&&(event.household?old.household===event.household:old.owner===event.owner)&&String(old.sourceRow.Dogs)===String(event.sourceRow.Dogs)&&old.date<event.date&&timeOffReason(settings,settings.groomers.find(g=>g.name===old.groomer),old.date))
+  const origin=events.find(old=>!old.active&&old.sourceRow['Rescheduled To']===event.date&&(event.household?old.household===event.household:old.owner===event.owner)&&String(old.sourceRow.Dogs)===String(event.sourceRow.Dogs)&&old.date<event.date&&(settings.timeOff||[]).some(item=>!item.groomerId&&item.start<=old.date&&item.end>=old.date))
   if(origin){event.closureDate=origin.date;event.closureGroomer=origin.groomer}
  }
  const affected=events.filter(event=>event.active&&event.date>=today&&event.date<=horizonDate(today)&&!/completed/i.test(event.sourceRow['Completion Status']||'')&&(event.closureDate||timeOffReason(settings,settings.groomers.find(g=>g.name===event.groomer),event.date)))
