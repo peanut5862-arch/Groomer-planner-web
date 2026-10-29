@@ -155,3 +155,27 @@ test('a visit previously moved after Christmas can be moved before Christmas',()
  const plan=proposeClosureMoves({today,events:[moved],clients:[client],groomers,timeOff:[{start:'2026-12-25',end:'2026-12-28'}],returnHome:{'p|Haley':15},preferBefore:true})
  assert.equal(plan.moves.length,1);assert.equal(plan.moves[0].date,'2026-12-24')
 })
+test('holiday fallback uses the preceding week when the nearest week is full',()=>{
+ const holiday=event('2026-11-26')
+ const occupied=[19,20,23,24,25].map(day=>event(`2026-11-${day}`,'other'+day,'Dog','Other area'))
+ const plan=proposeClosureMoves({today,events:[holiday,...occupied],clients:[client],groomers,timeOff:[{start:'2026-11-26',end:'2026-11-27'}],returnHome:{'p|Haley':15},preferBefore:true})
+ assert.equal(plan.moves.length,1);assert.equal(plan.moves[0].date,'2026-11-18')
+})
+test('groomer vacation can transfer an Either household together on the same date',()=>{
+ const team=[{...groomers[0],id:'haley'},{...groomers[0],id:'jen',name:'Jen'}]
+ const visits=[event('2026-11-10'),event('2026-11-10','p','Bella','Montgomery',{time:'10:05'})]
+ const plan=proposeClosureMoves({today,events:visits,clients:[client,{...client,dog:'Bella'}],groomers:team,timeOff:[{start:'2026-11-09',end:'2026-11-13',groomerId:'haley'}],returnHome:{'p|Haley':15,'p|Jen':15},buffer:5,preferBefore:true})
+ assert.equal(plan.moves.length,2);assert.ok(plan.moves.every(move=>move.groomer==='Jen'&&move.date==='2026-11-10'))
+})
+test('groomer-specific client moves to an open date with their required groomer',()=>{
+ const team=[{...groomers[0],id:'haley'},{...groomers[0],id:'jen',name:'Jen'}]
+ const untouched=event('2026-11-10','other','Other dog','Montgomery',{groomer:'Jen'})
+ const plan=proposeClosureMoves({today,events:[event('2026-11-10'),untouched],clients:[{...client,groomer:'Haley'}],groomers:team,timeOff:[{start:'2026-11-09',end:'2026-11-13',groomerId:'haley'}],returnHome:{'p|Haley':15,'p|Jen':15},preferBefore:true})
+ assert.equal(plan.moves.length,1);assert.equal(plan.moves[0].groomer,'Haley');assert.equal(plan.moves[0].date,'2026-11-06');assert.ok(!plan.moves.some(move=>move.event===untouched))
+})
+test('an unmoved affected booking still occupies its original slot',()=>{
+ const stuck=event('2026-12-29','stuck','Dog','Other area',{closureDate:'2026-12-25',closureGroomer:'Haley'})
+ const next=event('2026-12-28','next','Other dog','Montgomery')
+ const plan=proposeClosureMoves({today,events:[stuck,next],clients:[{...client,household:'stuck',dog:'Dog'},{...client,household:'next',dog:'Other dog'}],groomers,timeOff:[{start:'2026-12-25',end:'2026-12-28'}],returnHome:{'next|Haley':15},preferBefore:false})
+ assert.ok(plan.issues.some(issue=>issue.owner==='stuck'));assert.equal(plan.moves[0].date,'2026-12-30')
+})
