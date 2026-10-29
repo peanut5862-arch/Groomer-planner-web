@@ -33,9 +33,9 @@ test('area repair preserves confirmed and fixed bookings',()=>{
  const fixed=event('2026-11-06','q','Henry','Magnolia',{sourceRow:{'Recurring IDs':['q'],'Locked Time':true}})
  assert.equal(proposeAreaRepair({today,events:[confirmed,fixed],clients:[client],groomers,returnHome:{'p|Haley':15,'q|Haley':15}}).moves.length,0)
 })
-test('destination week household collision blocks the move',()=>{
- const current=event('2026-11-06'),other=event('2026-11-12','p','Other dog')
- assert.match(validateRepairSelection([current,other],[{event:current,date:'2026-11-13',time:'09:00',groomer:'Haley',area:'Montgomery'}]),/household/)
+test('destination week duplicate dog blocks the move',()=>{
+ const current=event('2026-11-06'),other=event('2026-11-12','p','Bo')
+ assert.match(validateRepairSelection([current,other],[{event:current,date:'2026-11-13',time:'09:00',groomer:'Haley',area:'Montgomery'}]),/dog/)
 })
 import {replaceableRecurring} from '../src/performance/recurringRebuild.js'
 import {proposeRecurring} from '../src/performance/recurringPlan.js'
@@ -233,4 +233,37 @@ test('a new completed service resolves the earlier time-off queue entry',()=>{
  const queued={...booking('2026-11-27','Bo (Groom)','Moved to another week'),Status:'Needs rescheduling','Queued Date':'2026-10-29'}
  const due={infos:[{row:{dog:'Bo',last_groom:'2026-11-24',frequency_weeks:2},dueDate:'2026-12-08',status:'Upcoming',rank:3}]}
  assert.equal(rebookingNeed(client,due,[queued],'2026-11-25'),null)
+})
+test('area repair moves a two-row Willis household together away from protected HMR stops',()=>{
+ const family=[event('2026-12-10','dentler','Bailey','Willis',{groomer:'Jen',duration:28,time:'10:55'}),event('2026-12-10','dentler','Duncan','Willis',{groomer:'Jen',duration:50,time:'11:23'})]
+ const hmr=event('2026-12-10','kari','Oliver','HMR',{groomer:'Jen',sourceRow:{'Locked Time':'09:00'}})
+ const clients=family.map(e=>({household:'dentler',owner:'dentler',dog:e.dogs[0],groomer:'Jen',frequency:4,due:'2026-12-10'}))
+ const plan=proposeAreaRepair({today,events:[hmr,...family],clients,groomers:[{...groomers[0],name:'Jen',workDays:[2,3,4]}],returnHome:{'dentler|Jen':15,'kari|Jen':15},buffer:5})
+ assert.equal(plan.moves.length,2)
+ assert.ok(plan.moves.every(move=>move.date==='2026-12-15'&&move.groomer==='Jen'))
+ assert.equal(validateRepairSelection([hmr,...family],plan.moves,5),'')
+ assert.equal(plan.conflicts.length,0)
+})
+test('add-only recurring planning will not add to a mixed or unknown existing area day',()=>{
+ const c={...client,area:'HMR',service:'Groom',duration:60,price:80,due:'2026-12-10',groomer:'Haley',frequency:6}
+ for(const existing of [event('2026-12-10','x','Dog','Willis',{groomer:' Haley '}),event('2026-12-10','x','Dog','')]){
+  const plan=proposeRecurring({today,clients:[c],events:[existing],groomers})
+  assert.ok(plan.appointments.length)
+  assert.ok(!plan.appointments.some(a=>a.date==='2026-12-10'))
+ }
+})
+import {proposeFreshRecurring} from '../src/performance/recurringRebuildPlan.js'
+test('fresh rebuild removes all eligible mixed-area drafts together and queues unplaced rows',()=>{
+ const hmr=event('2026-12-10','hmr','Oliver','HMR'),willis=event('2026-12-10','willis','Bailey','Willis'),missing=event('2026-12-10','missing','Unknown','Spring')
+ const clients=[['hmr','Oliver','HMR'],['willis','Bailey','Willis']].map(([household,dog,area])=>({...client,household,owner:household,dog,area,frequency:6,due:'2026-12-10',service:'Groom',duration:60,price:80}))
+ const plan=proposeFreshRecurring({today,events:[hmr,willis,missing],clients,groomers})
+ assert.equal(plan.replaced.length,3);assert.ok(plan.queued.includes(missing));assert.equal(plan.retained.length,0)
+ for(const stop of plan.appointments)assert.ok(plan.appointments.filter(other=>other.date===stop.date&&other.groomer===stop.groomer).every(other=>other.area===stop.area))
+})
+test('fresh rebuild preserves owner-moved and confirmed appointments as anchors',()=>{
+ const protectedVisit=event('2026-12-10','a','One','HMR',{sourceRow:{'Client Confirmation':'Confirmed','Recurring IDs':['a']}})
+ const draft=event('2026-12-10','b','Two','Willis')
+ const clients=[{...client,household:'b',owner:'b',dog:'Two',area:'Willis',frequency:6,due:'2026-12-10',service:'Groom',duration:60,price:80}]
+ const plan=proposeFreshRecurring({today,events:[protectedVisit,draft],clients,groomers})
+ assert.deepEqual(plan.replaced,[draft]);assert.ok(plan.retained.includes(protectedVisit));assert.ok(plan.appointments.every(stop=>stop.date!=='2026-12-10'))
 })
