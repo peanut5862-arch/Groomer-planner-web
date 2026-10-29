@@ -1,3 +1,4 @@
+import {historyRequest,completedHistory,historyReply} from './bettyHistory.js'
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { createBettyRequestPlan } from './bettyRequests.js'
@@ -330,6 +331,22 @@ function AssistantSheet({open,initial,onClose,dogs,onChoose,onClient,onScheduleC
     try {
       if (!supabase) throw new Error('Your schedule connection is not configured.')
       const today = businessDateKey()
+      const historical=historyRequest(prompt,today,groomerNames(true))
+      if(historical){
+        // A late completion can belong to an older scheduled week. Read all
+        // saved weeks up to today, then filter by the actual completion date.
+        const history=[]
+        for(let offset=0;;offset+=500){
+          const {data,error}=await supabase.from('weekly_drafts').select('week_start,plan_json').lte('week_start',mondayForDate(today)).order('week_start').range(offset,offset+499)
+          if(error)throw error
+          history.push(...(data||[]).flatMap(week=>Array.isArray(week.plan_json)?week.plan_json:[]))
+          if((data||[]).length<500)break
+        }
+        const reply=historyReply(completedHistory(history,historical),historical)
+        setConversation(current=>[...current,{role:'user',text:prompt},{role:'assistant',text:reply}].slice(-16))
+        setAnswer({mode:'ai',title:'Completed grooming history',text:reply,targetDate:historical.start,filters:{},candidates:[],summary:''})
+        return
+      }
       let filters = plannerQueryFilters(prompt,dogs)
       const groups = plannerClientGroups(dogs)
       const addressSubject=addressQuestion(prompt,conversation)
