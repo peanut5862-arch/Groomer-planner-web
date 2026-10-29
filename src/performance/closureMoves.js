@@ -30,6 +30,7 @@ export function proposeClosureMoves({today,events,clients,groomers,timeOff=[],re
    if(day.some(event=>!event.area||norm(event.area)!==norm(first.area)))continue
    const slots=day.map(event=>({start:minute(event.time),end:minute(event.time)+Number(event.duration),household:event.household})).sort((a,b)=>a.start-b.start)
    if(slots.some(slot=>!Number.isFinite(slot.start)||!Number.isFinite(slot.end)||slot.end<=slot.start))continue
+   if(slots.some((slot,index)=>index>0&&slot.start<Math.max(...slots.slice(0,index).map(previous=>previous.end))+buffer))continue
    let start=minute(groomer.startTime),end=minute(groomer.endTime)
    const fits=time=>time>=minute(groomer.startTime)&&time+duration+Math.ceil(home)<=end&&slots.every(slot=>time+duration+buffer<=slot.start||time>=slot.end+buffer)
    const original=Math.min(...visit.map(event=>minute(event.time)))
