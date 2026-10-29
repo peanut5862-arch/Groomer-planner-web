@@ -18,10 +18,10 @@ export function proposeClosureMoves({today,events,clients,groomers,timeOff=[],re
   let chosen=null
   const closureDate=first.closureDate||first.date
   const closure=timeOff.find(item=>item.start<=closureDate&&item.end>=closureDate&&(!item.groomerId||item.groomerId===groomers.find(g=>g.name===(first.closureGroomer||first.groomer))?.id))
-  const offsets=preferBefore?Array.from({length:7},(_,index)=>-index-1):Array.from({length:21},(_,index)=>index+1)
+  const offsets=preferBefore?Array.from({length:14},(_,index)=>-index-1):Array.from({length:21},(_,index)=>index+1)
   for(const offset of offsets){if(chosen)break;for(const groomer of [...choices].sort((a,b)=>(a.name===first.groomer?-1:0)-(b.name===first.groomer?-1:0))){
    const date=addDays(preferBefore?(closure?.start||closureDate):closureDate,offset),weekday=new Date(`${date}T12:00:00Z`).getUTCDay()
-   if(date<today||visit.some(event=>date<addDays(event.closureDate||event.date,-7)))continue
+   if(date<today||visit.some(event=>date<addDays(event.closureDate||event.date,-14)))continue
    if(!groomer.workDays.includes(weekday)||timeOffReason(settings,groomer,date))continue
    const home=returnHome[`${first.household}|${groomer.name}`];if(!Number.isFinite(home))continue
    const day=occupied.filter(event=>event.date===date&&event.groomer===groomer.name)
@@ -35,10 +35,10 @@ export function proposeClosureMoves({today,events,clients,groomers,timeOff=[],re
    if(!fits(start))continue
    const last=slots.at(-1);if(last&&last.end>start+duration){const lastHome=returnHome[`${last.household}|${groomer.name}`];if(!Number.isFinite(lastHome)||last.end+Math.ceil(lastHome)>end)continue}
    // Never duplicate the same dog's other booking on the proposed date.
-   if(occupied.some(event=>event.date===date&&(first.household?event.household===first.household:norm(event.owner)===norm(first.owner))&&event.dogs.some(dog=>names.includes(norm(dog)))))continue
+   if(occupied.some(event=>Math.abs((new Date(event.date)-new Date(date))/86400000)<7&&(first.household?event.household===first.household:norm(event.owner)===norm(first.owner))&&event.dogs.some(dog=>names.includes(norm(dog)))))continue
    chosen={date,time:clock(start),groomer:groomer.name};break
   }}
-  if(!chosen){issues.push({owner:first.owner,reason:preferBefore?'No safe matching-area opening in the 7 days before the holiday.':'No safe matching-area opening within 21 days after the closed date.'});continue}
+  if(!chosen){issues.push({owner:first.owner,reason:preferBefore?'No safe matching-area opening in the 14 days before the holiday.':'No safe matching-area opening within 21 days after the closed date.'});continue}
   let start=minute(chosen.time)
   for(const event of visit.slice().sort((a,b)=>minute(a.time)-minute(b.time))){const move={event,date:chosen.date,time:clock(start),groomer:chosen.groomer};moves.push(move);occupied.push({...event,...chosen,time:move.time});start+=Number(event.duration)+buffer}
  }
