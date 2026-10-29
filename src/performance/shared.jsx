@@ -935,7 +935,7 @@ function dogDueInfo(row, todayKey = businessDateKey()) {
   else if (nextLabel.toLowerCase().includes('bath')) baseDate = lastBath
   else baseDate = [lastGroom,lastBath].filter(Boolean).sort().at(-1) || ''
 
-  const dueDate = explicitDue || (Number.isFinite(frequency) && frequency > 0 ? addWeeks(baseDate,frequency) : '')
+  const dueDate = (Number.isFinite(frequency) && frequency > 0 ? addWeeks(baseDate,frequency) : '') || explicitDue
   if (!dueDate) {
     return { dueDate:'', status:'Not enough data', detail:'No completed service history yet', rank:5, days:null, nextLabel }
   }
