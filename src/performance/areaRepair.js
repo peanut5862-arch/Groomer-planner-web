@@ -5,10 +5,11 @@ const norm=value=>String(value || '').trim().toLowerCase()
 const minute=value=>{const m=/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i.exec(String(value || '').trim());if(!m)return NaN;let h=+m[1];if(m[3])h=h%12+(m[3].toUpperCase()==='PM'?12:0);return h*60+(+m[2])}
 const weekOf=date=>{const d=new Date(`${date}T12:00:00Z`);d.setUTCDate(d.getUTCDate()-((d.getUTCDay()+6)%7));return d.toISOString().slice(0,10)}
 const sameClient=(a,b)=>a.household&&b.household?a.household===b.household:norm(a.owner)===norm(b.owner)
+const samePet=(a,b)=>sameClient(a,b)&&(a.dogs||[]).some(dog=>(b.dogs||[]).some(other=>norm(dog)===norm(other)))
 const clock=value=>`${String(Math.floor(value/60)).padStart(2,'0')}:${String(value%60).padStart(2,'0')}`
 export function proposeAreaRepair({today,events,groomers,clients=[],returnHome={},timeOff=[],buffer=0,until='9999-12-31'}) {
   let active=events.filter(e=>e.active&&e.date>today).map((e,index)=>({...e,repairKey:index}))
-  const movable=e=>e.sourceRow && !e.sourceRow['Locked Time'] && !/completed/i.test(e.sourceRow['Completion Status'] || '') && !/^(confirmed|yes)$/i.test(String(e.sourceRow['Client Confirmation'] || '').trim()) && (Array.isArray(e.sourceRow['Recurring IDs']) || /^Recurring draft/i.test(e.sourceRow['Status Note'] || ''))
+  const movable=e=>e.weekStatus!=='confirmed' && e.sourceRow && !e.sourceRow['Locked Time'] && !/completed/i.test(e.sourceRow['Completion Status'] || '') && !/^(confirmed|yes)$/i.test(String(e.sourceRow['Client Confirmation'] || '').trim()) && (Array.isArray(e.sourceRow['Recurring IDs']) || /^Recurring draft/i.test(e.sourceRow['Status Note'] || ''))
   const groups=new Map(),issues=[]
   let moves=[]
   for(const event of active.filter(e=>movable(e)&&e.date<=until)) {
@@ -22,11 +23,10 @@ export function proposeAreaRepair({today,events,groomers,clients=[],returnHome={
   active=active.filter(e=>!relocating.has(e.repairKey))
   for(const visit of [...groups.values()].sort((a,b)=>a[0].date.localeCompare(b[0].date)||norm(a[0].area).localeCompare(norm(b[0].area)))) {
     const first=visit[0]
-    if(visit.length>1){issues.push({owner:first.owner,reason:'This household has separate dog appointments that need to be combined before moving together.'});active.push(...visit);continue}
     const scheduledDogs=visit.flatMap(e=>e.dogs).map(norm)
     const preferences=clients.filter(c=>(c.household===first.household || (!first.household&&norm(c.owner)===norm(first.owner)))&&scheduledDogs.includes(norm(c.dog))).map(c=>norm(c.groomer)).filter(name=>name&&name!=='either')
     const eligible=groomers.filter(g=>g.active!==false&&preferences.every(name=>name===norm(g.name)))
-    const duration=visit.reduce((sum,e)=>sum+Number(e.duration || 0),0)
+    const duration=visit.reduce((sum,e)=>sum+Number(e.duration || 0),0)+Math.max(0,visit.length-1)*buffer
     if(!eligible.length || !first.area || !duration){issues.push({owner:first.owner,reason:'Needs an active groomer, area, service length, and verified drive home.'});active.push(...visit);continue}
     const cadenceEvents=[...active,...events.filter(e=>!active.some(a=>a.sourceRow===e.sourceRow))]
     const cadenceFloor=earliestRecurringDate(visit,clients,cadenceEvents,today)
@@ -37,9 +37,9 @@ export function proposeAreaRepair({today,events,groomers,clients=[],returnHome={
      const home=returnHome[`${first.household}|${g.name}`];if(!Number.isFinite(home))continue
      for(let offset=0;offset<=7;offset++) {
       const date=addDays(baseDate,offset),wd=new Date(`${date}T12:00:00Z`).getUTCDay()
-      if(date>cadenceCeiling || date>addDays(first.date,7))continue
+      if(date>until || date>cadenceCeiling || date>addDays(first.date,7))continue
       if(!g.workDays.includes(wd)||timeOffReason({timeOff},g,date))continue
-      if(others.some(e=>sameClient(e,first)&&weekOf(e.date)===weekOf(date)))continue
+      if(others.some(e=>samePet(e,first)&&weekOf(e.date)===weekOf(date)))continue
       const sameDay=others.filter(e=>e.date===date&&e.groomer===g.name)
       // Unknown or mixed areas must be reviewed, never treated as open capacity.
       if(sameDay.some(e=>!e.area || norm(e.area)!==norm(first.area)))continue
@@ -66,7 +66,7 @@ export function proposeAreaRepair({today,events,groomers,clients=[],returnHome={
       const time=clock(start)
       if(event.date!==chosen.date || minute(event.time)!==start || event.groomer!==chosen.groomer)moves.push({event,date:chosen.date,time,owner:event.owner,area:event.area,groomer:chosen.groomer,cadenceClients:clients.filter(c=>scheduledDogs.includes(norm(c.dog))&&(first.household?c.household===first.household:norm(c.owner)===norm(first.owner))),cadenceToday:today})
       const index=active.findIndex(e=>e.repairKey===event.repairKey)
-      const placed={...event,originalDate:event.originalDate || event.date,date:chosen.date,time,groomer:chosen.groomer};if(index>=0)active[index]=placed;else active.push(placed);start+=Number(event.duration)
+      const placed={...event,originalDate:event.originalDate || event.date,date:chosen.date,time,groomer:chosen.groomer};if(index>=0)active[index]=placed;else active.push(placed);start+=Number(event.duration)+buffer
     }
   }
   // An unplaced visit remains on its original day. Remove dependent moves
@@ -76,22 +76,17 @@ export function proposeAreaRepair({today,events,groomers,clients=[],returnHome={
     const projected=events.filter(e=>e.active&&e.date>today).map(event=>{const move=moves.find(m=>m.event.sourceRow===event.sourceRow);return move?{...event,originalDate:event.originalDate || event.date,date:move.date,time:move.time,groomer:move.groomer}:event})
     const invalid=new Set()
     for(const move of moves){const day=projected.filter(e=>e.date===move.date&&e.groomer===move.groomer);const slots=day.map(e=>({start:minute(e.time),end:minute(e.time)+Number(e.duration)})).sort((a,b)=>a.start-b.start)
-      if(cadenceError(move,projected)||projected.some(e=>e.sourceRow!==move.event.sourceRow&&sameClient(e,move.event)&&weekOf(e.date)===weekOf(move.date))||day.some(e=>norm(e.area)!==norm(move.area))||slots.some((slot,index)=>!Number.isFinite(slot.start)||!Number.isFinite(slot.end)||(index>0&&slots[index-1].end+buffer>slot.start)))invalid.add(`${move.date}|${move.groomer}`)
+      if(cadenceError(move,projected)||projected.some(e=>e.sourceRow!==move.event.sourceRow&&samePet(e,move.event)&&weekOf(e.date)===weekOf(move.date))||day.some(e=>norm(e.area)!==norm(move.area))||slots.some((slot,index)=>!Number.isFinite(slot.start)||!Number.isFinite(slot.end)||(index>0&&slots[index-1].end+buffer>slot.start)))invalid.add(`${move.date}|${move.groomer}`)
     }
     if(!invalid.size)break
     const rejected=moves.filter(m=>invalid.has(`${m.date}|${m.groomer}`))
     for(const m of rejected)issues.push({owner:m.owner,reason:'This move depends on another visit that could not be placed. Review manually.'})
     moves=moves.filter(m=>!invalid.has(`${m.date}|${m.groomer}`))
   }
-  const pending=[...moves],ordered=[]
-  let current=events.filter(e=>e.active&&e.date>today).slice()
-  while(pending.length){
-    const index=pending.findIndex(move=>!validateRepairSelection(current,[move],buffer))
-    if(index<0){for(const move of pending)issues.push({owner:move.owner,reason:'Needs coordinated moves with another appointment. Review manually.'});break}
-    const [move]=pending.splice(index,1);ordered.push(move)
-    current=current.map(event=>event.sourceRow===move.event.sourceRow?{...event,originalDate:event.originalDate || event.date,date:move.date,time:move.time,groomer:move.groomer}:event)
-  }
-  moves=ordered
+  // Apply the entire reviewed set atomically, including households stored as
+  // separate dog rows. Intermediate single-row states can be invalid.
+  const invalidSelection=validateRepairSelection(events,moves,buffer)
+  if(invalidSelection){for(const move of moves)issues.push({owner:move.owner,reason:invalidSelection});moves=[]}
   const conflicts=[],byDay=new Map()
   for(const event of events.filter(e=>e.active&&e.date>today)){const move=moves.find(m=>m.event.sourceRow===event.sourceRow),e=move?{...event,date:move.date,groomer:move.groomer}:event;const key=`${e.date}|${e.groomer}`;if(!byDay.has(key))byDay.set(key,new Set());if(e.area)byDay.get(key).add(e.area)}
   for(const [key,areas] of byDay)if(areas.size>1)conflicts.push({key,areas:[...areas]})
@@ -102,7 +97,7 @@ export function validateRepairSelection(events,moves,buffer=0) {
   const projected=events.filter(e=>e.active).map(event=>{const move=moves.find(m=>m.event.sourceRow===event.sourceRow);return move?{...event,originalDate:event.originalDate || event.date,date:move.date,time:move.time,groomer:move.groomer}:event})
   for(const move of moves){
     if(cadenceError(move,projected))return 'The selected move would put this dog too close to another booked visit. Rebuild the review.'
-    if(projected.some(e=>e.sourceRow!==move.event.sourceRow&&sameClient(e,move.event)&&weekOf(e.date)===weekOf(move.date)))return 'This household already has another active appointment in the proposed week. Rebuild the review.'
+    if(projected.some(e=>e.sourceRow!==move.event.sourceRow&&samePet(e,move.event)&&weekOf(e.date)===weekOf(move.date)))return 'This dog already has another active appointment in the proposed week. Rebuild the review.'
     const day=projected.filter(e=>e.date===move.date&&e.groomer===move.groomer)
     if(day.some(e=>norm(e.area)!==norm(move.area)))return 'Some selected moves depend on other moves. Keep the complete proposal selected or rebuild the review.'
     const slots=day.map(e=>({start:minute(e.time),end:minute(e.time)+Number(e.duration)})).sort((a,b)=>a.start-b.start)
