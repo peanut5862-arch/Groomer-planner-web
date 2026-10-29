@@ -1,3 +1,4 @@
+import {unplacedClosureRows} from './closureQueue.js'
 import {supabase} from '../supabase.js'
 import {proposeClosureMoves} from './closureMoves.js'
 import {addDays,horizonDate} from './recurringPlan.js'
@@ -18,7 +19,7 @@ export async function moveAppointmentsOffClosures(settings,onProgress=()=>{},pre
   if(origin){event.closureDate=origin.date;event.closureGroomer=origin.groomer}
  }
  const affected=events.filter(event=>event.active&&event.date>=today&&event.date<=horizonDate(today)&&!/completed/i.test(event.sourceRow['Completion Status']||'')&&(event.closureDate||timeOffReason(settings,settings.groomers.find(g=>g.name===event.groomer),event.date)))
- if(!affected.length)return {moved:0,issues:[]}
+ if(!affected.length)return {moved:0,visits:0,queuedVisits:0,issues:[]}
  const jobs=new Map(),returnHome={}
  for(const event of events.filter(event=>event.active&&event.date>=today)){
   const client=clients.find(client=>client.household&&client.household===event.household),groomer=settings.groomers.find(g=>g.name===event.groomer)
@@ -37,9 +38,10 @@ export async function moveAppointmentsOffClosures(settings,onProgress=()=>{},pre
   if(response.ok&&payload.legs?.length&&Number.isFinite(minutes)&&minutes>=0){returnHome[key]=minutes;try{localStorage.setItem(cacheKey,JSON.stringify({at:Date.now(),minutes}))}catch{}}
  }catch{}finally{checked++;onProgress(`Checking holiday moves… ${checked}/${total}`)}}}))
  const plan=proposeClosureMoves({today,events,clients,groomers:settings.groomers,timeOff:settings.timeOff||[],buffer:settings.bufferMinutes,returnHome,preferBefore:true})
- if(!plan.moves.length)return {moved:0,issues:plan.issues}
+ const unplaced=unplacedClosureRows(plan)
+ if(!plan.moves.length&&!unplaced.length)return {moved:0,visits:0,queuedVisits:0,issues:plan.issues}
  const expected={};for(let week=from;week<=until;week=addDays(week,7))expected[week]=(weeks.data||[]).find(item=>item.week_start===week)?.plan_json||null
- const {data,error}=await supabase.rpc('move_closed_day_appointments',{p_moves:plan.moves.map(move=>({weekStart:move.event.weekStart,expectedRow:move.event.sourceRow,closedDate:move.event.closureDate||move.event.date,closedGroomer:move.event.closureGroomer||move.event.groomer,date:move.date,time:move.time,groomer:move.groomer})),p_expected_weeks:expected,p_expected_settings:settings})
+ const {data,error}=await supabase.rpc('move_closed_day_appointments',{p_moves:plan.moves.map(move=>({weekStart:move.event.weekStart,expectedRow:move.event.sourceRow,closedDate:move.event.closureDate||move.event.date,closedGroomer:move.event.closureGroomer||move.event.groomer,date:move.date,time:move.time,groomer:move.groomer})),p_expected_weeks:expected,p_expected_settings:settings,p_unplaced:unplaced.map(event=>({weekStart:event.weekStart,expectedRow:event.sourceRow,closedDate:event.closureDate||event.date,closedGroomer:event.closureGroomer||event.groomer}))})
  if(error)throw error;if(data?.status!=='moved')throw Error('The holiday moves could not be confirmed.')
- return {moved:data.moved,visits:new Set(plan.moves.map(move=>`${move.event.household||move.event.owner}|${move.event.date}|${move.event.groomer}`)).size,issues:plan.issues}
+ return {moved:data.moved,queuedVisits:new Set(unplaced.map(event=>`${event.household||event.owner}|${event.closureDate||event.date}|${event.groomer}`)).size,visits:new Set(plan.moves.map(move=>`${move.event.household||move.event.owner}|${move.event.date}|${move.event.groomer}`)).size,issues:plan.issues}
 }
