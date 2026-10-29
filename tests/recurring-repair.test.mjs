@@ -192,3 +192,20 @@ test('refresh preserves a household visit already moved by the owner',()=>{
  assert.equal(replaceableRecurring(moved,today,'2027-01-28',[old,moved]),false)
  assert.equal(replaceableRecurring(event('2026-12-09'),today,'2027-01-28',[old,moved]),true)
 })
+import {rebookingNeed} from '../src/performance/rebooking.js'
+const dueFor=(dog='Bo',extra={})=>({infos:[{row:{dog},dueDate:'2026-11-10',status:'Upcoming',detail:'Due in 13 days',rank:3,...extra}]})
+const booking=(date,dogs,status='Scheduled')=>({Owner:'p','Household ID':'p',Date:date,Dogs:dogs,'Appointment Status':status})
+test('cancelled visit stays in rebooking even with a later-cycle appointment',()=>{
+ const rows=[booking('2026-11-10','Bo (Groom)','Cancelled'),booking('2026-12-22','Bo (Groom)')]
+ assert.equal(rebookingNeed(client,dueFor(),rows,today).detail,'Cancelled · needs rebooking')
+ assert.equal(rebookingNeed(client,dueFor(),[...rows,booking('2026-11-12','Bo (Groom)')],today),null)
+})
+test('booking another household dog does not hide the cancelled dog',()=>{
+ assert.ok(rebookingNeed(client,dueFor(),[booking('2026-11-10','Bo (Groom)','Cancelled'),booking('2026-11-10','Bella (Bath)')],today))
+})
+test('a completed new cycle clears an old cancelled visit',()=>{
+ assert.equal(rebookingNeed(client,dueFor('Bo',{dueDate:'2026-12-22'}),[booking('2026-11-10','Bo (Groom)','Cancelled')],today),null)
+})
+test('an unrebooked cancelled dog becomes overdue on its original due date',()=>{
+ assert.equal(rebookingNeed(client,dueFor('Bo',{dueDate:'2026-10-20',status:'Overdue',rank:0,detail:'8 days overdue'}),[booking('2026-10-20','Bo (Groom)','Cancelled')],today).status,'Overdue')
+})
