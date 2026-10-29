@@ -1,5 +1,5 @@
 import {proposeRecurring,horizonDate} from './recurringPlan.js'
-import {replaceableRecurring} from './recurringRebuild.js'
+import {dueFromCompletedService,replaceableRecurring} from './recurringRebuild.js'
 const norm=value=>String(value || '').trim().toLowerCase()
 const key=record=>record.household || `owner:${norm(record.owner)}`
 // If any visit in a household's rebuilt series cannot be placed, keep that
@@ -28,4 +28,30 @@ export function proposeRecurringRebuild(options) {
   for(const [household,reason] of additions)retained.set(household,reason)
  }
  return {...result,replaced,retained:candidates.filter(event=>retained.has(key(event))),keptHouseholds:[...retained].map(([household,reason])=>({household,owner:candidates.find(event=>key(event)===household)?.owner,reason}))}
+}
+
+// Fresh preview: remove all eligible automatic drafts together, then plan around
+// protected bookings. Unplaced visits remain as explicit rescheduling records.
+export function proposeFreshRecurring(options){
+ const {today,events,clients}=options,until=horizonDate(today)
+ const replaced=events.filter(event=>replaceableRecurring(event,today,until,events))
+ const removed=new Set(replaced),retained=events.filter(event=>!removed.has(event))
+ const result=proposeRecurring({...options,rebuild:true,events:retained})
+ const queued=replaced.filter(event=>event.dogs.some(dog=>{
+  const client=clients.find(client=>key(client)===key(event)&&norm(client.dog)===norm(dog))
+  if(!client||!(client.frequency>0))return true
+  const interval=Math.round(client.frequency*7)
+  const base=dueFromCompletedService(client,events,today)
+  if(!base)return true
+  const cycle=record=>{
+   const prefix=`recurring:${client.household}:${norm(client.dog)}:`
+   const id=(record.sourceRow?.['Recurring IDs']||record.ids||[]).find?.(id=>String(id).startsWith(prefix))
+   const due=String(id||'').match(/(\d{4}-\d{2}-\d{2})$/)?.[1]||record.date
+   return Math.max(0,Math.round((new Date(due)-new Date(base))/86400000/interval))
+  }
+  const sameCycle=record=>key(record)===key(event)&&cycle(record)===cycle(event)
+  const covered=result.appointments.some(stop=>sameCycle(stop)&&stop.dogs.some(pet=>norm(pet.dog)===norm(dog)))||retained.some(other=>other.active&&other.date>today&&sameCycle(other)&&other.dogs.some(pet=>norm(pet)===norm(dog)))
+  return !covered
+ }))
+ return {...result,replaced,retained,queued,keptHouseholds:[]}
 }
