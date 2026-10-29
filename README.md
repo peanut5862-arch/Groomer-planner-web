@@ -1,38 +1,24 @@
-# Grooming Planner Frontend Prototype
+# Hey Betty
 
-This is a **professional front-end direction prototype** for the grooming planner.
+Hey Betty is a working grooming business app with Supabase accounts and saved client, appointment, payment, and business records. This repository started as a frontend prototype; the former description of Betty as a local demo is outdated.
 
-## What this version demonstrates
-- Mobile-first bottom navigation
-- Today dashboard
-- Week schedule cards
-- Separate Jen / Haley month views
-- Client directory
-- Tap-to-edit appointment sheet
-- Persistent **Ask Planner** AI bar
-- AI cancellation-fill workflow
-- Quick AI prompts such as:
-  - Fill Thursday's cancellation
-  - Who is overdue near The Woodlands?
-  - Move Leah to 9:30 and reroute
-- Ranked cancellation-fill suggestions using due status, area, drive time, service length, and price
+## Ask Betty
 
-## Important
-The AI assistant in this prototype is a UI demonstration with local demo responses. It is **not yet connected to OpenAI or your scheduling engine**.
+The deployed `/api/ask-betty` backend calls OpenAI. The signed-in app supplies planner context, and dedicated lookups read saved appointments. Google Routes supplies drive calculations. Betty is not a separate demo model or a simulated chat.
 
-The production architecture should keep:
-- Supabase as the database
-- Google Maps / Routes for travel
-- Your scheduling logic
-- secure backend actions for AI and route operations
+Capabilities depend on the app workflow. Supported booking and rescheduling requests show a review step before saving. General conversation cannot independently write arbitrary database changes or send customer messages. Historical completed-visit lookups use saved completion dates and distinguish completed visits from scheduled appointments.
 
-Do **not** put the Supabase `service_role` key in this front end. A public web app should use Supabase Auth + RLS and a safe anon/publishable key, with privileged actions behind a backend/server function.
+The viewer account is intentionally a read-only demo; that restriction does not apply to the business owner account.
 
-## Run locally
-1. Install Node.js
-2. `npm install`
-3. `npm run dev`
+## Scheduling
 
-## Build
-`npm run build`
-Deployment trigger
+Client frequency and actual completed service dates determine recurring due dates. Future appointments are separate saved bookings. The recurring planner checks household dogs, groomer restrictions, service areas, working days, time off, service duration, and the return home deadline. Automatic booking after completion is being added; do not assume changing a due date alone creates an appointment. Existing draft cleanup is reviewed before replacement.
+
+## Development
+
+- `npm install`
+- `npm run dev`
+- `npm run build`
+- `node --test tests/*.test.mjs`
+
+API credentials stay in server environment variables. Never put a Supabase service-role key or OpenAI secret in frontend code. Database changes live in `database/`; apply the matching migration before deploying dependent app behavior.
