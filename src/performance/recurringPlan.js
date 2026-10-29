@@ -46,7 +46,7 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
    while(bookedCycles.has(cycleIndex(next)))next=addDays(next,interval)
    return next
   }
-  tasks.push({c,options,either,anchors:[],normalizeDue,due:normalizeDue(completedDue)})
+  tasks.push({c,options,either,anchors:[],normalizeDue,completedDue,due:normalizeDue(completedDue)})
  }
  while(tasks.length){tasks.sort((a,b)=>a.due.localeCompare(b.due)||a.c.owner.localeCompare(b.c.owner)||a.c.dog.localeCompare(b.c.dog));const t=tasks.shift();if(t.due>until)continue
   const {c,options,either}=t;let chosen=null
@@ -63,11 +63,16 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
   const visitDue=visit.map(item=>item.due).sort().at(-1)
   const required=visit.reduce((sum,item)=>sum+item.c.duration,0)
   const assignmentKey=`${c.household}|${visitDue}`,assigned=householdAssignments.get(assignmentKey)
+  const holiday=timeOff.find(item=>!item.groomerId&&item.start<=visitDue&&item.end>=visitDue)
+  const candidateDates=holiday?Array.from({length:14},(_,i)=>addDays(holiday.start,-i-1)):Array.from({length:8},(_,i)=>addDays(visitDue<from?from:visitDue,i))
   const candidates=[]
   for(const {g,weekdays} of sharedOptions){
    if(either && assigned && assigned!==g.name)continue
-   for(let i=0;i<8;i++){
-    const date=addDays(visitDue<from?from:visitDue,i),wd=day(date).getUTCDay()
+   for(const date of candidateDates){
+    const wd=day(date).getUTCDay()
+    if(date<from)continue
+    if(visit.some(item=>date<addDays(item.completedDue,holiday?-14:0)))continue
+    if(visit.some(item=>{const minimum=Math.max(7,Math.round(item.c.frequency*7)-(holiday?14:0));return [...events.filter(e=>e.active&&e.date>=from),...proposals].some(other=>other.household===item.c.household&&(other.dogs||[other.dog]).some(dog=>norm(typeof dog==='string'?dog:dog.dog)===norm(item.c.dog))&&Math.abs((day(other.date)-day(date))/86400000)<minimum)}))continue
     if(timeOffReason({timeOff},g,date) || date>until || !g.workDays.includes(wd) || !weekdays.has(wd))continue
     if(visit.some(item=>item.anchors.some(anchor=>anchor>=item.due && date>addDays(anchor,-Math.round(item.c.frequency*7)))))continue
     const existingAreas=[...events.filter(e=>e.active),...proposals].filter(e=>e.date===date&&norm(e.groomer)===norm(g.name)).map(e=>areaDayKey(e.area))
@@ -87,7 +92,7 @@ export function proposeRecurring({today,clients,events,groomers,buffer=0,returnH
     candidates.push({date,time:clock(start),groomer:g.name,sameArea,weekdayStrength:weekdays.get(wd),load,returnMinutes,homeBy:g.endTime})
    }
   }
-  candidates.sort((a,b)=>b.sameArea-a.sameArea || a.date.localeCompare(b.date) || b.weekdayStrength-a.weekdayStrength || a.load-b.load || a.groomer.localeCompare(b.groomer))
+  candidates.sort((a,b)=>b.sameArea-a.sameArea || (holiday?b.date.localeCompare(a.date):a.date.localeCompare(b.date)) || b.weekdayStrength-a.weekdayStrength || a.load-b.load || a.groomer.localeCompare(b.groomer))
   chosen=candidates[0]
   if(!chosen){for(const item of visit){issues.push({owner:item.c.owner,dog:item.c.dog,reason:`No matching area-day opening that allows the drive home by the end time near ${item.due}.`});tasks.push({...item,due:item.normalizeDue(addDays(item.due,Math.round(item.c.frequency*7)))})}continue}
   let visitStart=minutes(chosen.time)
