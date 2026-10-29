@@ -222,3 +222,15 @@ test('queued time-off visits are inactive calendar history but remain available 
  assert.equal(rebookingNeed(client,dueFor(),[queued,booking('2026-11-12','Bo (Groom)')],today),null)
  assert.equal(JSON.stringify(queued),saved)
 })
+
+test('the prior two-week cycle does not hide a queued holiday visit',()=>{
+ const queued={...booking('2026-11-27','Bo (Groom)','Moved to another week'),Status:'Needs rescheduling','Queued Date':'2026-10-29'}
+ const due={infos:[{row:{dog:'Bo',frequency_weeks:2},dueDate:'2026-12-11',status:'Upcoming',rank:3,detail:'Upcoming'}]}
+ assert.equal(rebookingNeed(client,due,[queued,booking('2026-11-13','Bo (Groom)')],'2026-10-29').detail,'Needs rescheduling · time off')
+ assert.equal(rebookingNeed(client,due,[queued,booking('2026-11-24','Bo (Groom)')],'2026-10-29'),null)
+})
+test('a new completed service resolves the earlier time-off queue entry',()=>{
+ const queued={...booking('2026-11-27','Bo (Groom)','Moved to another week'),Status:'Needs rescheduling','Queued Date':'2026-10-29'}
+ const due={infos:[{row:{dog:'Bo',last_groom:'2026-11-24',frequency_weeks:2},dueDate:'2026-12-08',status:'Upcoming',rank:3}]}
+ assert.equal(rebookingNeed(client,due,[queued],'2026-11-25'),null)
+})
