@@ -1,3 +1,4 @@
+import {rebookingNeed} from './rebooking.js'
 import React, { lazy, Suspense, useEffect, useState } from 'react';
 import {monthRange,reportRows} from './reportingPeriod.js'
 const SalesTaxLog=React.lazy(()=>import('./SalesTaxLog.jsx'))
@@ -54,12 +55,13 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
       setLoading(true)
       setError('')
       const currentWeek = mondayForDate(today)
+      const historyStart=new Date(`${today}T12:00:00Z`);historyStart.setUTCDate(historyStart.getUTCDate()-84)
       const futureEndDate = new Date(`${today}T12:00:00Z`)
       futureEndDate.setUTCDate(futureEndDate.getUTCDate()+84)
       const futureEndWeek = mondayForDate(futureEndDate.toISOString().slice(0,10))
       const [weekResult,futureResult,monthResult] = await Promise.all([
         supabase.from('weekly_drafts').select('week_start,plan_json,status,confirmed_at').eq('week_start',weekStart).limit(1),
-        supabase.from('weekly_drafts').select('week_start,plan_json,status').gte('week_start',currentWeek).lte('week_start',futureEndWeek).order('week_start',{ascending:true}),
+        supabase.from('weekly_drafts').select('week_start,plan_json,status').gte('week_start',mondayForDate(historyStart.toISOString().slice(0,10))).lte('week_start',futureEndWeek).order('week_start',{ascending:true}),
         period==='month'?supabase.from('weekly_drafts').select('week_start,plan_json').gte('week_start',mondayForDate(range.from)).lte('week_start',mondayForDate(range.until)).order('week_start',{ascending:true}):Promise.resolve({data:[]})
       ])
       if(cancelled) return
@@ -147,19 +149,10 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
     return acc
   },{'Confirmed':0,'Unconfirmed':0,'Needs reply':0,"Can't make it":0})
 
-  const futureRows = futureWeeks.flatMap(week=>Array.isArray(week.plan_json)?week.plan_json:[]).filter(row=>plannerActiveRow(row,today))
-  const bookedKeys = new Set()
-  for(const row of futureRows){
-    const household=String(row?.['Household ID'] || row?.household_id || '').trim()
-    const owner=String(row?.Owner || '').trim().toLowerCase()
-    if(household) bookedKeys.add(`h:${household}`)
-    if(owner) bookedKeys.add(`o:${owner}`)
-  }
+  const bookingRows=futureWeeks.flatMap(week=>Array.isArray(week.plan_json)?week.plan_json:[])
   const rebooking = plannerClientGroups(dogs).map(client=>{
-    const ownerKey=`o:${client.owner.toLowerCase()}`
-    if(bookedKeys.has(client.key) || bookedKeys.has(ownerKey)) return null
-    const due=clientDueInfo(client.rows,today)
-    if(!['Overdue','Due today','Due this week','Due soon'].includes(due.status)) return null
+    const due=rebookingNeed(client,clientDueInfo(client.rows,today),bookingRows,today)
+    if(!due)return null
     const assigned=[...new Set(client.rows.map(row=>String(row?.groomer || row?.Groomer || '').trim()).filter(name=>groomerNames(true).includes(name)))]
     return {...client,due,groomer:assigned.length===1?assigned[0]:firstGroomer()}
   }).filter(Boolean).sort((a,b)=>a.due.rank-b.due.rank || (a.due.dueDate || '').localeCompare(b.due.dueDate || '') || a.owner.localeCompare(b.owner))
@@ -242,14 +235,14 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
 
         <div style={{...reportCard,marginTop:14}}>
           <div style={{display:'flex',justifyContent:'space-between',gap:10,alignItems:'flex-start',marginBottom:10}}>
-            <div><div className="section-title" style={{margin:0}}><h3>Needs rebooking</h3></div><div style={{fontSize:11,color:'#7b828e',marginTop:3}}>Due or overdue with no active future appointment</div></div>
+            <div><div className="section-title" style={{margin:0}}><h3>Needs rebooking</h3></div><div style={{fontSize:11,color:'#7b828e',marginTop:3}}>Cancelled visits and due dogs without a suitable replacement booking</div></div>
             <div style={{fontSize:22,fontWeight:900,color:'#172038'}}>{rebooking.length}</div>
           </div>
           {rebooking.slice(0,5).map(client=><button key={client.key} type="button" onClick={()=>onRebook?.(client)} style={{width:'100%',display:'grid',gridTemplateColumns:'1fr auto',gap:10,alignItems:'center',textAlign:'left',padding:'11px 0',border:'0',borderTop:'1px solid #eceef1',background:'transparent',color:'#172038'}}>
             <div><strong style={{fontSize:13}}>{client.owner}</strong><div style={{fontSize:11,color:client.due.status==='Overdue'?'#a83d3d':'#7b828e',marginTop:2}}>{client.due.detail}</div></div>
             <span style={{fontSize:11,fontWeight:900,color:'#26345e'}}>Rebook ›</span>
           </button>)}
-          {!rebooking.length && <div className="prototype-note">No due or overdue clients currently need rebooking.</div>}
+          {!rebooking.length && <div className="prototype-note">No clients currently need rebooking.</div>}
           {rebooking.length>5 && <button type="button" className="ghost" style={{width:'100%',marginTop:10}} onClick={()=>onAsk?.("Who hasn't been booked back yet?")}>View all with Ask Betty</button>}
         </div>
 
