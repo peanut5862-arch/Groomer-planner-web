@@ -38,7 +38,7 @@ test('destination week duplicate dog blocks the move',()=>{
  assert.match(validateRepairSelection([current,other],[{event:current,date:'2026-11-13',time:'09:00',groomer:'Haley',area:'Montgomery'}]),/dog/)
 })
 import {replaceableRecurring} from '../src/performance/recurringRebuild.js'
-import {proposeRecurring} from '../src/performance/recurringPlan.js'
+import {addDays,proposeRecurring} from '../src/performance/recurringPlan.js'
 test('rebuild removes only eligible drafts, keeping protected records',()=>{
  const draft=event('2026-12-22'),manual=event('2026-12-22','m','Dog','Tomball',{sourceRow:{}})
  assert.equal(replaceableRecurring(draft,today,'2027-01-28'),true)
@@ -273,4 +273,19 @@ test('fresh preview discloses mixed-area days retained by protected bookings',()
  assert.equal(plan.protectedVisits,2);assert.equal(plan.protectedConflicts.length,1)
  assert.deepEqual(plan.protectedConflicts[0].areas,['HMR','Willis'])
  assert.equal(plan.replaced.length,0)
+})
+test('fresh recurring holiday visits are proposed before Thanksgiving and Christmas',()=>{
+ for(const [due,start,end] of [['2026-11-26','2026-11-26','2026-11-27'],['2026-12-25','2026-12-25','2026-12-28']]){
+  const c={...client,frequency:6,due,area:'HMR',service:'Groom',duration:60,price:80}
+  const plan=proposeRecurring({today,clients:[c],events:[],groomers,timeOff:[{start,end}],rebuild:true})
+  const stop=plan.appointments.find(stop=>stop.due===due)
+  assert.ok(stop);assert.ok(stop.date<start);assert.ok(stop.date>=addDays(start,-14))
+ }
+})
+test('an overdue first visit never causes another six-week visit a few weeks later',()=>{
+ const c={...client,frequency:6,lastServiceDate:'2026-08-25',area:'HMR',service:'Groom',duration:60,price:80}
+ const plan=proposeRecurring({today,clients:[c],events:[],groomers,rebuild:true})
+ const dates=plan.appointments.map(stop=>stop.date)
+ assert.ok(dates.length>1)
+ for(let i=1;i<dates.length;i++)assert.ok((new Date(dates[i])-new Date(dates[i-1]))/86400000>=42)
 })
