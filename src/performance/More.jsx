@@ -150,6 +150,7 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
   },{'Confirmed':0,'Unconfirmed':0,'Needs reply':0,"Can't make it":0})
 
   const bookingRows=futureWeeks.flatMap(week=>Array.isArray(week.plan_json)?week.plan_json:[])
+  const [showAllRebooking,setShowAllRebooking]=useState(false)
   const rebooking = plannerClientGroups(dogs).map(client=>{
     const due=rebookingNeed(client,clientDueInfo(client.rows,today),bookingRows,today)
     if(!due)return null
@@ -238,12 +239,12 @@ function More({dogs,revision,onAsk,onRebook,session,showPushSetup=false,onSettin
             <div><div className="section-title" style={{margin:0}}><h3>Needs rebooking</h3></div><div style={{fontSize:11,color:'#7b828e',marginTop:3}}>Cancelled visits and due dogs without a suitable replacement booking</div></div>
             <div style={{fontSize:22,fontWeight:900,color:'#172038'}}>{rebooking.length}</div>
           </div>
-          {rebooking.slice(0,5).map(client=><button key={client.key} type="button" onClick={()=>onRebook?.(client)} style={{width:'100%',display:'grid',gridTemplateColumns:'1fr auto',gap:10,alignItems:'center',textAlign:'left',padding:'11px 0',border:'0',borderTop:'1px solid #eceef1',background:'transparent',color:'#172038'}}>
+          {(showAllRebooking?rebooking:rebooking.slice(0,5)).map(client=><button key={client.key} type="button" onClick={()=>onRebook?.(client)} style={{width:'100%',display:'grid',gridTemplateColumns:'1fr auto',gap:10,alignItems:'center',textAlign:'left',padding:'11px 0',border:'0',borderTop:'1px solid #eceef1',background:'transparent',color:'#172038'}}>
             <div><strong style={{fontSize:13}}>{client.owner}</strong><div style={{fontSize:11,color:client.due.status==='Overdue'?'#a83d3d':'#7b828e',marginTop:2}}>{client.due.detail}</div></div>
             <span style={{fontSize:11,fontWeight:900,color:'#26345e'}}>Rebook ›</span>
           </button>)}
           {!rebooking.length && <div className="prototype-note">No clients currently need rebooking.</div>}
-          {rebooking.length>5 && <button type="button" className="ghost" style={{width:'100%',marginTop:10}} onClick={()=>onAsk?.("Who hasn't been booked back yet?")}>View all with Ask Betty</button>}
+          {rebooking.length>5 && <button type="button" className="ghost" style={{width:'100%',marginTop:10}} onClick={()=>setShowAllRebooking(value=>!value)}>{showAllRebooking?'Show fewer':`View all ${rebooking.length} clients`}</button>}
         </div>
 
         {showPushSetup && <OwnerPushNotifications session={session}/>}
