@@ -179,3 +179,16 @@ test('an unmoved affected booking still occupies its original slot',()=>{
  const plan=proposeClosureMoves({today,events:[stuck,next],clients:[{...client,household:'stuck',dog:'Dog'},{...client,household:'next',dog:'Other dog'}],groomers,timeOff:[{start:'2026-12-25',end:'2026-12-28'}],returnHome:{'next|Haley':15},preferBefore:false})
  assert.ok(plan.issues.some(issue=>issue.owner==='stuck'));assert.equal(plan.moves[0].date,'2026-12-30')
 })
+
+test('time-off move skips a destination with pre-existing overlapping bookings',()=>{
+ const bookings=[event('2026-11-25','a','Dog','Montgomery'),event('2026-11-25','b','Dog','Montgomery',{time:'09:30'})]
+ const plan=proposeClosureMoves({today,events:[event('2026-11-26'),...bookings],clients:[client],groomers,timeOff:[{start:'2026-11-26',end:'2026-11-27'}],returnHome:{'p|Haley':15,'a|Haley':15,'b|Haley':15},preferBefore:true})
+ assert.equal(plan.moves.length,1);assert.equal(plan.moves[0].date,'2026-11-24')
+})
+
+test('refresh preserves a household visit already moved by the owner',()=>{
+ const old=event('2026-11-23','p','Bo','Montgomery',{active:false,sourceRow:{'Appointment Status':'Moved to another week','Rescheduled To':'2026-11-25'}})
+ const moved=event('2026-11-25')
+ assert.equal(replaceableRecurring(moved,today,'2027-01-28',[old,moved]),false)
+ assert.equal(replaceableRecurring(event('2026-12-09'),today,'2027-01-28',[old,moved]),true)
+})
