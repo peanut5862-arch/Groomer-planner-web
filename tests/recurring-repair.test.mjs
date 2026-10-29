@@ -267,3 +267,10 @@ test('fresh rebuild preserves owner-moved and confirmed appointments as anchors'
  const plan=proposeFreshRecurring({today,events:[protectedVisit,draft],clients,groomers})
  assert.deepEqual(plan.replaced,[draft]);assert.ok(plan.retained.includes(protectedVisit));assert.ok(plan.appointments.every(stop=>stop.date!=='2026-12-10'))
 })
+test('fresh preview discloses mixed-area days retained by protected bookings',()=>{
+ const protectedVisits=['HMR','Willis'].map((area,i)=>event('2026-12-10',`h${i}`,'Dog',area,{sourceRow:{'Client Confirmation':'Confirmed','Recurring IDs':['x']}}))
+ const plan=proposeFreshRecurring({today,events:protectedVisits,clients:[],groomers})
+ assert.equal(plan.protectedVisits,2);assert.equal(plan.protectedConflicts.length,1)
+ assert.deepEqual(plan.protectedConflicts[0].areas,['HMR','Willis'])
+ assert.equal(plan.replaced.length,0)
+})
