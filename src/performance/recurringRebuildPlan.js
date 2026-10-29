@@ -53,5 +53,10 @@ export function proposeFreshRecurring(options){
   const covered=result.appointments.some(stop=>sameCycle(stop)&&stop.dogs.some(pet=>norm(pet.dog)===norm(dog)))||retained.some(other=>other.active&&other.date>today&&sameCycle(other)&&other.dogs.some(pet=>norm(pet)===norm(dog)))
   return !covered
  }))
- return {...result,replaced,retained,queued,keptHouseholds:[]}
+ const visits=records=>new Set(records.map(record=>`${key(record)}|${record.date}|${record.groomer}`)).size
+ const protectedFuture=retained.filter(event=>event.active&&event.date>today&&event.date<=until)
+ const days=new Map()
+ for(const event of protectedFuture){const id=event.date+'|'+event.groomer;if(!days.has(id))days.set(id,{date:event.date,groomer:event.groomer,areas:new Set()});days.get(id).areas.add(event.area||'Unknown area')}
+ const protectedConflicts=[...days.values()].filter(day=>day.areas.size>1).map(day=>({...day,areas:[...day.areas]}))
+ return {...result,replaced,retained,queued,archivedVisits:visits(replaced),queuedVisits:visits(queued),protectedVisits:visits(protectedFuture),protectedConflicts,keptHouseholds:[]}
 }
