@@ -1,3 +1,4 @@
+import MonthDayPopup from './MonthDayPopup.jsx';
 import {timeOffReason} from './timeOff.js';
 import { monthVisits } from './monthVisits.js';
 import { businessSettings, groomerNames, groomerConfig, firstGroomer, groomerWorksOn, chooseGroomer, calendarWorkDays, getBusinessContext, setBusinessContext, useBusinessContext } from './businessConfig.js';
@@ -34,7 +35,9 @@ function moveMonth(monthKey,offset) {
 function Month({onOpen,revision,dogs,viewerMode=false,onAddAppointment,onFillOpening}) {
   const business = useBusinessContext()
   const [recurringOpen,setRecurringOpen] = useState(false)
+  const [dayOpen,setDayOpen] = useState(false)
   const [repairMode,setRepairMode] = useState(false)
+  const [rebuildMode,setRebuildMode] = useState(false)
   const [notice,setNotice] = useState('')
   const [search,setSearch] = useState('')
   const [dueFilter,setDueFilter] = useState('Due soon')
@@ -113,12 +116,14 @@ function Month({onOpen,revision,dogs,viewerMode=false,onAddAppointment,onFillOpe
       </div>
       <div className="section-title">
         <button className="text-btn" onClick={()=>{setMonth(businessDateKey().slice(0,7));setSelected(businessDateKey())}}>This month</button>
-        <button className="text-btn" disabled={loading} onClick={()=>setRefresh(value=>value+1)}>Refresh</button>
+        <button className="text-btn" disabled={loading} onClick={()=>setRefresh(value=>value+1)}>Reload bookings</button>
       </div>
-      {!viewerMode && ['owner','editor'].includes(business.role) && <button className="primary-mini" style={{marginBottom:12}} onClick={()=>{setRepairMode(false);setRecurringOpen(true)}}>Plan next 3 months</button>}
-      {!viewerMode && ['owner','editor'].includes(business.role) && <button className="ghost" style={{marginBottom:12,marginLeft:8}} onClick={()=>{setRepairMode(true);setRecurringOpen(true)}}>Review area grouping</button>}
+      {!viewerMode && ['owner','editor'].includes(business.role) && <button className="primary-mini" style={{marginBottom:12}} onClick={()=>{setRebuildMode(false);setRepairMode(false);setRecurringOpen(true)}}>Plan next 3 months</button>}
+      {!viewerMode && ['owner','editor'].includes(business.role) && <button className="ghost" style={{marginBottom:12,marginLeft:8}} onClick={()=>{setRebuildMode(false);setRepairMode(true);setRecurringOpen(true)}}>Review area grouping</button>}
+      {!viewerMode && ['owner','editor'].includes(business.role) && <button className="primary-mini" style={{marginBottom:12,marginLeft:8}} onClick={()=>{setRepairMode(false);setRebuildMode(true);setRecurringOpen(true)}}>Refresh schedule</button>}
       {notice && <div className="prototype-note" role="status">{notice}</div>}
-      {recurringOpen && <RecurringPlanSheet focusDate={selected} initialRepair={repairMode} dogs={dogs} onClose={()=>setRecurringOpen(false)} onSaved={message=>{setNotice(message);setRefresh(v=>v+1)}}/>}
+      {recurringOpen && <RecurringPlanSheet focusDate={selected} initialRepair={repairMode} initialRebuild={rebuildMode} dogs={dogs} onClose={()=>setRecurringOpen(false)} onSaved={message=>{setNotice(message);setRefresh(v=>v+1)}}/>}
+      {dayOpen && <MonthDayPopup date={selected} visits={selectedVisits} appointments={selectedAppointments} groomer={groomer} settings={business.settings} viewerMode={viewerMode} onClose={()=>setDayOpen(false)} onOpen={appt=>{setDayOpen(false);onOpen({...appt,_initialMode:'edit'})}} onAdd={()=>{setDayOpen(false);onAddAppointment?.(selected,groomer,chosenClient?.key)}} onFind={()=>{setDayOpen(false);onFillOpening?.({date:selected,groomer,appointments:selectedAppointments})}}/>}
       {loading && <div className="prototype-note" role="status">Loading your month…</div>}
       {error && <div className="login-message" role="alert">{error}</div>}
       {ready && <>
@@ -131,7 +136,7 @@ function Month({onOpen,revision,dogs,viewerMode=false,onAddAppointment,onFillOpe
             return <button type="button" key={day} disabled={!inMonth}
               className={`cal-day ${appointments.length?'busy':''}`}
               aria-pressed={selected===day} aria-label={`${day}, ${visitCount} stops`}
-              onClick={()=>setSelected(day)}
+              onClick={()=>{setSelected(day);setDayOpen(true)}}
               style={{textAlign:'left',font:'inherit',minWidth:0,cursor:inMonth?'pointer':'default',
                 opacity:inMonth?1:0.3,outline:selected===day?'2px solid #006876':'none',outlineOffset:-2}}>
               <span className="day-num">{Number(day.slice(8))}</span>
